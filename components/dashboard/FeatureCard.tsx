@@ -22,7 +22,7 @@ export function FeatureCard({
   statusText,
 }: FeatureCardProps) {
   return (
-    <Card className="hover:shadow-lg transition-all">
+    <Card className="transition-all duration-300 hover:-translate-y-1 hover:shadow-xl">
       <CardHeader>
         <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-slate-100">
           <Icon className="h-6 w-6 text-slate-900" />
