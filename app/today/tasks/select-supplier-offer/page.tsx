@@ -7,9 +7,9 @@ export default function SelectSupplierOfferPage() {
       <div className="mx-auto max-w-4xl px-8 py-12">
         <Link
           href="/today"
-          className="text-sm font-medium text-neutral-500 hover:text-neutral-900"
+          className="inline-flex rounded-lg border border-neutral-300 bg-white px-4 py-2 text-sm font-medium text-neutral-700 shadow-sm transition-colors hover:bg-neutral-50 hover:text-neutral-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-900 focus-visible:ring-offset-2"
         >
-          ← Zurück zu Heute
+          ← Zurück zur Tagesübersicht
         </Link>
 
         <div className="mt-8 rounded-2xl border bg-white p-8">
