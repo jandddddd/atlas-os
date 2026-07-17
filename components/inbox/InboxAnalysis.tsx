@@ -83,6 +83,8 @@ export function InboxAnalysis() {
   const [offerError, setOfferError] = useState("");
   const [editableOffer, setEditableOffer] = useState<OfferDraft | null>(null);
   
+  const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
+
   useEffect(() => {
   try {
     const savedAnalysis = window.localStorage.getItem(
@@ -463,62 +465,77 @@ setOfferStatus("completed");
                 Entwurf
               </span>
               
-              {isEditingOffer ? (
-  <div className="flex flex-wrap gap-3">
-    <button
-  type="button"
-  onClick={() => {
-  if (editableOffer) {
-    const savedOffer = {
-      ...editableOffer,
-      positions: editableOffer.positions.map((position) => ({
-        ...position,
-      })),
-    };
+              <div>
+  {isEditingOffer ? (
+    <div className="flex flex-wrap gap-3">
+      <button
+        type="button"
+        onClick={() => {
+          if (editableOffer) {
+            const savedOffer = {
+              ...editableOffer,
+              positions: editableOffer.positions.map((position) => ({
+                ...position,
+              })),
+            };
 
-    setOffer(savedOffer);
+            setOffer(savedOffer);
 
-    window.localStorage.setItem(
-      "atlas-editable-offer",
-      JSON.stringify(savedOffer),
-    );
-  }
+            window.localStorage.setItem(
+              "atlas-editable-offer",
+              JSON.stringify(savedOffer),
+            );
 
-  setIsEditingOffer(false);
-}}
-  className="rounded-lg bg-neutral-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-neutral-700"
->
-  Änderungen übernehmen
-</button>
+            setLastSavedAt(
+              new Date().toLocaleTimeString("de-DE", {
+                hour: "2-digit",
+                minute: "2-digit",
+              }),
+            );
+          }
 
+          setIsEditingOffer(false);
+        }}
+        className="rounded-lg bg-neutral-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-neutral-700"
+      >
+        Änderungen übernehmen
+      </button>
+
+      <button
+        type="button"
+        onClick={() => {
+          if (offer) {
+            setEditableOffer({
+              ...offer,
+              positions: offer.positions.map((position) => ({
+                ...position,
+              })),
+            });
+          }
+
+          setIsEditingOffer(false);
+        }}
+        className="rounded-lg border bg-white px-4 py-2 text-sm font-medium transition hover:bg-neutral-50"
+      >
+        Änderungen verwerfen
+      </button>
+    </div>
+  ) : (
     <button
       type="button"
-      onClick={() => {
-        if (offer) {
-  setEditableOffer({
-    ...offer,
-    positions: offer.positions.map((position) => ({
-      ...position,
-    })),
-  });
-}
-
-        setIsEditingOffer(false);
-      }}
-      className="rounded-lg border bg-white px-4 py-2 text-sm font-medium transition hover:bg-neutral-50"
+      onClick={() => setIsEditingOffer(true)}
+      className="rounded-lg border px-4 py-2 text-sm font-medium transition hover:bg-neutral-50"
     >
-      Änderungen verwerfen
+      Entwurf bearbeiten
     </button>
-  </div>
-) : (
-  <button
-    type="button"
-    onClick={() => setIsEditingOffer(true)}
-    className="rounded-lg border px-4 py-2 text-sm font-medium transition hover:bg-neutral-50"
-  >
-    Entwurf bearbeiten
-  </button>
-)}
+  )}
+
+  {lastSavedAt && !isEditingOffer && (
+    <p className="mt-3 text-sm text-emerald-700">
+      Änderungen gespeichert um {lastSavedAt} Uhr
+    </p>
+  )}
+</div>
 
               {isEditingOffer ? (
   <div className="mt-4 space-y-3">
