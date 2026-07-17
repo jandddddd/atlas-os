@@ -6,12 +6,14 @@ type TaskItemProps = {
   title: string;
   description: string;
   priority: "high" | "medium" | "low";
+  href: string;
 };
 
 export function TaskItem({
   title,
   description,
   priority,
+href,
 }: TaskItemProps) {
   const priorityStyles = {
     high: "bg-red-500",
@@ -21,7 +23,7 @@ export function TaskItem({
 
   return (
     <Link
-     href="/today/tasks/offer-mueller"
+     href={href}
      className="flex w-full items-center gap-4 rounded-xl border bg-white p-4 text-left transition hover:bg-neutral-50"
     >
       <span

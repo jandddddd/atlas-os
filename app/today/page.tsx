@@ -14,18 +14,21 @@ const tasks = [
     title: "Angebot Müller prüfen",
     description: "Entwurf über 4.850 € wartet auf Freigabe",
     priority: "high" as const,
+    href: "/today/tasks/offer-mueller",
   },
   {
     id: 2,
     title: "Besichtigung Weber bestätigen",
     description: "Vorgeschlagener Termin: heute um 15:30 Uhr",
     priority: "medium" as const,
+    href: "/today/tasks/visit-weber",
   },
   {
     id: 3,
     title: "Lieferantenangebot auswählen",
     description: "Drei Angebote wurden von Atlas verglichen",
     priority: "low" as const,
+    href: "/today/tasks/select-supplier-offer",
   },
 ];
 
@@ -127,6 +130,7 @@ export default async function TodayPage({
         title={task.title}
         description={task.description}
         priority={task.priority}
+        href={task.href}
       />
     ))}
   </div>
