@@ -1,11 +1,18 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ScanSearch, Sparkles, TriangleAlert } from "lucide-react";
 
 import { AnalysisResultView } from "./AnalysisResultView";
 import { OfferDraftView } from "./OfferDraftView";
 import type { AnalysisResult, OfferDraft, OfferStatus } from "./types";
+import {
+  clearInboxWorkflow,
+  loadInquiryAnalysis,
+  loadOfferDraft,
+  saveInquiryAnalysis,
+  saveOfferDraft,
+} from "@/lib/storage/inbox-storage";
 
 const inquiry = `
 Guten Tag, wir möchten unser Wohnzimmer, Esszimmer und den Flur
@@ -15,6 +22,7 @@ Bilder können wir gerne nachreichen.
 `.trim();
 
 export function InboxAnalysis() {
+  const workflowVersion = useRef(0);
   const [isEditingOffer, setIsEditingOffer] = useState(false);
   const [status, setStatus] = useState<
     "idle" | "analyzing" | "completed" | "error"
@@ -30,38 +38,23 @@ export function InboxAnalysis() {
   useEffect(() => {
     let cancelled = false;
 
-    try {
-      const savedAnalysis = window.localStorage.getItem(
-        "atlas-inquiry-analysis",
-      );
-      const savedOffer = window.localStorage.getItem("atlas-editable-offer");
-      const parsedAnalysis = savedAnalysis
-        ? (JSON.parse(savedAnalysis) as AnalysisResult)
-        : null;
-      const parsedOffer = savedOffer
-        ? (JSON.parse(savedOffer) as OfferDraft)
-        : null;
+    const savedAnalysis = loadInquiryAnalysis();
+    const savedOffer = loadOfferDraft();
 
-      queueMicrotask(() => {
-        if (cancelled) return;
+    queueMicrotask(() => {
+      if (cancelled) return;
 
-        if (parsedAnalysis) {
-          setAnalysis(parsedAnalysis);
-          setStatus("completed");
-        }
+      if (savedAnalysis) {
+        setAnalysis(savedAnalysis);
+        setStatus("completed");
+      }
 
-        if (parsedOffer) {
-          setOffer(parsedOffer);
-          setEditableOffer(parsedOffer);
-          setOfferStatus("completed");
-        }
-      });
-    } catch (error) {
-      console.error(
-        "Gespeicherte Atlas-Daten konnten nicht geladen werden:",
-        error,
-      );
-    }
+      if (savedOffer) {
+        setOffer(savedOffer);
+        setEditableOffer(savedOffer);
+        setOfferStatus("completed");
+      }
+    });
 
     return () => {
       cancelled = true;
@@ -89,10 +82,7 @@ export function InboxAnalysis() {
       }
 
       setAnalysis(data.analysis);
-      window.localStorage.setItem(
-        "atlas-inquiry-analysis",
-        JSON.stringify(data.analysis),
-      );
+      saveInquiryAnalysis(data.analysis);
       setStatus("completed");
     } catch (error) {
       setAnalysisError(
@@ -106,6 +96,7 @@ export function InboxAnalysis() {
 
   async function generateOffer() {
     if (!analysis) return;
+    const currentWorkflowVersion = workflowVersion.current;
 
     try {
       setOfferStatus("generating");
@@ -118,6 +109,8 @@ export function InboxAnalysis() {
       });
       const data = await response.json();
 
+      if (currentWorkflowVersion !== workflowVersion.current) return;
+
       if (!response.ok) {
         throw new Error(
           data.error ?? "Der Angebotsentwurf konnte nicht erstellt werden.",
@@ -126,12 +119,11 @@ export function InboxAnalysis() {
 
       setOffer(data.offer);
       setEditableOffer(data.offer);
-      window.localStorage.setItem(
-        "atlas-editable-offer",
-        JSON.stringify(data.offer),
-      );
+      saveOfferDraft(data.offer);
       setOfferStatus("completed");
     } catch (error) {
+      if (currentWorkflowVersion !== workflowVersion.current) return;
+
       setOfferError(
         error instanceof Error
           ? error.message
@@ -148,10 +140,7 @@ export function InboxAnalysis() {
         positions: editableOffer.positions.map((position) => ({ ...position })),
       };
       setOffer(savedOffer);
-      window.localStorage.setItem(
-        "atlas-editable-offer",
-        JSON.stringify(savedOffer),
-      );
+      saveOfferDraft(savedOffer);
       setLastSavedAt(
         new Date().toLocaleTimeString("de-DE", {
           hour: "2-digit",
@@ -160,6 +149,20 @@ export function InboxAnalysis() {
       );
     }
     setIsEditingOffer(false);
+  }
+
+  function resetInboxWorkflow() {
+    workflowVersion.current += 1;
+    clearInboxWorkflow();
+    setIsEditingOffer(false);
+    setStatus("idle");
+    setAnalysis(null);
+    setAnalysisError("");
+    setOfferStatus("idle");
+    setOffer(null);
+    setOfferError("");
+    setEditableOffer(null);
+    setLastSavedAt(null);
   }
 
   function discardOfferChanges() {
@@ -262,6 +265,16 @@ export function InboxAnalysis() {
           onDiscard={discardOfferChanges}
         />
       )}
+
+      <div className="flex justify-end">
+        <button
+          type="button"
+          onClick={resetInboxWorkflow}
+          className="text-sm text-neutral-500 transition hover:text-neutral-900"
+        >
+          Gespeicherten Vorgang zurücksetzen
+        </button>
+      </div>
     </div>
   );
 }
