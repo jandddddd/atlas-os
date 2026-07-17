@@ -1,12 +1,14 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   CheckCircle2,
   Clock3,
   FileText,
+  Plus,
   ScanSearch,
   Sparkles,
+  Trash2,
   TriangleAlert,
 } from "lucide-react";
 
@@ -63,6 +65,7 @@ Bilder können wir gerne nachreichen.
 `.trim();
 
 export function InboxAnalysis() {
+  const [isEditingOffer, setIsEditingOffer] = useState(false);  
   const [status, setStatus] = useState<
     "idle" | "analyzing" | "completed" | "error"
   >("idle");
@@ -78,7 +81,44 @@ export function InboxAnalysis() {
 
   const [offer, setOffer] = useState<OfferDraft | null>(null);
   const [offerError, setOfferError] = useState("");
+  const [editableOffer, setEditableOffer] = useState<OfferDraft | null>(null);
+  
+  useEffect(() => {
+  try {
+    const savedAnalysis = window.localStorage.getItem(
+      "atlas-inquiry-analysis",
+    );
 
+    const savedOffer = window.localStorage.getItem(
+      "atlas-editable-offer",
+    );
+
+    if (savedAnalysis) {
+      const parsedAnalysis = JSON.parse(
+        savedAnalysis,
+      ) as AnalysisResult;
+
+      setAnalysis(parsedAnalysis);
+      setStatus("completed");
+    }
+
+    if (savedOffer) {
+      const parsedOffer = JSON.parse(
+        savedOffer,
+      ) as OfferDraft;
+
+      setOffer(parsedOffer);
+      setEditableOffer(parsedOffer);
+      setOfferStatus("completed");
+    }
+  } catch (error) {
+    console.error(
+      "Gespeicherte Atlas-Daten konnten nicht geladen werden:",
+      error,
+    );
+  }
+}, []);
+  
   async function startAnalysis() {
     try {
       setStatus("analyzing");
@@ -104,7 +144,13 @@ export function InboxAnalysis() {
       }
 
       setAnalysis(data.analysis);
-      setStatus("completed");
+
+window.localStorage.setItem(
+  "atlas-inquiry-analysis",
+  JSON.stringify(data.analysis),
+);
+
+setStatus("completed");
     } catch (error) {
       setAnalysisError(
         error instanceof Error
@@ -146,7 +192,14 @@ export function InboxAnalysis() {
       }
 
       setOffer(data.offer);
-      setOfferStatus("completed");
+setEditableOffer(data.offer);
+
+window.localStorage.setItem(
+  "atlas-editable-offer",
+  JSON.stringify(data.offer),
+);
+
+setOfferStatus("completed");
     } catch (error) {
       setOfferError(
         error instanceof Error
@@ -402,21 +455,114 @@ export function InboxAnalysis() {
         </section>
       )}
 
-      {offerStatus === "completed" && offer && (
+      {offerStatus === "completed" && editableOffer && (
         <section className="rounded-2xl border bg-white p-6">
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div>
               <span className="rounded-full bg-amber-100 px-3 py-1 text-sm font-medium text-amber-800">
                 Entwurf
               </span>
+              
+              {isEditingOffer ? (
+  <div className="flex flex-wrap gap-3">
+    <button
+  type="button"
+  onClick={() => {
+  if (editableOffer) {
+    const savedOffer = {
+      ...editableOffer,
+      positions: editableOffer.positions.map((position) => ({
+        ...position,
+      })),
+    };
 
-              <h2 className="mt-4 text-3xl font-bold tracking-tight">
-                {offer.title}
-              </h2>
+    setOffer(savedOffer);
 
-              <p className="mt-2 text-neutral-600">
-                {offer.projectSummary}
-              </p>
+    window.localStorage.setItem(
+      "atlas-editable-offer",
+      JSON.stringify(savedOffer),
+    );
+  }
+
+  setIsEditingOffer(false);
+}}
+  className="rounded-lg bg-neutral-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-neutral-700"
+>
+  Änderungen übernehmen
+</button>
+
+    <button
+      type="button"
+      onClick={() => {
+        if (offer) {
+  setEditableOffer({
+    ...offer,
+    positions: offer.positions.map((position) => ({
+      ...position,
+    })),
+  });
+}
+
+        setIsEditingOffer(false);
+      }}
+      className="rounded-lg border bg-white px-4 py-2 text-sm font-medium transition hover:bg-neutral-50"
+    >
+      Änderungen verwerfen
+    </button>
+  </div>
+) : (
+  <button
+    type="button"
+    onClick={() => setIsEditingOffer(true)}
+    className="rounded-lg border px-4 py-2 text-sm font-medium transition hover:bg-neutral-50"
+  >
+    Entwurf bearbeiten
+  </button>
+)}
+
+              {isEditingOffer ? (
+  <div className="mt-4 space-y-3">
+    <input
+      value={editableOffer.title}
+      onChange={(event) => {
+        setEditableOffer((current) => {
+          if (!current) return current;
+
+          return {
+            ...current,
+            title: event.target.value,
+          };
+        });
+      }}
+      className="w-full rounded-lg border px-3 py-2 text-2xl font-bold"
+    />
+
+    <textarea
+      value={editableOffer.projectSummary}
+      onChange={(event) => {
+        setEditableOffer((current) => {
+          if (!current) return current;
+
+          return {
+            ...current,
+            projectSummary: event.target.value,
+          };
+        });
+      }}
+      className="min-h-24 w-full rounded-lg border px-3 py-2 text-neutral-700"
+    />
+  </div>
+) : (
+  <>
+    <h2 className="mt-4 text-3xl font-bold tracking-tight">
+      {editableOffer.title}
+    </h2>
+
+    <p className="mt-2 text-neutral-600">
+      {editableOffer.projectSummary}
+    </p>
+  </>
+)}
             </div>
 
             <div className="text-right">
@@ -425,13 +571,16 @@ export function InboxAnalysis() {
               </p>
 
               <p className="mt-1 font-medium">
-                {offer.customerName}
+                {editableOffer.customerName}
               </p>
             </div>
           </div>
 
           <div className="mt-8 overflow-hidden rounded-xl border">
             <div
+
+           
+
   className="grid gap-4 bg-neutral-50 px-5 py-3 text-sm font-medium text-neutral-500"
   style={{
     gridTemplateColumns: "minmax(0, 1fr) 110px 150px",
@@ -442,18 +591,82 @@ export function InboxAnalysis() {
               <span>Einheit</span>
             </div>
 
-            {offer.positions.map((position) => (
+            {isEditingOffer && (
+  <button
+    type="button"
+    onClick={() => {
+      setEditableOffer((current) => {
+        if (!current) return current;
+
+        const nextId =
+          current.positions.length === 0
+            ? 1
+            : Math.max(
+                ...current.positions.map((position) => position.id),
+              ) + 1;
+
+        return {
+          ...current,
+          positions: [
+            ...current.positions,
+            {
+              id: nextId,
+              description: "Neue Leistung",
+              quantity: 0,
+              unit: "noch zu ermitteln",
+              notes: "",
+            },
+          ],
+        };
+      });
+    }}
+    className="mt-4 inline-flex items-center gap-2 rounded-lg border bg-white px-4 py-2 text-sm font-medium transition hover:bg-neutral-50"
+  >
+    <Plus className="h-4 w-4" />
+    Position hinzufügen
+  </button>
+)}
+
+            {editableOffer.positions.map((position) => (
               <div
+              
+
   key={position.id}
   className="grid gap-4 border-t px-5 py-4"
   style={{
-    gridTemplateColumns: "minmax(0, 1fr) 110px 150px",
-  }}
+  gridTemplateColumns: isEditingOffer
+    ? "minmax(0, 1fr) 110px 150px 44px"
+    : "minmax(0, 1fr) 110px 150px",
+}}
 >
                 <div>
-                  <p className="font-medium">
-                    {position.description}
-                  </p>
+                  {isEditingOffer ? (
+  <input
+    value={position.description}
+    onChange={(event) => {
+      setEditableOffer((current) => {
+        if (!current) return current;
+
+        return {
+          ...current,
+          positions: current.positions.map((item) =>
+            item.id === position.id
+              ? {
+                  ...item,
+                  description: event.target.value,
+                }
+              : item,
+          ),
+        };
+      });
+    }}
+    className="w-full rounded-lg border px-3 py-2 font-medium"
+  />
+) : (
+  <p className="font-medium">
+    {position.description}
+  </p>
+)}
 
                   {position.notes && (
                     <p className="mt-1 text-sm text-neutral-500">
@@ -463,24 +676,99 @@ export function InboxAnalysis() {
                 </div>
 
                 <span className="text-neutral-700">
-                  {position.quantity === 0 ? "-" : position.quantity}
+                  {isEditingOffer ? (
+  <input
+    type="number"
+    min="0"
+    value={position.quantity}
+    onChange={(event) => {
+      const quantity = Number(event.target.value);
+
+      setEditableOffer((current) => {
+        if (!current) return current;
+
+        return {
+          ...current,
+          positions: current.positions.map((item) =>
+            item.id === position.id
+              ? {
+                  ...item,
+                  quantity,
+                }
+              : item,
+          ),
+        };
+      });
+    }}
+    className="w-full rounded-lg border px-3 py-2"
+  />
+) : (
+  position.quantity === 0 ? "—" : position.quantity
+)}
                 </span>
 
                 <span className="text-neutral-700">
-                  {position.unit}
+                  {isEditingOffer ? (
+  <input
+    value={position.unit}
+    onChange={(event) => {
+      setEditableOffer((current) => {
+        if (!current) return current;
+
+        return {
+          ...current,
+          positions: current.positions.map((item) =>
+            item.id === position.id
+              ? {
+                  ...item,
+                  unit: event.target.value,
+                }
+              : item,
+          ),
+        };
+      });
+    }}
+    className="w-full rounded-lg border px-3 py-2"
+  />
+) : (
+  position.unit
+)}
                 </span>
+
+             {isEditingOffer && (
+  <button
+    type="button"
+    onClick={() => {
+      setEditableOffer((current) => {
+        if (!current) return current;
+
+        return {
+          ...current,
+          positions: current.positions.filter(
+            (item) => item.id !== position.id,
+          ),
+        };
+      });
+    }}
+    className="rounded-lg p-2 text-red-600 transition hover:bg-red-50"
+    aria-label={`${position.description} löschen`}
+  >
+    <Trash2 className="h-5 w-5" />
+  </button>
+)}
+
               </div>
             ))}
           </div>
 
-          {offer.assumptions.length > 0 && (
+          {editableOffer.assumptions.length > 0 && (
             <div className="mt-6 rounded-xl bg-neutral-50 p-5">
               <p className="font-semibold">
                 Annahmen
               </p>
 
               <ul className="mt-3 space-y-2 text-sm text-neutral-700">
-                {offer.assumptions.map((assumption) => (
+                {editableOffer.assumptions.map((assumption) => (
                   <li key={assumption}>
                     • {assumption}
                   </li>
@@ -489,14 +777,14 @@ export function InboxAnalysis() {
             </div>
           )}
 
-          {offer.missingInformation.length > 0 && (
+          {editableOffer.missingInformation.length > 0 && (
             <div className="mt-4 rounded-xl bg-sky-100 p-5">
               <p className="font-semibold text-sky-900">
                 Vor Freigabe noch klären
               </p>
 
               <ul className="mt-3 space-y-2 text-sm text-sky-800">
-                {offer.missingInformation.map(
+                {editableOffer.missingInformation.map(
                   (information) => (
                     <li key={information}>
                       • {information}
@@ -513,7 +801,7 @@ export function InboxAnalysis() {
             </p>
 
             <p className="mt-1 font-medium">
-              {offer.recommendedNextStep}
+              {editableOffer.recommendedNextStep}
             </p>
           </div>
 
