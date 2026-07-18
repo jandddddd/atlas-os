@@ -1,5 +1,6 @@
 import { DecisionOverviewList } from "@/components/today/DecisionOverviewList";
 import { PriorityApprovalPlaceholder } from "@/components/today/PriorityApprovalPlaceholder";
+import { TodayCompletionNotice } from "@/components/today/TodayCompletionNotice";
 import { TodayEmptyState } from "@/components/today/TodayEmptyState";
 import { TodayHeader } from "@/components/today/TodayHeader";
 
@@ -46,9 +47,6 @@ const priorityDecision = {
     "Phase 1 bildet nur die Layout-Grundlage ab. Es gibt noch keine echte Decision Engine, keine Backend-Daten und keine Freigabelogik.",
 };
 
-const decisionCount = decisions.length + 1;
-const hasDecisions = decisionCount > 0;
-
 const dateFormatter = new Intl.DateTimeFormat("de-DE", {
   weekday: "long",
   day: "numeric",
@@ -56,18 +54,48 @@ const dateFormatter = new Intl.DateTimeFormat("de-DE", {
   year: "numeric",
 });
 
-export default function TodayPage() {
+type TodayPageProps = {
+  searchParams: Promise<{
+    offerApproved?: string;
+    changeRequested?: string;
+  }>;
+};
+
+function getCompletionStatus({
+  offerApproved,
+  changeRequested,
+}: Awaited<TodayPageProps["searchParams"]>) {
+  if (offerApproved === "true") {
+    return "offer-approved" as const;
+  }
+
+  if (changeRequested === "true") {
+    return "change-requested" as const;
+  }
+
+  return null;
+}
+
+export default async function TodayPage({ searchParams }: TodayPageProps) {
+  const params = await searchParams;
+  const completionStatus = getCompletionStatus(params);
+  const visibleDecisions = completionStatus === "offer-approved"
+    ? decisions.filter((decision) => decision.id !== "offer-mueller")
+    : decisions;
+  const decisionCount = visibleDecisions.length + 1;
+  const hasDecisions = decisionCount > 0;
   const todayLabel = dateFormatter.format(new Date());
 
   return (
     <main className="min-h-screen bg-neutral-50">
       <div className="mx-auto flex max-w-6xl flex-col gap-14 px-6 py-10 sm:gap-16 sm:px-8 sm:py-14 lg:py-18">
         <TodayHeader dateLabel={todayLabel} decisionCount={decisionCount} />
+        <TodayCompletionNotice status={completionStatus} />
 
         {hasDecisions ? (
           <>
             <PriorityApprovalPlaceholder {...priorityDecision} />
-            <DecisionOverviewList decisions={decisions} />
+            <DecisionOverviewList decisions={visibleDecisions} />
           </>
         ) : (
           <TodayEmptyState isVisible />
