@@ -1,5 +1,9 @@
+"use client";
+
 export type ApprovalCardAction = {
   label: string;
+  href?: string;
+  onSelect?: () => void;
 };
 
 export type ApprovalCardContextItem = {
@@ -23,6 +27,54 @@ export type ApprovalCardProps = {
   primaryAction: ApprovalCardAction;
   secondaryActions: ApprovalCardAction[];
 };
+
+type ActionStyle = "primary" | "secondary";
+
+function getActionClassName(style: ActionStyle, isUnavailable: boolean) {
+  if (style === "primary") {
+    return isUnavailable
+      ? "inline-flex cursor-not-allowed rounded-full bg-neutral-200 px-6 py-3 text-sm font-semibold text-neutral-500"
+      : "inline-flex rounded-full bg-neutral-950 px-6 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-neutral-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-neutral-950";
+  }
+
+  return isUnavailable
+    ? "inline-flex cursor-not-allowed rounded-full px-4 py-2.5 text-sm font-medium text-neutral-400"
+    : "inline-flex rounded-full px-4 py-2.5 text-sm font-medium text-neutral-500 transition hover:bg-neutral-100 hover:text-neutral-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-neutral-300";
+}
+
+function ApprovalCardActionControl({
+  action,
+  style,
+}: {
+  action: ApprovalCardAction;
+  style: ActionStyle;
+}) {
+  const hasLink = Boolean(action.href);
+  const hasHandler = Boolean(action.onSelect);
+  const className = getActionClassName(style, !hasLink && !hasHandler);
+
+  if (action.href) {
+    return (
+      <a className={className} href={action.href}>
+        {action.label}
+      </a>
+    );
+  }
+
+  if (action.onSelect) {
+    return (
+      <button type="button" className={className} onClick={action.onSelect}>
+        {action.label}
+      </button>
+    );
+  }
+
+  return (
+    <span aria-disabled="true" className={className} role="text">
+      {action.label}
+    </span>
+  );
+}
 
 export function ApprovalCard({
   decisionType,
@@ -141,21 +193,14 @@ export function ApprovalCard({
           </div>
 
           <div className="flex flex-col gap-3 border-t border-neutral-200 pt-7 sm:flex-row sm:items-center">
-            <button
-              type="button"
-              className="rounded-full bg-neutral-950 px-6 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-neutral-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-neutral-950"
-            >
-              {primaryAction.label}
-            </button>
+            <ApprovalCardActionControl action={primaryAction} style="primary" />
             <div className="flex flex-wrap gap-2 sm:ml-2">
               {secondaryActions.map((action) => (
-                <button
+                <ApprovalCardActionControl
                   key={action.label}
-                  type="button"
-                  className="rounded-full px-4 py-2.5 text-sm font-medium text-neutral-500 transition hover:bg-neutral-100 hover:text-neutral-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-neutral-300"
-                >
-                  {action.label}
-                </button>
+                  action={action}
+                  style="secondary"
+                />
               ))}
             </div>
           </div>

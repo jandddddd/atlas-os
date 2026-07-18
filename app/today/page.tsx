@@ -65,12 +65,12 @@ const priorityDecision = {
   },
   consequence:
     "Mit der Freigabe wird das vorbereitete Angebot an Familie Müller gesendet.",
-  primaryAction: { label: "Angebot senden" },
+  primaryAction: { label: "Angebot senden", href: "/today?offerApproved=true" },
   secondaryActions: [
-    { label: "Ändern" },
+    { label: "Ändern", href: "/today?changeRequested=true" },
     { label: "Rückfrage stellen" },
     { label: "Später entscheiden" },
-    { label: "Details ansehen" },
+    { label: "Details ansehen", href: "/today/tasks/offer-mueller" },
   ],
 };
 
@@ -106,10 +106,11 @@ function getCompletionStatus({
 export default async function TodayPage({ searchParams }: TodayPageProps) {
   const params = await searchParams;
   const completionStatus = getCompletionStatus(params);
-  const visibleDecisions = completionStatus === "offer-approved"
-    ? decisions.filter((decision) => decision.id !== "offer-mueller")
-    : decisions;
-  const decisionCount = visibleDecisions.length + 1;
+  const showPriorityDecision = completionStatus === null;
+  const visibleDecisions = showPriorityDecision
+    ? decisions
+    : decisions.filter((decision) => decision.id !== "offer-mueller");
+  const decisionCount = visibleDecisions.length + (showPriorityDecision ? 1 : 0);
   const hasDecisions = decisionCount > 0;
   const todayLabel = dateFormatter.format(new Date());
 
@@ -121,7 +122,7 @@ export default async function TodayPage({ searchParams }: TodayPageProps) {
 
         {hasDecisions ? (
           <>
-            <ApprovalCard {...priorityDecision} />
+            {showPriorityDecision ? <ApprovalCard {...priorityDecision} /> : null}
             <DecisionOverviewList decisions={visibleDecisions} />
           </>
         ) : (
