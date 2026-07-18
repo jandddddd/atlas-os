@@ -18,7 +18,9 @@ Eine Approval Card beantwortet innerhalb weniger Sekunden:
 
 Die Karte zeigt nur Informationen, die für diese eine Entscheidung relevant sind. Details, Herkunftsinformationen, Verlauf und alternative Optionen erscheinen erst auf Nachfrage.
 
-## Verpflichtende Inhalte jeder Approval Card
+## Inhalte jeder Approval Card
+
+Verpflichtend sind Entscheidungstyp, Entscheidungstitel, Zusammenfassung, Empfehlung, Begründung und Aktionen. Kontext, Konsequenz und Unsicherheit erscheinen nur, wenn sie die konkrete Entscheidung schneller oder sicherer verständlich machen.
 
 ### Entscheidungstyp
 
@@ -101,9 +103,9 @@ Geeignete Gründe sind zum Beispiel:
 
 Die Begründung bleibt knapp. Ausführliche Quellen, Nachrichtenverläufe oder Dokumentdetails gehören in den optionalen Detailbereich.
 
-### Unsicherheit
+### Optionaler Abschnitt: Unsicherheit
 
-Unsicherheit wird nur angezeigt, wenn sie für die Entscheidung relevant ist. Sie ist kein Fehlerzustand, sondern ein konkreter Prüfhinweis.
+Unsicherheit ist ein optionaler Abschnitt. Sie wird nur angezeigt, wenn sie für die Entscheidung relevant ist. Approval Cards ohne relevante Unsicherheit zeigen diesen Abschnitt überhaupt nicht. Die Karte bleibt dadurch kompakt und fokussiert. Unsicherheit ist kein Fehlerzustand, sondern ein konkreter Prüfhinweis.
 
 Atlas erklärt konkret:
 
