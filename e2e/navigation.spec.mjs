@@ -95,6 +95,28 @@ test("Der primäre Freigabe-Button ist sichtbar, erreichbar und rückt die näch
   await expect(page.getByText("Atlas hat heute 4 Entscheidungen vorbereitet.")).toBeVisible();
 });
 
+test("Während der Freigabe bleiben alle Aktionen sichtbar, aber gesperrt", async ({ page }) => {
+  await page.goto("/today");
+  await page.route("**/today", async (route) => {
+    if (route.request().method() === "POST") {
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+
+    await route.continue();
+  });
+
+  const approveButton = page.getByRole("button", { name: "Angebot senden" });
+  const submit = approveButton.click();
+
+  await expect(page.getByRole("button", { name: "Wird freigegeben …" })).toBeDisabled();
+  await expect(page.getByText("Ändern", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Später entscheiden" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Details ansehen" })).toBeDisabled();
+
+  await submit;
+  await expect(page.getByLabel("Aktueller Abschluss")).toBeVisible();
+});
+
 test("Freigabe bleibt nach einem Reload erhalten", async ({ page }) => {
   await page.goto("/today");
 

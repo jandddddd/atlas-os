@@ -196,19 +196,33 @@ export function TodayApprovalCenter({
             }
             primaryAction={{
               label: priorityDecision.primaryActionLabel,
+              pendingLabel: "Wird freigegeben …",
               onSelect: approvePriorityDecision,
               isDisabled: isSubmittingPriorityDecision,
             }}
             secondaryActions={[
               priorityDecision.editHref
-                ? { label: "Ändern", href: priorityDecision.editHref }
-                : { label: "Ändern", onSelect: () => showEditHint(priorityDecision.id) },
-              { label: "Später entscheiden", onSelect: postponePriorityDecision },
+                ? {
+                    label: "Ändern",
+                    href: priorityDecision.editHref,
+                    isDisabled: isSubmittingPriorityDecision,
+                  }
+                : {
+                    label: "Ändern",
+                    onSelect: () => showEditHint(priorityDecision.id),
+                    isDisabled: isSubmittingPriorityDecision,
+                  },
+              {
+                label: "Später entscheiden",
+                onSelect: postponePriorityDecision,
+                isDisabled: isSubmittingPriorityDecision,
+              },
               {
                 label: expandedDetailsId === priorityDecision.id ? "Details ausblenden" : "Details ansehen",
                 onSelect: () => toggleDetails(priorityDecision.id),
                 controls: `details-${priorityDecision.id}`,
                 expanded: expandedDetailsId === priorityDecision.id,
+                isDisabled: isSubmittingPriorityDecision,
               },
             ]}
           />
