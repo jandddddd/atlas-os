@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 
 import { submitTodayDecision } from "@/app/today/actions";
 import { ApprovalCard, type ApprovalCardProps } from "@/components/today/ApprovalCard";
@@ -62,6 +62,7 @@ export function TodayApprovalCenter({
   const [completionMessage, setCompletionMessage] = useState<string | null>(null);
   const [expandedDetailsId, setExpandedDetailsId] = useState<string | null>(null);
   const [editHintDecisionId, setEditHintDecisionId] = useState<string | null>(null);
+  const priorityDecisionSubmissionInProgress = useRef(false);
 
   const [priorityDecisionId, ...overviewDecisionIds] = visibleDecisionIds;
   const priorityDecision = priorityDecisionId
@@ -79,43 +80,55 @@ export function TodayApprovalCenter({
   const hasDecisions = visibleDecisionIds.length > 0;
 
   async function approvePriorityDecision() {
-    if (!priorityDecision) {
+    if (!priorityDecision || priorityDecisionSubmissionInProgress.current) {
       return;
     }
 
-    const result = await submitTodayDecision({
-      decisionId: priorityDecision.id,
-      action: "approve",
-    });
+    priorityDecisionSubmissionInProgress.current = true;
 
-    if (!result.success) {
-      return;
+    try {
+      const result = await submitTodayDecision({
+        decisionId: priorityDecision.id,
+        action: "approve",
+      });
+
+      if (!result.success) {
+        return;
+      }
+
+      setCompletionMessage(priorityDecision.completionMessage);
+      setExpandedDetailsId(null);
+      setEditHintDecisionId(null);
+      setVisibleDecisionIds((currentDecisionIds) => currentDecisionIds.slice(1));
+    } finally {
+      priorityDecisionSubmissionInProgress.current = false;
     }
-
-    setCompletionMessage(priorityDecision.completionMessage);
-    setExpandedDetailsId(null);
-    setEditHintDecisionId(null);
-    setVisibleDecisionIds((currentDecisionIds) => currentDecisionIds.slice(1));
   }
 
   async function postponePriorityDecision() {
-    if (!priorityDecision) {
+    if (!priorityDecision || priorityDecisionSubmissionInProgress.current) {
       return;
     }
 
-    const result = await submitTodayDecision({
-      decisionId: priorityDecision.id,
-      action: "later",
-    });
+    priorityDecisionSubmissionInProgress.current = true;
 
-    if (!result.success) {
-      return;
+    try {
+      const result = await submitTodayDecision({
+        decisionId: priorityDecision.id,
+        action: "later",
+      });
+
+      if (!result.success) {
+        return;
+      }
+
+      setCompletionMessage(null);
+      setExpandedDetailsId(null);
+      setEditHintDecisionId(null);
+      setVisibleDecisionIds(moveFirstDecisionToEnd);
+    } finally {
+      priorityDecisionSubmissionInProgress.current = false;
     }
-
-    setCompletionMessage(null);
-    setExpandedDetailsId(null);
-    setEditHintDecisionId(null);
-    setVisibleDecisionIds(moveFirstDecisionToEnd);
   }
 
   function toggleDetails(decisionId: string) {
