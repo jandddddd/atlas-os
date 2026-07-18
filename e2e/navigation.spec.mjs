@@ -77,10 +77,16 @@ test("Today-Seite ist erreichbar", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "Angebotsentwurf Müller prüfen" })).toHaveCount(0);
 });
 
-test("Freigeben entfernt die Priorität und rückt die nächste Entscheidung nach", async ({ page }) => {
+test("Der primäre Freigabe-Button ist sichtbar, erreichbar und rückt die nächste Entscheidung nach", async ({ page }) => {
   await page.goto("/today");
 
-  await page.getByRole("button", { name: "Angebot senden" }).click();
+  const approveButton = page.getByRole("button", { name: "Angebot senden" });
+  await expect(approveButton).toBeVisible();
+  await expect(approveButton).toBeEnabled();
+
+  await approveButton.focus();
+  await expect(approveButton).toBeFocused();
+  await approveButton.click();
 
   await expect(page).toHaveURL("/today");
   await expect(page.getByLabel("Aktueller Abschluss")).toContainText("Angebot für Familie Müller wurde freigegeben.");
