@@ -4,6 +4,7 @@ export type ApprovalCardAction = {
   label: string;
   href?: string;
   onSelect?: () => void;
+  isDisabled?: boolean;
   controls?: string;
   expanded?: boolean;
 };
@@ -62,7 +63,8 @@ function ApprovalCardActionControl({
 }) {
   const hasLink = Boolean(action.href);
   const hasHandler = Boolean(action.onSelect);
-  const className = getActionClassName(style, !hasLink && !hasHandler);
+  const isUnavailable = !hasLink && !hasHandler;
+  const className = getActionClassName(style, isUnavailable || action.isDisabled === true);
 
   if (action.href) {
     return (
@@ -77,6 +79,7 @@ function ApprovalCardActionControl({
       <button
         type="button"
         className={className}
+        disabled={action.isDisabled}
         aria-controls={action.controls}
         aria-expanded={action.expanded}
         onClick={action.onSelect}

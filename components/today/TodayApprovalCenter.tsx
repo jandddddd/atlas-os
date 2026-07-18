@@ -63,6 +63,7 @@ export function TodayApprovalCenter({
   const [expandedDetailsId, setExpandedDetailsId] = useState<string | null>(null);
   const [editHintDecisionId, setEditHintDecisionId] = useState<string | null>(null);
   const [submissionError, setSubmissionError] = useState(false);
+  const [isSubmittingPriorityDecision, setIsSubmittingPriorityDecision] = useState(false);
   const priorityDecisionSubmissionInProgress = useRef(false);
 
   const [priorityDecisionId, ...overviewDecisionIds] = visibleDecisionIds;
@@ -86,6 +87,7 @@ export function TodayApprovalCenter({
     }
 
     priorityDecisionSubmissionInProgress.current = true;
+    setIsSubmittingPriorityDecision(true);
     setSubmissionError(false);
 
     try {
@@ -106,6 +108,7 @@ export function TodayApprovalCenter({
       setVisibleDecisionIds((currentDecisionIds) => currentDecisionIds.slice(1));
     } finally {
       priorityDecisionSubmissionInProgress.current = false;
+      setIsSubmittingPriorityDecision(false);
     }
   }
 
@@ -115,6 +118,7 @@ export function TodayApprovalCenter({
     }
 
     priorityDecisionSubmissionInProgress.current = true;
+    setIsSubmittingPriorityDecision(true);
     setSubmissionError(false);
 
     try {
@@ -135,6 +139,7 @@ export function TodayApprovalCenter({
       setVisibleDecisionIds(moveFirstDecisionToEnd);
     } finally {
       priorityDecisionSubmissionInProgress.current = false;
+      setIsSubmittingPriorityDecision(false);
     }
   }
 
@@ -192,6 +197,7 @@ export function TodayApprovalCenter({
             primaryAction={{
               label: priorityDecision.primaryActionLabel,
               onSelect: approvePriorityDecision,
+              isDisabled: isSubmittingPriorityDecision,
             }}
             secondaryActions={[
               priorityDecision.editHref
