@@ -67,9 +67,7 @@ const priorityDecision = {
     "Mit der Freigabe wird das vorbereitete Angebot an Familie Müller gesendet.",
   primaryAction: { label: "Angebot senden", href: "/today?offerApproved=true" },
   secondaryActions: [
-    { label: "Ändern", href: "/today?changeRequested=true" },
-    { label: "Rückfrage stellen" },
-    { label: "Später entscheiden" },
+    { label: "Ändern", href: "/today/tasks/offer-mueller" },
     { label: "Details ansehen", href: "/today/tasks/offer-mueller" },
   ],
 };
@@ -107,23 +105,21 @@ export default async function TodayPage({ searchParams }: TodayPageProps) {
   const params = await searchParams;
   const completionStatus = getCompletionStatus(params);
   const showPriorityDecision = completionStatus === null;
-  const visibleDecisions = showPriorityDecision
-    ? decisions
-    : decisions.filter((decision) => decision.id !== "offer-mueller");
-  const decisionCount = visibleDecisions.length + (showPriorityDecision ? 1 : 0);
-  const hasDecisions = decisionCount > 0;
+  const overviewDecisions = decisions.filter((decision) => decision.id !== "offer-mueller");
+  const visibleDecisionCount = overviewDecisions.length + (showPriorityDecision ? 1 : 0);
+  const hasDecisions = visibleDecisionCount > 0;
   const todayLabel = dateFormatter.format(new Date());
 
   return (
     <main className="min-h-screen bg-neutral-50">
       <div className="mx-auto flex max-w-6xl flex-col gap-14 px-6 py-10 sm:gap-16 sm:px-8 sm:py-14 lg:py-18">
-        <TodayHeader dateLabel={todayLabel} decisionCount={decisionCount} />
+        <TodayHeader dateLabel={todayLabel} decisionCount={visibleDecisionCount} />
         <TodayCompletionNotice status={completionStatus} />
 
         {hasDecisions ? (
           <>
             {showPriorityDecision ? <ApprovalCard {...priorityDecision} /> : null}
-            <DecisionOverviewList decisions={visibleDecisions} />
+            <DecisionOverviewList decisions={overviewDecisions} />
           </>
         ) : (
           <TodayEmptyState isVisible />
