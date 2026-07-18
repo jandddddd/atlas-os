@@ -69,7 +69,8 @@ test("Startseite ist erreichbar", async ({ page }) => {
 test("Today-Seite ist erreichbar", async ({ page }) => {
   await page.goto("/today");
 
-  await expect(page.getByRole("heading", { name: /Guten Morgen, Jan/ })).toBeVisible();
+  await expect(page).toHaveURL("/today");
+  await expect(page.getByRole("heading", { name: "Guten Morgen." })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Heute zuerst" })).toBeVisible();
 });
 
@@ -88,5 +89,6 @@ test("Lieferantenangebot ist erreichbar und Zurück-Link funktioniert", async ({
   await page.getByRole("link", { name: "← Zurück zur Tagesübersicht" }).click();
 
   await expect(page).toHaveURL("/today");
-  await expect(page.getByRole("heading", { name: /Guten Morgen, Jan/ })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Guten Morgen." })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Heute zuerst" })).toBeVisible();
 });
