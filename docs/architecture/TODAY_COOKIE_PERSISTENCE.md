@@ -8,7 +8,7 @@ The versioned cookie payload contains only the decision ID and its last action:
 {"version":1,"decisions":[{"decisionId":"offer-mueller","action":"approve"}]}
 ```
 
-Fixture decisions remain the authoritative source for all decision text and details. On every Today request, the server validates the cookie, ignores malformed, unknown, or unsupported entries, and applies valid actions to the fixture queue. `approve` removes an item; `later` moves it behind the remaining items. The payload retains at most 20 entries, so it is intentionally not an event history.
+Fixture decisions remain the authoritative source for all decision text and details. On every Today request, the server validates the cookie, ignores malformed, unknown, or unsupported entries, and applies valid actions to the fixture queue. Duplicate IDs are normalized defensively: the first valid action is retained and later duplicate entries are ignored. `approve` removes an item; `later` moves it behind the remaining items. The payload retains at most 20 entries, so it is intentionally not an event history.
 
 The cookie is `httpOnly`, `sameSite=lax`, scoped to `/today`, and marked `secure` in production. It is not encrypted because it contains no secret data. Cookie manipulation must therefore never be treated as proof of authorization or an audit trail.
 

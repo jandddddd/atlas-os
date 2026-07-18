@@ -35,6 +35,26 @@ function isPersistedDecision(value: unknown): value is PersistedTodayDecision {
   );
 }
 
+function normalizePersistedDecisions(values: unknown[]): PersistedTodayDecision[] {
+  const decisionIds = new Set<string>();
+  const decisions: PersistedTodayDecision[] = [];
+
+  for (const value of values) {
+    if (!isPersistedDecision(value) || decisionIds.has(value.decisionId)) {
+      continue;
+    }
+
+    decisionIds.add(value.decisionId);
+    decisions.push(value);
+
+    if (decisions.length === maximumPersistedDecisions) {
+      break;
+    }
+  }
+
+  return decisions;
+}
+
 export function parseTodayDecisionState(value: string | undefined): TodayDecisionState {
   if (!value) {
     return emptyTodayDecisionState;
@@ -56,7 +76,7 @@ export function parseTodayDecisionState(value: string | undefined): TodayDecisio
 
     return {
       version: 1,
-      decisions: parsed.decisions.filter(isPersistedDecision).slice(-maximumPersistedDecisions),
+      decisions: normalizePersistedDecisions(parsed.decisions),
     };
   } catch {
     return emptyTodayDecisionState;

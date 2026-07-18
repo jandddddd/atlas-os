@@ -139,6 +139,30 @@ test("Beschädigte Cookie-Daten werden ignoriert", async ({ context, page }) => 
   await expect(page.getByText("Atlas hat heute 5 Entscheidungen vorbereitet.")).toBeVisible();
 });
 
+test("Doppelte decisionIds im Cookie behalten die erste gültige Aktion", async ({ context, page }) => {
+  await context.addCookies([
+    {
+      name: "atlas-today-decisions",
+      value: JSON.stringify({
+        version: 1,
+        decisions: [
+          { decisionId: "offer-mueller", action: "later" },
+          { decisionId: "offer-mueller", action: "approve" },
+        ],
+      }),
+      url: "http://127.0.0.1:3000/today",
+      httpOnly: true,
+      sameSite: "Lax",
+    },
+  ]);
+
+  await page.goto("/today");
+
+  await expect(page.getByRole("heading", { name: "Besichtigung Weber als nächsten Schritt einplanen" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Angebotsentwurf Müller prüfen" })).toBeVisible();
+  await expect(page.getByText("Atlas hat heute 5 Entscheidungen vorbereitet.")).toBeVisible();
+});
+
 test("Eine bereits erledigte Entscheidung entfernt bei einem stale Submit nicht die nächste", async ({
   context,
   page,
