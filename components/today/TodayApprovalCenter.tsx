@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 
+import { submitTodayDecision } from "@/app/today/actions";
 import { ApprovalCard, type ApprovalCardProps } from "@/components/today/ApprovalCard";
 import { DecisionOverviewList } from "@/components/today/DecisionOverviewList";
 import { TodayCompletionNotice } from "@/components/today/TodayCompletionNotice";
@@ -77,8 +78,17 @@ export function TodayApprovalCenter({
     }));
   const hasDecisions = visibleDecisionIds.length > 0;
 
-  function approvePriorityDecision() {
+  async function approvePriorityDecision() {
     if (!priorityDecision) {
+      return;
+    }
+
+    const result = await submitTodayDecision({
+      decisionId: priorityDecision.id,
+      action: "approve",
+    });
+
+    if (!result.success) {
       return;
     }
 
@@ -88,7 +98,20 @@ export function TodayApprovalCenter({
     setVisibleDecisionIds((currentDecisionIds) => currentDecisionIds.slice(1));
   }
 
-  function postponePriorityDecision() {
+  async function postponePriorityDecision() {
+    if (!priorityDecision) {
+      return;
+    }
+
+    const result = await submitTodayDecision({
+      decisionId: priorityDecision.id,
+      action: "later",
+    });
+
+    if (!result.success) {
+      return;
+    }
+
     setCompletionMessage(null);
     setExpandedDetailsId(null);
     setEditHintDecisionId(null);
