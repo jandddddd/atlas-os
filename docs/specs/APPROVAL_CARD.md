@@ -329,7 +329,6 @@ Beispielstruktur:
 - Zusammenfassung: Atlas hat den Materialbedarf für die geplanten Arbeiten zusammengeführt und eine Bestellung vorbereitet.
 - Empfehlung: Bestellung beim vorgeschlagenen Lieferanten auslösen.
 - Begründung: Material und Liefertermin passen zum Projektplan; der Lieferant ist für diese Produktlinie bereits vorgesehen.
-- Unsicherheit: Keine relevante Unsicherheit, wenn Menge, Preis und Liefertermin belastbar vorliegen.
 - Konsequenz: Die Bestellung wird verbindlich beim Lieferanten ausgelöst.
 - Primäre Aktion: Bestellung auslösen
 
@@ -377,7 +376,6 @@ Beispielstruktur:
 - Zusammenfassung: Die Kundin hat nach einer Farbänderung gefragt. Atlas hat eine kurze Antwort vorbereitet.
 - Empfehlung: Nachricht nach kurzer inhaltlicher Prüfung senden.
 - Begründung: Die Antwort greift den Kundenwunsch auf und nennt den nächsten Abstimmungsschritt.
-- Unsicherheit: Keine relevante Unsicherheit, wenn Inhalt und Empfänger eindeutig sind.
 - Konsequenz: Nach Freigabe wird die Nachricht an die Kundin versendet.
 - Primäre Aktion: Nachricht senden
 
