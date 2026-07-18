@@ -7,12 +7,25 @@ test.beforeEach(async ({ page }) => {
       contentType: "application/json",
       body: JSON.stringify({
         analysis: {
-          customer: "Familie Schneider",
-          location: "Mannheim",
-          workSummary: "Wohnzimmer, Esszimmer und Flur streichen",
-          urgency: "normal",
+          customer: {
+            name: "Unbekannt",
+          },
+          project: {
+            trade: "Malerarbeiten",
+            service: "Wohnzimmer, Esszimmer und Flur streichen",
+            estimatedArea: 75,
+          },
+          workflow: {
+            priority: "normal",
+            confidence: 0.82,
+            nextAction: "Angebotsentwurf vorbereiten",
+          },
+          nextSteps: ["Besichtigung oder Bildmaterial anfordern"],
           missingInformation: ["Bilder", "genaue Raummaße"],
-          nextSteps: ["Besichtigung abstimmen"],
+          recommendedTask: {
+            type: "offer",
+            title: "Angebotsentwurf Familie Schneider vorbereiten",
+          },
         },
       }),
     });
@@ -24,19 +37,22 @@ test.beforeEach(async ({ page }) => {
       contentType: "application/json",
       body: JSON.stringify({
         offer: {
+          customerName: "Unbekannt",
           title: "Angebotsentwurf Familie Schneider",
-          intro: "Vielen Dank für Ihre Anfrage.",
+          projectSummary: "Streichen von Wohnzimmer, Esszimmer und Flur auf Basis der Kundenanfrage.",
           positions: [
             {
-              title: "Malerarbeiten",
-              description: "Streichen der angefragten Räume als Entwurf.",
-              quantity: "1",
-              unitPrice: "0,00 €",
-              total: "0,00 €",
+              id: 1,
+              description: "Malerarbeiten in den angefragten Räumen",
+              quantity: 0,
+              unit: "noch zu ermitteln",
+              notes: "Exakte Mengen und Untergründe müssen vor Ort oder anhand belastbarer Bilder geprüft werden.",
             },
           ],
-          total: "0,00 €",
-          notes: ["Testdaten ohne API-Kosten."],
+          assumptions: ["Die genannte Fläche beschreibt die Raumfläche, nicht automatisch Wand- oder Deckenflächen."],
+          missingInformation: ["Bilder", "genaue Raummaße"],
+          recommendedNextStep: "Besichtigung oder Bild- und Maßmaterial anfordern.",
+          status: "draft",
         },
       }),
     });
