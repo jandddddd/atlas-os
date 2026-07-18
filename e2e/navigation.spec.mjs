@@ -46,7 +46,7 @@ test.beforeEach(async ({ page }) => {
 test("Startseite ist erreichbar", async ({ page }) => {
   await page.goto("/");
 
-  await expect(page.getByRole("heading", { name: "ATLAS" })).toBeVisible();
+  await expect(page.locator("header").getByRole("heading", { name: "ATLAS" })).toBeVisible();
   await expect(page.getByText("Atlas erstellt Angebotsentwürfe")).toBeVisible();
 });
 
