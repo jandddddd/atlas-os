@@ -89,6 +89,17 @@ test("Freigeben entfernt die Priorität und rückt die nächste Entscheidung nac
   await expect(page.getByText("Atlas hat heute 4 Entscheidungen vorbereitet.")).toBeVisible();
 });
 
+test("Freigabe bleibt nach einem Reload erhalten", async ({ page }) => {
+  await page.goto("/today");
+
+  await page.getByRole("button", { name: "Angebot senden" }).click();
+  await page.reload();
+
+  await expect(page.getByRole("heading", { name: "Angebot für Familie Müller freigeben und senden" })).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "Besichtigung Weber als nächsten Schritt einplanen" })).toBeVisible();
+  await expect(page.getByText("Atlas hat heute 4 Entscheidungen vorbereitet.")).toBeVisible();
+});
+
 test("Später entscheiden verschiebt die Priorität ans Ende", async ({ page }) => {
   await page.goto("/today");
 
@@ -98,6 +109,84 @@ test("Später entscheiden verschiebt die Priorität ans Ende", async ({ page }) 
   await expect(page.getByRole("heading", { name: "Besichtigung Weber als nächsten Schritt einplanen" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Angebotsentwurf Müller prüfen" })).toBeVisible();
   await expect(page.getByText("Atlas hat heute 5 Entscheidungen vorbereitet.")).toBeVisible();
+});
+
+test("Später entscheiden bleibt nach einem Reload am Ende der Queue", async ({ page }) => {
+  await page.goto("/today");
+
+  await page.getByRole("button", { name: "Später entscheiden" }).click();
+  await page.reload();
+
+  await expect(page.getByRole("heading", { name: "Besichtigung Weber als nächsten Schritt einplanen" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Angebotsentwurf Müller prüfen" })).toBeVisible();
+  await expect(page.getByText("Atlas hat heute 5 Entscheidungen vorbereitet.")).toBeVisible();
+});
+
+test("Beschädigte Cookie-Daten werden ignoriert", async ({ context, page }) => {
+  await context.addCookies([
+    {
+      name: "atlas-today-decisions",
+      value: "not-json",
+      url: "http://127.0.0.1:3000/today",
+      httpOnly: true,
+      sameSite: "Lax",
+    },
+  ]);
+
+  await page.goto("/today");
+
+  await expect(page.getByRole("heading", { name: "Angebot für Familie Müller freigeben und senden" })).toBeVisible();
+  await expect(page.getByText("Atlas hat heute 5 Entscheidungen vorbereitet.")).toBeVisible();
+});
+
+test("Doppelte decisionIds im Cookie behalten die erste gültige Aktion", async ({ context, page }) => {
+  await context.addCookies([
+    {
+      name: "atlas-today-decisions",
+      value: JSON.stringify({
+        version: 1,
+        decisions: [
+          { decisionId: "offer-mueller", action: "later" },
+          { decisionId: "offer-mueller", action: "approve" },
+        ],
+      }),
+      url: "http://127.0.0.1:3000/today",
+      httpOnly: true,
+      sameSite: "Lax",
+    },
+  ]);
+
+  await page.goto("/today");
+
+  await expect(page.getByRole("heading", { name: "Besichtigung Weber als nächsten Schritt einplanen" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Angebotsentwurf Müller prüfen" })).toBeVisible();
+  await expect(page.getByText("Atlas hat heute 5 Entscheidungen vorbereitet.")).toBeVisible();
+});
+
+test("Eine bereits erledigte Entscheidung entfernt bei einem stale Submit nicht die nächste", async ({
+  context,
+  page,
+}) => {
+  await page.goto("/today");
+  await context.addCookies([
+    {
+      name: "atlas-today-decisions",
+      value: JSON.stringify({
+        version: 1,
+        decisions: [{ decisionId: "offer-mueller", action: "approve" }],
+      }),
+      url: "http://127.0.0.1:3000/today",
+      httpOnly: true,
+      sameSite: "Lax",
+    },
+  ]);
+
+  await page.getByRole("button", { name: "Angebot senden" }).click();
+  await expect(page.getByLabel("Entscheidungsfehler")).toBeVisible();
+  await page.reload();
+
+  await expect(page.getByRole("heading", { name: "Besichtigung Weber als nächsten Schritt einplanen" })).toBeVisible();
+  await expect(page.getByText("Atlas hat heute 4 Entscheidungen vorbereitet.")).toBeVisible();
 });
 
 test("Details lassen sich öffnen und schließen", async ({ page }) => {

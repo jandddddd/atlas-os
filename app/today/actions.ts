@@ -1,6 +1,15 @@
 "use server";
 
 import { fixtureTodayDecisionRepository } from "@/lib/today/fixture-decision-repository";
+import {
+  getTodayDecisionStateFromCookie,
+  saveTodayDecisionStateToCookie,
+} from "@/lib/today/today-decision-cookie";
+import {
+  applyTodayDecisionState,
+  recordTodayDecisionAction,
+  restrictTodayDecisionStateToKnownDecisions,
+} from "@/lib/today/today-decision-state";
 import type {
   TodayDecisionAction,
   TodayDecisionCommand,
@@ -30,12 +39,29 @@ export async function submitTodayDecision(
     return { success: false, error: "invalid-action" };
   }
 
-  const decisions = await fixtureTodayDecisionRepository.getTodayDecisions();
+  const [decisions, persistedState] = await Promise.all([
+    fixtureTodayDecisionRepository.getTodayDecisions(),
+    getTodayDecisionStateFromCookie(),
+  ]);
   const decisionExists = decisions.some((decision) => decision.id === command.decisionId);
 
   if (!decisionExists) {
     return { success: false, error: "decision-not-found" };
   }
+
+  const state = restrictTodayDecisionStateToKnownDecisions(persistedState, decisions);
+  const [currentDecision] = applyTodayDecisionState(decisions, state);
+
+  if (currentDecision?.id !== command.decisionId) {
+    return { success: false, error: "decision-not-current" };
+  }
+
+  await saveTodayDecisionStateToCookie(
+    recordTodayDecisionAction(state, {
+      decisionId: command.decisionId,
+      action: command.action,
+    }),
+  );
 
   return { success: true };
 }
