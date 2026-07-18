@@ -161,7 +161,7 @@ Regeln:
 
 Gute Beispiele:
 
-- Angebot freigeben
+- Angebot senden
 - Bestellung auslösen
 - Termin bestätigen
 - Nachricht senden
@@ -313,7 +313,7 @@ Beispielstruktur:
 - Begründung: Leistungsumfang und Kundennachricht passen zusammen; der Preis basiert auf den vorhandenen Angaben.
 - Unsicherheit: Die Flurfläche ist als Raumfläche genannt, aber nicht als Bearbeitungsfläche bestätigt.
 - Konsequenz: Nach Freigabe wird das Angebot an den Kunden gesendet.
-- Primäre Aktion: Angebot freigeben
+- Primäre Aktion: Angebot senden
 
 ### Materialbestellung
 
@@ -361,7 +361,7 @@ Beispielstruktur:
 - Begründung: Die abgerechneten Leistungen entsprechen dem dokumentierten Projektstand; ein zusätzlicher Arbeitsschritt wurde gesondert aufgeführt.
 - Unsicherheit: Die Zusatzleistung ist dokumentiert, aber die Kundenfreigabe für den Nachtrag sollte vor Versand geprüft werden.
 - Konsequenz: Nach Freigabe wird die Rechnung an den vorgesehenen Empfänger gesendet.
-- Primäre Aktion: Rechnung freigeben
+- Primäre Aktion: Rechnung senden
 
 ### Kommunikation
 
