@@ -3,10 +3,10 @@
 import { Button } from "@/components/ui/Button";
 
 type TodayErrorProps = {
-  reset: () => void;
+  unstable_retry: () => void;
 };
 
-export default function TodayError({ reset }: TodayErrorProps) {
+export default function TodayError({ unstable_retry }: TodayErrorProps) {
   return (
     <main className="min-h-screen bg-neutral-50">
       <div className="mx-auto flex min-h-screen max-w-6xl items-center px-6 py-10 sm:px-8 sm:py-14">
@@ -23,7 +23,7 @@ export default function TodayError({ reset }: TodayErrorProps) {
           <p className="mt-4 max-w-lg text-base leading-7">
             Bitte versuche es noch einmal. Wenn das Problem weiterhin besteht, prüfe die Seite später erneut.
           </p>
-          <Button className="mt-7" size="lg" type="button" onClick={reset}>
+          <Button className="mt-7" size="lg" type="button" onClick={unstable_retry}>
             Erneut versuchen
           </Button>
         </section>
