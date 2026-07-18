@@ -40,6 +40,7 @@ function normalizePersistedDecisions(values: unknown[]): PersistedTodayDecision[
   const decisions: PersistedTodayDecision[] = [];
 
   for (const value of values) {
+    // First valid entry wins so later cookie duplicates cannot override it.
     if (!isPersistedDecision(value) || decisionIds.has(value.decisionId)) {
       continue;
     }
