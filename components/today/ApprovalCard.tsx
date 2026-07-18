@@ -4,6 +4,8 @@ export type ApprovalCardAction = {
   label: string;
   href?: string;
   onSelect?: () => void;
+  controls?: string;
+  expanded?: boolean;
 };
 
 export type ApprovalCardContextItem = {
@@ -26,6 +28,15 @@ export type ApprovalCardProps = {
   consequence: string;
   primaryAction: ApprovalCardAction;
   secondaryActions: ApprovalCardAction[];
+  details?: {
+    id: string;
+    title: string;
+    items: string[];
+    isVisible: boolean;
+  };
+  notice?: {
+    text: string;
+  };
 };
 
 type ActionStyle = "primary" | "secondary";
@@ -63,7 +74,13 @@ function ApprovalCardActionControl({
 
   if (action.onSelect) {
     return (
-      <button type="button" className={className} onClick={action.onSelect}>
+      <button
+        type="button"
+        className={className}
+        aria-controls={action.controls}
+        aria-expanded={action.expanded}
+        onClick={action.onSelect}
+      >
         {action.label}
       </button>
     );
@@ -87,6 +104,8 @@ export function ApprovalCard({
   consequence,
   primaryAction,
   secondaryActions,
+  details,
+  notice,
 }: ApprovalCardProps) {
   return (
     <section aria-labelledby="priority-decision" className="space-y-5">
@@ -191,6 +210,33 @@ export function ApprovalCard({
               </section>
             </aside>
           </div>
+
+          {notice ? (
+            <p className="rounded-3xl bg-neutral-50 px-5 py-4 text-sm leading-6 text-neutral-600">
+              {notice.text}
+            </p>
+          ) : null}
+
+          {details?.isVisible ? (
+            <section
+              id={details.id}
+              aria-label={details.title}
+              className="rounded-3xl border border-neutral-200 bg-white p-6"
+            >
+              <h4 className="text-sm font-medium text-neutral-500">{details.title}</h4>
+              <ul className="mt-4 space-y-3 text-sm leading-6 text-neutral-600">
+                {details.items.map((item) => (
+                  <li key={item} className="flex gap-3">
+                    <span
+                      aria-hidden="true"
+                      className="mt-2.5 h-1.5 w-1.5 shrink-0 rounded-full bg-neutral-300"
+                    />
+                    <span>{item}</span>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          ) : null}
 
           <div className="flex flex-col gap-3 border-t border-neutral-200 pt-7 sm:flex-row sm:items-center">
             <ApprovalCardActionControl action={primaryAction} style="primary" />
