@@ -91,6 +91,59 @@ Zusätzlich:
 - Behaupte nie, eine Prüfung sei erfolgreich gewesen, wenn sie nicht ausgeführt wurde.
 - Prüfe vor Abschluss `git status` und den vollständigen Diff auf unbeabsichtigte Änderungen.
 
+## Definition of Done für Codex-Aufgaben
+
+Eine Codex-Aufgabe gilt erst als fertig, wenn die Akzeptanzkriterien erfüllt, die relevanten Prüfungen bestanden und bekannte Einschränkungen transparent dokumentiert sind.
+
+### Verbindliche Abschlussprüfungen
+
+Führe vor Abschluss einer Aufgabe – soweit im Repository verfügbar – aus:
+
+- `npm ci`
+- `npm run lint`
+- `npm run build`
+- passende Tests für die Änderung
+- `git diff --check`
+
+Wenn die Codex-Umgebung einen Schritt wegen einer externen Registry-, Proxy- oder Netzwerkbeschränkung nicht ausführen kann:
+
+- dokumentiere die Ursache klar,
+- behaupte nicht, der Schritt sei erfolgreich gewesen,
+- nenne GitHub Actions als abschließende Validierung.
+
+### Tests
+
+- Neue Funktionen und Fehlerbehebungen benötigen passende Tests. Erweitere bestehende Tests oder ergänze neue Tests.
+- Reine Text- oder Dokumentationsänderungen sind von der Pflicht zu neuen oder erweiterten Tests ausgenommen.
+
+### Playwright
+
+- Playwright-Tests müssen auf einem frischen Checkout funktionieren.
+- Playwright-Tests dürfen nicht von einem alten `.next`-Build abhängen.
+- Externe KI- oder Claude-Aufrufe müssen gemockt werden.
+- Mocks müssen den echten bestehenden TypeScript-Datenverträgen entsprechen.
+- Verwende robuste, eindeutige Locators.
+
+### Dependencies
+
+- `package.json` und `package-lock.json` müssen synchron sein.
+- Flicke `package-lock.json` nicht manuell.
+- Aktualisiere das Lockfile nur über den normalen npm-Workflow.
+- Füge keine unnötigen neuen Abhängigkeiten hinzu.
+
+### Produktcode
+
+- Ändere nichts außerhalb des Aufgabenumfangs.
+- Erfinde keine fachlichen Daten.
+- Verwende bestehende Architektur und Typen wieder.
+- Committe keine API-Schlüssel oder Secrets.
+
+### Pull Requests
+
+- Merge Pull Requests nicht selbst.
+- Fasse geänderte Dateien, Testergebnisse und bekannte Risiken zusammen.
+- Korrigiere bei fehlgeschlagenen Checks den bestehenden Pull Request, statt einen neuen parallelen Pull Request zu erstellen.
+
 ## Abschlussbericht
 
 Nenne am Ende:
