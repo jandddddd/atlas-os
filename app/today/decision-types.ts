@@ -9,5 +9,5 @@ export type TodayDecisionResult =
   | { success: true }
   | {
       success: false;
-      error: "invalid-decision-id" | "invalid-action" | "decision-not-found";
+      error: "invalid-decision-id" | "invalid-action" | "decision-not-found" | "decision-not-current";
     };

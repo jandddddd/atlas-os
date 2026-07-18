@@ -1,5 +1,7 @@
 import { TodayApprovalCenter } from "@/components/today/TodayApprovalCenter";
 import { fixtureTodayDecisionRepository } from "@/lib/today/fixture-decision-repository";
+import { getTodayDecisionStateFromCookie } from "@/lib/today/today-decision-cookie";
+import { applyTodayDecisionState } from "@/lib/today/today-decision-state";
 
 export const dynamic = "force-dynamic";
 
@@ -33,9 +35,10 @@ function getCompletionStatus({
 }
 
 export default async function TodayPage({ searchParams }: TodayPageProps) {
-  const [params, decisions] = await Promise.all([
+  const [params, decisions, persistedState] = await Promise.all([
     searchParams,
     fixtureTodayDecisionRepository.getTodayDecisions(),
+    getTodayDecisionStateFromCookie(),
   ]);
   const completionStatus = getCompletionStatus(params);
   const todayLabel = dateFormatter.format(new Date());
@@ -46,7 +49,7 @@ export default async function TodayPage({ searchParams }: TodayPageProps) {
         <TodayApprovalCenter
           dateLabel={todayLabel}
           initialCompletionStatus={completionStatus}
-          decisions={decisions}
+          decisions={applyTodayDecisionState(decisions, persistedState)}
         />
       </div>
     </main>
