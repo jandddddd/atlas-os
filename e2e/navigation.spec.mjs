@@ -71,7 +71,67 @@ test("Today-Seite ist erreichbar", async ({ page }) => {
 
   await expect(page).toHaveURL("/today");
   await expect(page.getByRole("heading", { name: "Guten Morgen." })).toBeVisible();
+  await expect(page.getByText("Atlas hat heute 5 Entscheidungen vorbereitet.")).toBeVisible();
   await expect(page.getByRole("heading", { name: "Heute zuerst" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Angebot für Familie Müller freigeben und senden" })).toHaveCount(1);
+  await expect(page.getByRole("heading", { name: "Angebotsentwurf Müller prüfen" })).toHaveCount(0);
+});
+
+test("Freigeben entfernt die Priorität und rückt die nächste Entscheidung nach", async ({ page }) => {
+  await page.goto("/today");
+
+  await page.getByRole("button", { name: "Angebot senden" }).click();
+
+  await expect(page).toHaveURL("/today");
+  await expect(page.getByLabel("Aktueller Abschluss")).toContainText("Angebot für Familie Müller wurde freigegeben.");
+  await expect(page.getByRole("heading", { name: "Angebot für Familie Müller freigeben und senden" })).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "Besichtigung Weber als nächsten Schritt einplanen" })).toBeVisible();
+  await expect(page.getByText("Atlas hat heute 4 Entscheidungen vorbereitet.")).toBeVisible();
+});
+
+test("Später entscheiden verschiebt die Priorität ans Ende", async ({ page }) => {
+  await page.goto("/today");
+
+  await page.getByRole("button", { name: "Später entscheiden" }).click();
+
+  await expect(page).toHaveURL("/today");
+  await expect(page.getByRole("heading", { name: "Besichtigung Weber als nächsten Schritt einplanen" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Angebotsentwurf Müller prüfen" })).toBeVisible();
+  await expect(page.getByText("Atlas hat heute 5 Entscheidungen vorbereitet.")).toBeVisible();
+});
+
+test("Details lassen sich öffnen und schließen", async ({ page }) => {
+  await page.goto("/today");
+
+  const detailsButton = page.getByRole("button", { name: "Details ansehen" });
+  await expect(detailsButton).toHaveAttribute("aria-expanded", "false");
+
+  await detailsButton.click();
+
+  await expect(page.getByRole("button", { name: "Details ausblenden" })).toHaveAttribute("aria-expanded", "true");
+  await expect(page.getByLabel("Details zum Angebotsentwurf")).toBeVisible();
+
+  await page.getByRole("button", { name: "Details ausblenden" }).click();
+
+  await expect(page.getByRole("button", { name: "Details ansehen" })).toHaveAttribute("aria-expanded", "false");
+  await expect(page.getByLabel("Details zum Angebotsentwurf")).toHaveCount(0);
+});
+
+test("Ändern erzeugt keinen falschen Abschlussstatus", async ({ page }) => {
+  await page.goto("/today");
+
+  await page.getByRole("link", { name: "Ändern" }).click();
+
+  await expect(page).toHaveURL("/today/tasks/offer-mueller");
+  await expect(page.getByRole("heading", { name: "Angebot Müller prüfen" })).toBeVisible();
+  await expect(page.getByLabel("Abschlusszustand")).toHaveCount(0);
+});
+
+test("Nicht implementierte Sekundäraktionen werden nicht angeboten", async ({ page }) => {
+  await page.goto("/today");
+
+  await expect(page.getByText("Rückfrage stellen")).toHaveCount(0);
+  await expect(page.getByText("Später entscheiden")).toBeVisible();
 });
 
 test("Today-Seite zeigt Abschlusszustand nach Angebotsfreigabe", async ({ page }) => {
@@ -79,8 +139,8 @@ test("Today-Seite zeigt Abschlusszustand nach Angebotsfreigabe", async ({ page }
 
   await expect(page).toHaveURL("/today?offerApproved=true");
   await expect(page.getByRole("heading", { name: "Guten Morgen." })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Heute zuerst" })).toBeVisible();
   await expect(page.getByLabel("Abschlusszustand")).toContainText("Angebot Müller wurde freigegeben.");
+  await expect(page.getByRole("heading", { name: "Angebot für Familie Müller freigeben und senden" })).toHaveCount(0);
 });
 
 test("Today-Seite zeigt Abschlusszustand nach Änderungsanforderung", async ({ page }) => {
@@ -88,8 +148,8 @@ test("Today-Seite zeigt Abschlusszustand nach Änderungsanforderung", async ({ p
 
   await expect(page).toHaveURL("/today?changeRequested=true");
   await expect(page.getByRole("heading", { name: "Guten Morgen." })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Heute zuerst" })).toBeVisible();
   await expect(page.getByLabel("Abschlusszustand")).toContainText("Änderung für Angebot Müller wurde angefordert.");
+  await expect(page.getByRole("heading", { name: "Angebot für Familie Müller freigeben und senden" })).toHaveCount(0);
 });
 
 test("Inbox ist erreichbar", async ({ page }) => {
