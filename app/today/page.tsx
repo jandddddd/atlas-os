@@ -1,5 +1,5 @@
 import { TodayApprovalCenter } from "@/components/today/TodayApprovalCenter";
-import { todayDecisionFixtures } from "@/lib/today/decision-fixtures";
+import { fixtureTodayDecisionRepository } from "@/lib/today/fixture-decision-repository";
 
 export const dynamic = "force-dynamic";
 
@@ -33,7 +33,10 @@ function getCompletionStatus({
 }
 
 export default async function TodayPage({ searchParams }: TodayPageProps) {
-  const params = await searchParams;
+  const [params, decisions] = await Promise.all([
+    searchParams,
+    fixtureTodayDecisionRepository.getTodayDecisions(),
+  ]);
   const completionStatus = getCompletionStatus(params);
   const todayLabel = dateFormatter.format(new Date());
 
@@ -43,7 +46,7 @@ export default async function TodayPage({ searchParams }: TodayPageProps) {
         <TodayApprovalCenter
           dateLabel={todayLabel}
           initialCompletionStatus={completionStatus}
-          decisions={todayDecisionFixtures}
+          decisions={decisions}
         />
       </div>
     </main>
