@@ -1,7 +1,8 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 
+import { submitTodayDecision } from "@/app/today/actions";
 import { ApprovalCard, type ApprovalCardProps } from "@/components/today/ApprovalCard";
 import { DecisionOverviewList } from "@/components/today/DecisionOverviewList";
 import { TodayCompletionNotice } from "@/components/today/TodayCompletionNotice";
@@ -61,6 +62,8 @@ export function TodayApprovalCenter({
   const [completionMessage, setCompletionMessage] = useState<string | null>(null);
   const [expandedDetailsId, setExpandedDetailsId] = useState<string | null>(null);
   const [editHintDecisionId, setEditHintDecisionId] = useState<string | null>(null);
+  const [submissionError, setSubmissionError] = useState(false);
+  const priorityDecisionSubmissionInProgress = useRef(false);
 
   const [priorityDecisionId, ...overviewDecisionIds] = visibleDecisionIds;
   const priorityDecision = priorityDecisionId
@@ -77,22 +80,62 @@ export function TodayApprovalCenter({
     }));
   const hasDecisions = visibleDecisionIds.length > 0;
 
-  function approvePriorityDecision() {
-    if (!priorityDecision) {
+  async function approvePriorityDecision() {
+    if (!priorityDecision || priorityDecisionSubmissionInProgress.current) {
       return;
     }
 
-    setCompletionMessage(priorityDecision.completionMessage);
-    setExpandedDetailsId(null);
-    setEditHintDecisionId(null);
-    setVisibleDecisionIds((currentDecisionIds) => currentDecisionIds.slice(1));
+    priorityDecisionSubmissionInProgress.current = true;
+    setSubmissionError(false);
+
+    try {
+      const result = await submitTodayDecision({
+        decisionId: priorityDecision.id,
+        action: "approve",
+      });
+
+      if (!result.success) {
+        setSubmissionError(true);
+        return;
+      }
+
+      setSubmissionError(false);
+      setCompletionMessage(priorityDecision.completionMessage);
+      setExpandedDetailsId(null);
+      setEditHintDecisionId(null);
+      setVisibleDecisionIds((currentDecisionIds) => currentDecisionIds.slice(1));
+    } finally {
+      priorityDecisionSubmissionInProgress.current = false;
+    }
   }
 
-  function postponePriorityDecision() {
-    setCompletionMessage(null);
-    setExpandedDetailsId(null);
-    setEditHintDecisionId(null);
-    setVisibleDecisionIds(moveFirstDecisionToEnd);
+  async function postponePriorityDecision() {
+    if (!priorityDecision || priorityDecisionSubmissionInProgress.current) {
+      return;
+    }
+
+    priorityDecisionSubmissionInProgress.current = true;
+    setSubmissionError(false);
+
+    try {
+      const result = await submitTodayDecision({
+        decisionId: priorityDecision.id,
+        action: "later",
+      });
+
+      if (!result.success) {
+        setSubmissionError(true);
+        return;
+      }
+
+      setSubmissionError(false);
+      setCompletionMessage(null);
+      setExpandedDetailsId(null);
+      setEditHintDecisionId(null);
+      setVisibleDecisionIds(moveFirstDecisionToEnd);
+    } finally {
+      priorityDecisionSubmissionInProgress.current = false;
+    }
   }
 
   function toggleDetails(decisionId: string) {
@@ -109,6 +152,16 @@ export function TodayApprovalCenter({
     <>
       <TodayHeader dateLabel={dateLabel} decisionCount={visibleDecisionIds.length} />
       <TodayCompletionNotice status={initialCompletionStatus} />
+
+      {submissionError ? (
+        <p
+          aria-label="Entscheidungsfehler"
+          role="alert"
+          className="rounded-3xl border border-amber-200 bg-amber-50 px-6 py-4 text-sm leading-6 text-amber-900"
+        >
+          Die Entscheidung konnte gerade nicht verarbeitet werden. Bitte versuche es erneut.
+        </p>
+      ) : null}
 
       {completionMessage ? (
         <section
