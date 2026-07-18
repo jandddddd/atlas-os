@@ -69,8 +69,27 @@ test("Startseite ist erreichbar", async ({ page }) => {
 test("Today-Seite ist erreichbar", async ({ page }) => {
   await page.goto("/today");
 
-  await expect(page.getByRole("heading", { name: /Guten Morgen, Jan/ })).toBeVisible();
+  await expect(page).toHaveURL("/today");
+  await expect(page.getByRole("heading", { name: "Guten Morgen." })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Heute zuerst" })).toBeVisible();
+});
+
+test("Today-Seite zeigt Abschlusszustand nach Angebotsfreigabe", async ({ page }) => {
+  await page.goto("/today?offerApproved=true");
+
+  await expect(page).toHaveURL("/today?offerApproved=true");
+  await expect(page.getByRole("heading", { name: "Guten Morgen." })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Heute zuerst" })).toBeVisible();
+  await expect(page.getByLabel("Abschlusszustand")).toContainText("Angebot Müller wurde freigegeben.");
+});
+
+test("Today-Seite zeigt Abschlusszustand nach Änderungsanforderung", async ({ page }) => {
+  await page.goto("/today?changeRequested=true");
+
+  await expect(page).toHaveURL("/today?changeRequested=true");
+  await expect(page.getByRole("heading", { name: "Guten Morgen." })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Heute zuerst" })).toBeVisible();
+  await expect(page.getByLabel("Abschlusszustand")).toContainText("Änderung für Angebot Müller wurde angefordert.");
 });
 
 test("Inbox ist erreichbar", async ({ page }) => {
@@ -88,5 +107,6 @@ test("Lieferantenangebot ist erreichbar und Zurück-Link funktioniert", async ({
   await page.getByRole("link", { name: "← Zurück zur Tagesübersicht" }).click();
 
   await expect(page).toHaveURL("/today");
-  await expect(page.getByRole("heading", { name: /Guten Morgen, Jan/ })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Guten Morgen." })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Heute zuerst" })).toBeVisible();
 });
