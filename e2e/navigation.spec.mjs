@@ -83,6 +83,13 @@ test("Der primäre Freigabe-Button ist sichtbar, erreichbar und rückt die näch
   const approveButton = page.getByRole("button", { name: "Angebot senden" });
   await expect(approveButton).toBeVisible();
   await expect(approveButton).toBeEnabled();
+  await expect(approveButton).toHaveText(/\S/);
+  await expect(approveButton).toHaveText("Angebot senden");
+
+  const approveButtonBox = await approveButton.boundingBox();
+  expect(approveButtonBox).not.toBeNull();
+  expect(approveButtonBox?.width).toBeGreaterThan(0);
+  expect(approveButtonBox?.height).toBeGreaterThan(0);
 
   await approveButton.focus();
   await expect(approveButton).toBeFocused();

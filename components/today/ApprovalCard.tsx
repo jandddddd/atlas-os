@@ -46,13 +46,20 @@ type ActionStyle = "primary" | "secondary";
 function getActionClassName(style: ActionStyle, isUnavailable: boolean) {
   if (style === "primary") {
     return isUnavailable
-      ? "inline-flex min-h-11 w-full cursor-not-allowed items-center justify-center rounded-xl bg-muted px-5 py-2.5 text-sm font-semibold text-muted-foreground sm:w-auto"
-      : "inline-flex min-h-11 w-full items-center justify-center rounded-xl bg-primary px-5 py-2.5 text-sm font-semibold text-primary-foreground shadow-sm transition hover:bg-primary/90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring sm:w-auto";
+      ? "inline-flex min-h-11 w-full cursor-not-allowed items-center justify-center rounded-xl bg-neutral-700 px-5 py-2.5 text-sm font-semibold text-white sm:w-auto"
+      : "inline-flex min-h-11 w-full items-center justify-center rounded-xl bg-neutral-900 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-neutral-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-neutral-900 sm:w-auto";
   }
 
   return isUnavailable
     ? "inline-flex min-h-10 cursor-not-allowed items-center justify-center rounded-xl px-4 py-2 text-sm font-medium text-muted-foreground"
     : "inline-flex min-h-10 items-center justify-center rounded-xl px-4 py-2 text-sm font-medium text-muted-foreground transition hover:bg-muted hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring";
+}
+
+function getVisibleActionLabel(action: ApprovalCardAction, style: ActionStyle) {
+  const label = action.isDisabled && action.pendingLabel ? action.pendingLabel : action.label;
+  const fallbackLabel = style === "primary" ? "Freigeben und senden" : "Aktion nicht verfügbar";
+
+  return label.trim() || fallbackLabel;
 }
 
 function ApprovalCardActionControl({
@@ -66,11 +73,12 @@ function ApprovalCardActionControl({
   const hasHandler = Boolean(action.onSelect);
   const isUnavailable = !hasLink && !hasHandler;
   const className = getActionClassName(style, isUnavailable || action.isDisabled === true);
+  const visibleLabel = getVisibleActionLabel(action, style);
 
   if (action.href && !action.isDisabled) {
     return (
       <a className={className} href={action.href}>
-        {action.label}
+        {visibleLabel}
       </a>
     );
   }
@@ -81,18 +89,20 @@ function ApprovalCardActionControl({
         type="button"
         className={className}
         disabled={action.isDisabled}
+        aria-label={visibleLabel}
+        data-testid={style === "primary" ? "approval-primary-action" : undefined}
         aria-controls={action.controls}
         aria-expanded={action.expanded}
         onClick={action.onSelect}
       >
-        {action.isDisabled && action.pendingLabel ? action.pendingLabel : action.label}
+        {visibleLabel}
       </button>
     );
   }
 
   return (
     <span aria-disabled="true" className={className} role="text">
-      {action.isDisabled && action.pendingLabel ? action.pendingLabel : action.label}
+      {visibleLabel}
     </span>
   );
 }
@@ -112,7 +122,7 @@ export function ApprovalCard({
   notice,
 }: ApprovalCardProps) {
   return (
-    <section aria-labelledby="priority-decision" className="space-y-4">
+    <section aria-labelledby="priority-decision" className="space-y-3">
       <div className="space-y-1">
         <p className="text-sm font-medium uppercase tracking-[0.18em] text-neutral-500">
           Priorität
@@ -125,9 +135,9 @@ export function ApprovalCard({
         </h2>
       </div>
 
-      <article className="rounded-[2rem] border border-border bg-card px-6 py-7 text-card-foreground shadow-sm sm:px-8 sm:py-8 lg:px-10">
-        <div className="mx-auto max-w-4xl space-y-7">
-          <header className="space-y-4">
+      <article className="rounded-[2rem] border border-border bg-card px-6 py-6 text-card-foreground shadow-sm sm:px-8 sm:py-7 lg:px-10">
+        <div className="mx-auto max-w-4xl space-y-6">
+          <header className="space-y-3">
             <p className="text-sm font-medium uppercase tracking-[0.18em] text-neutral-500">
               {decisionType}
             </p>
@@ -150,8 +160,8 @@ export function ApprovalCard({
             ))}
           </dl>
 
-          <div className="grid gap-6 lg:grid-cols-[1.1fr_0.9fr] lg:gap-8">
-            <div className="space-y-6">
+          <div className="grid gap-5 lg:grid-cols-[1.1fr_0.9fr] lg:gap-7">
+            <div className="space-y-5">
               <section aria-labelledby="atlas-recommendation" className="rounded-2xl border border-border px-5 py-4 space-y-2">
                 <p
                   id="atlas-recommendation"
