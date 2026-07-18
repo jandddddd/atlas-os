@@ -1,22 +1,13 @@
 "use server";
 
 import { fixtureTodayDecisionRepository } from "@/lib/today/fixture-decision-repository";
+import type {
+  TodayDecisionAction,
+  TodayDecisionCommand,
+  TodayDecisionResult,
+} from "@/app/today/decision-types";
 
 const todayDecisionActions = ["approve", "later"] as const;
-
-type TodayDecisionAction = (typeof todayDecisionActions)[number];
-
-type TodayDecisionCommand = {
-  decisionId: string;
-  action: TodayDecisionAction;
-};
-
-type TodayDecisionResult =
-  | { success: true }
-  | {
-      success: false;
-      error: "invalid-decision-id" | "invalid-action" | "decision-not-found";
-    };
 
 function isTodayDecisionAction(action: unknown): action is TodayDecisionAction {
   return todayDecisionActions.some((todayDecisionAction) => todayDecisionAction === action);
@@ -48,5 +39,3 @@ export async function submitTodayDecision(
 
   return { success: true };
 }
-
-export type { TodayDecisionAction, TodayDecisionCommand, TodayDecisionResult };
