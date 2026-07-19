@@ -8,12 +8,15 @@ import { DecisionOverviewList } from "@/components/today/DecisionOverviewList";
 import { TodayCompletionNotice } from "@/components/today/TodayCompletionNotice";
 import { TodayEmptyState } from "@/components/today/TodayEmptyState";
 import { TodayHeader } from "@/components/today/TodayHeader";
-import type { TodayDecisionPriorityExplanation } from "@/lib/today/decision-priority";
+import type {
+  TodayDecisionPriorityExplanation,
+  TodayDecisionPriorityFactors,
+} from "@/lib/today/decision-priority";
 
 type CompletionStatus = "offer-approved" | "change-requested" | null;
 type FeedbackStatus = "completed" | "deferred" | null;
 
-type TodayApprovalDecision = Omit<ApprovalCardProps, "primaryAction" | "secondaryActions" | "details" | "notice"> & {
+type TodayApprovalDecision = Omit<ApprovalCardProps, "primaryAction" | "secondaryActions" | "details" | "notice"> & TodayDecisionPriorityFactors & {
   id: string;
   overviewTitle: string;
   overviewContext: string;

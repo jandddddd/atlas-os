@@ -3,6 +3,8 @@ import type { TodayApprovalDecisionInput } from "@/components/today/TodayApprova
 export const todayDecisionFixtures: TodayApprovalDecisionInput[] = [
   {
     id: "offer-mueller",
+    urgency: "high",
+    economicImpact: "high",
     decisionType: "Angebot",
     title: "Angebot für Familie Müller freigeben und senden",
     overviewTitle: "Angebotsentwurf Müller prüfen",
@@ -40,6 +42,8 @@ export const todayDecisionFixtures: TodayApprovalDecisionInput[] = [
   },
   {
     id: "visit-weber",
+    urgency: "high",
+    economicImpact: "medium",
     decisionType: "Termin",
     title: "Besichtigung Weber als nächsten Schritt einplanen",
     overviewTitle: "Besichtigung Weber einordnen",
@@ -73,6 +77,8 @@ export const todayDecisionFixtures: TodayApprovalDecisionInput[] = [
   },
   {
     id: "supplier-selection",
+    urgency: "medium",
+    economicImpact: "high",
     decisionType: "Material",
     title: "Materialrückfrage für den nächsten Einkauf vormerken",
     overviewTitle: "Materialrückfrage vormerken",
@@ -101,6 +107,8 @@ export const todayDecisionFixtures: TodayApprovalDecisionInput[] = [
   },
   {
     id: "customer-reply",
+    urgency: "medium",
+    economicImpact: "medium",
     decisionType: "Kommunikation",
     title: "Kundenantwort als Entwurf prüfen",
     overviewTitle: "Kundenantwort prüfen",
@@ -129,6 +137,8 @@ export const todayDecisionFixtures: TodayApprovalDecisionInput[] = [
   },
   {
     id: "measurement-gap",
+    urgency: "low",
+    economicImpact: "low",
     decisionType: "Unsicherheit",
     title: "Fehlendes Maß vor der nächsten Einschätzung kennzeichnen",
     overviewTitle: "Fehlendes Maß kennzeichnen",

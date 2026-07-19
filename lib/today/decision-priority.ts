@@ -1,13 +1,13 @@
-/**
- * Orders the decisions supplied for Today without changing the existing
- * product priority. The source order is the current priority contract: an
- * earlier decision receives a higher score.
- *
- * Future factors such as risk or due dates can be added here as additional
- * score components while preserving this single entry point for ordering.
- */
+export type TodayDecisionUrgency = "low" | "medium" | "high";
+export type TodayDecisionEconomicImpact = "low" | "medium" | "high";
+
+export type TodayDecisionPriorityFactors = {
+  urgency: TodayDecisionUrgency;
+  economicImpact: TodayDecisionEconomicImpact;
+};
+
 export type TodayDecisionPriorityReason = {
-  code: "source-order" | "manual-priority";
+  code: "urgency" | "economic-impact" | "manual-priority";
   description: string;
 };
 
@@ -23,33 +23,56 @@ export type PrioritizedTodayDecision<TDecision> = {
 };
 
 export function calculateTodayDecisionPriority(
-  sourceIndex: number,
-  decisionCount: number,
+  factors: TodayDecisionPriorityFactors,
 ): number {
-  return Math.max(decisionCount - sourceIndex, 0);
+  return urgencyScores[factors.urgency] + economicImpactScores[factors.economicImpact];
 }
 
 function createTodayDecisionPriorityExplanation(
-  sourceIndex: number,
-  decisionCount: number,
+  factors: TodayDecisionPriorityFactors,
 ): TodayDecisionPriorityExplanation {
   return {
-    score: calculateTodayDecisionPriority(sourceIndex, decisionCount),
+    score: calculateTodayDecisionPriority(factors),
     reasons: [
       {
-        code: "source-order",
-        description:
-          sourceIndex === 0
-            ? "Diese Entscheidung steht in der bestehenden Today-Reihenfolge an erster Stelle."
-            : "Diese Entscheidung folgt der bestehenden Today-Reihenfolge.",
+        code: "urgency",
+        description: `Dringlichkeit: ${urgencyLabels[factors.urgency]}.`,
+      },
+      {
+        code: "economic-impact",
+        description: `Wirtschaftliche Auswirkung: ${economicImpactLabels[factors.economicImpact]}.`,
       },
     ],
   };
 }
 
+const urgencyScores: Record<TodayDecisionUrgency, number> = {
+  low: 0,
+  medium: 30,
+  high: 60,
+};
+
+const economicImpactScores: Record<TodayDecisionEconomicImpact, number> = {
+  low: 0,
+  medium: 10,
+  high: 20,
+};
+
+const urgencyLabels: Record<TodayDecisionUrgency, string> = {
+  low: "niedrig",
+  medium: "mittel",
+  high: "hoch",
+};
+
+const economicImpactLabels: Record<TodayDecisionEconomicImpact, string> = {
+  low: "niedrig",
+  medium: "mittel",
+  high: "hoch",
+};
+
 /**
  * Describes a manual Today reordering without changing the base score that
- * the Decision Engine calculated from the source order.
+ * the Decision Engine calculated from the priority factors.
  */
 export function createTodayDecisionManualPriorityExplanation(
   priority: TodayDecisionPriorityExplanation,
@@ -66,16 +89,16 @@ export function createTodayDecisionManualPriorityExplanation(
 }
 
 /**
- * Returns the current Today priority order. A numeric score is calculated for
- * every decision so future prioritization inputs can be added centrally.
+ * Returns the current Today priority order. Decisions with the same score keep
+ * their supplied order through the source-index tie-breaker.
  */
-export function prioritizeTodayDecisions<TDecision>(
+export function prioritizeTodayDecisions<TDecision extends TodayDecisionPriorityFactors>(
   decisions: TDecision[],
 ): PrioritizedTodayDecision<TDecision>[] {
   return decisions
     .map((decision, sourceIndex): PrioritizedTodayDecision<TDecision> => ({
       decision,
-      priority: createTodayDecisionPriorityExplanation(sourceIndex, decisions.length),
+      priority: createTodayDecisionPriorityExplanation(decision),
       sourceIndex,
     }))
     .sort(
