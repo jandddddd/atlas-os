@@ -1,6 +1,6 @@
-import type { TodayApprovalDecision } from "@/components/today/TodayApprovalCenter";
+import type { TodayApprovalDecisionInput } from "@/components/today/TodayApprovalCenter";
 
-export const todayDecisionFixtures: TodayApprovalDecision[] = [
+export const todayDecisionFixtures: TodayApprovalDecisionInput[] = [
   {
     id: "offer-mueller",
     decisionType: "Angebot",
@@ -16,13 +16,6 @@ export const todayDecisionFixtures: TodayApprovalDecision[] = [
     ],
     summary:
       "Atlas hat einen Angebotsentwurf aus der Anfrage vorbereitet. Vor dem Versand braucht der Entwurf die bewusste Freigabe durch den Betrieb.",
-    recommendation:
-      "Atlas empfiehlt, das Angebot nach kurzer Prüfung freizugeben und an Familie Müller zu senden.",
-    rationale: [
-      "Der Entwurf folgt den bekannten Kundenangaben aus der Anfrage.",
-      "Die Leistung ist als Angebot vorbereitet und noch nicht verbindlich versendet.",
-      "Die Freigabe hält den Vorgang im Fluss, ohne die menschliche Prüfung zu ersetzen.",
-    ],
     uncertainty: {
       title: "Bitte kurz prüfen",
       description:
@@ -60,12 +53,6 @@ export const todayDecisionFixtures: TodayApprovalDecision[] = [
     ],
     summary:
       "Atlas hat die Besichtigung als nächsten sinnvollen Schritt vorbereitet. Die Terminabstimmung soll geprüft werden, bevor sie bestätigt wird.",
-    recommendation:
-      "Atlas empfiehlt, die Besichtigung als nächste Entscheidung zu prüfen.",
-    rationale: [
-      "Für eine belastbare Einschätzung fehlen noch Eindrücke vor Ort.",
-      "Die Entscheidung hält den Vorgang sichtbar, ohne bereits eine Terminbestätigung zu senden.",
-    ],
     uncertainty: {
       title: "Termin noch prüfen",
       description: "Die Rückmeldung zum genauen Zeitfenster ist noch nicht verbindlich bestätigt.",
@@ -99,12 +86,6 @@ export const todayDecisionFixtures: TodayApprovalDecision[] = [
     ],
     summary:
       "Atlas hat eine Materialrückfrage als offene Entscheidung erkannt. Eine Auswahl wird noch nicht automatisch getroffen.",
-    recommendation:
-      "Atlas empfiehlt, die Rückfrage zunächst sichtbar zu halten und nicht ohne Prüfung auszulösen.",
-    rationale: [
-      "Für die Auswahl fehlen noch belastbare Vergleichsinformationen.",
-      "Die Entscheidung kann nach der nächsten Prüfung erneut priorisiert werden.",
-    ],
     consequence:
       "Mit der Freigabe bleibt die Materialrückfrage als geprüfter nächster Schritt vorgemerkt.",
     primaryActionLabel: "Rückfrage vormerken",
@@ -133,12 +114,6 @@ export const todayDecisionFixtures: TodayApprovalDecision[] = [
     ],
     summary:
       "Atlas hat eine Kundenantwort als prüfpflichtigen Punkt markiert. Der Entwurf soll vor einer externen Nachricht bewusst geprüft werden.",
-    recommendation:
-      "Atlas empfiehlt, die Antwort erst nach kurzer Prüfung freizugeben.",
-    rationale: [
-      "Externe Kommunikation bleibt vor dem Versand unter menschlicher Kontrolle.",
-      "Der Entwurf ist sichtbar, ohne schon eine Nachricht zu senden.",
-    ],
     consequence:
       "Mit der Freigabe wird der Antwortentwurf als geprüft vorgemerkt.",
     primaryActionLabel: "Antwort vormerken",
@@ -167,12 +142,6 @@ export const todayDecisionFixtures: TodayApprovalDecision[] = [
     ],
     summary:
       "Atlas hat erkannt, dass ein Maß fehlt. Ohne diese Angabe soll keine scheinbar genaue Einschätzung entstehen.",
-    recommendation:
-      "Atlas empfiehlt, die fehlende Angabe sichtbar zu kennzeichnen.",
-    rationale: [
-      "Fehlende Maße können Preise, Mengen und Aufwand beeinflussen.",
-      "Die Kennzeichnung verhindert, dass die Raumfläche automatisch als Bearbeitungsfläche verstanden wird.",
-    ],
     uncertainty: {
       title: "Angabe fehlt",
       description: "Das benötigte Maß liegt noch nicht belastbar vor.",

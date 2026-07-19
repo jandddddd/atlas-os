@@ -26,6 +26,8 @@ type TodayApprovalDecision = Omit<ApprovalCardProps, "primaryAction" | "secondar
   };
 };
 
+type TodayApprovalDecisionInput = Omit<TodayApprovalDecision, "priority">;
+
 type TodayApprovalCenterProps = {
   dateLabel: string;
   initialCompletionStatus: CompletionStatus;
@@ -293,4 +295,4 @@ export function TodayApprovalCenter({
   );
 }
 
-export type { TodayApprovalDecision };
+export type { TodayApprovalDecision, TodayApprovalDecisionInput };

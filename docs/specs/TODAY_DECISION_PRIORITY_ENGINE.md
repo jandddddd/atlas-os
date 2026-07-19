@@ -4,8 +4,20 @@
 
 Die Decision Engine ist der zentrale Einstiegspunkt für die fachliche
 Reihenfolge der Entscheidungen auf Today. Sie erzeugt für jede aus dem
-Repository gelieferte Entscheidung einen numerischen Priority Score und gibt
-die Entscheidungen danach sortiert zurück.
+Repository gelieferte Entscheidung einen numerischen Priority Score, eine
+strukturierte Explainability und gibt die Entscheidungen danach sortiert zurück.
+
+## Explainability
+
+Jedes priorisierte Ergebnis enthält neben der Entscheidung die `priority` mit
+`score` und einer Liste von `reasons`. Der aktuelle Grund verwendet den Code
+`source-order` und beschreibt ausschließlich den bestehenden Prioritätsvertrag.
+So kann Atlas nachvollziehbar erklären, warum eine Entscheidung in der
+Grundreihenfolge steht, ohne diese Reihenfolge zu verändern.
+
+Die Approval Card zeigt diese von der Engine gelieferten Gründe. Sie erzeugt
+keine eigenen Priorisierungsbegründungen, damit Anzeige und fachliche
+Priorisierung nicht auseinanderlaufen.
 
 ## Aktueller Score
 
@@ -24,6 +36,7 @@ angewendet.
 Neue Faktoren wie Risiko, Dringlichkeit, wirtschaftlicher Wert, Fälligkeit
 oder KI-Empfehlungen werden nicht in UI-Komponenten oder Stores ergänzt.
 Stattdessen werden sie als weitere, dokumentierte Score-Komponenten in
-`calculateTodayDecisionPriority` aufgenommen. Dabei müssen ihre Eingabedaten
-zur Laufzeit an der jeweiligen Systemgrenze validiert werden und bestehende
-Prioritäten durch passende Unit-Tests abgesichert bleiben.
+`calculateTodayDecisionPriority` aufgenommen und erhalten jeweils einen
+zusätzlichen strukturierten Grund in `priority.reasons`. Dabei müssen ihre
+Eingabedaten zur Laufzeit an der jeweiligen Systemgrenze validiert werden und
+bestehende Prioritäten durch passende Unit-Tests abgesichert bleiben.

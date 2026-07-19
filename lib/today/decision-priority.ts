@@ -6,6 +6,22 @@
  * Future factors such as risk or due dates can be added here as additional
  * score components while preserving this single entry point for ordering.
  */
+export type TodayDecisionPriorityReason = {
+  code: "source-order";
+  description: string;
+};
+
+export type TodayDecisionPriorityExplanation = {
+  score: number;
+  reasons: TodayDecisionPriorityReason[];
+};
+
+export type PrioritizedTodayDecision<TDecision> = {
+  decision: TDecision;
+  priority: TodayDecisionPriorityExplanation;
+  sourceIndex: number;
+};
+
 export function calculateTodayDecisionPriority(
   sourceIndex: number,
   decisionCount: number,
@@ -13,11 +29,23 @@ export function calculateTodayDecisionPriority(
   return Math.max(decisionCount - sourceIndex, 0);
 }
 
-type PrioritizedDecision<TDecision> = {
-  decision: TDecision;
-  priorityScore: number;
-  sourceIndex: number;
-};
+function createTodayDecisionPriorityExplanation(
+  sourceIndex: number,
+  decisionCount: number,
+): TodayDecisionPriorityExplanation {
+  return {
+    score: calculateTodayDecisionPriority(sourceIndex, decisionCount),
+    reasons: [
+      {
+        code: "source-order",
+        description:
+          sourceIndex === 0
+            ? "Diese Entscheidung steht in der bestehenden Today-Reihenfolge an erster Stelle."
+            : "Diese Entscheidung folgt der bestehenden Today-Reihenfolge.",
+      },
+    ],
+  };
+}
 
 /**
  * Returns the current Today priority order. A numeric score is calculated for
@@ -25,16 +53,15 @@ type PrioritizedDecision<TDecision> = {
  */
 export function prioritizeTodayDecisions<TDecision>(
   decisions: TDecision[],
-): TDecision[] {
+): PrioritizedTodayDecision<TDecision>[] {
   return decisions
-    .map((decision, sourceIndex): PrioritizedDecision<TDecision> => ({
+    .map((decision, sourceIndex): PrioritizedTodayDecision<TDecision> => ({
       decision,
-      priorityScore: calculateTodayDecisionPriority(sourceIndex, decisions.length),
+      priority: createTodayDecisionPriorityExplanation(sourceIndex, decisions.length),
       sourceIndex,
     }))
     .sort(
       (left, right) =>
-        right.priorityScore - left.priorityScore || left.sourceIndex - right.sourceIndex,
-    )
-    .map(({ decision }) => decision);
+        right.priority.score - left.priority.score || left.sourceIndex - right.sourceIndex,
+    );
 }
