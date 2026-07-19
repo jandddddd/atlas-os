@@ -133,7 +133,9 @@ export function TodayApprovalCenter({
       }
 
       setSubmissionError(false);
-      setCompletionMessage(null);
+      setCompletionMessage(
+        "Die Entscheidung wurde für später eingeordnet. Atlas zeigt dir jetzt den nächsten Punkt.",
+      );
       setExpandedDetailsId(null);
       setEditHintDecisionId(null);
       setVisibleDecisionIds(
@@ -186,7 +188,7 @@ export function TodayApprovalCenter({
   }
 
   return (
-    <>
+    <div className="space-y-8 sm:space-y-10">
       <TodayHeader dateLabel={dateLabel} decisionCount={visibleDecisionIds.length} />
       <TodayCompletionNotice status={initialCompletionStatus} />
 
@@ -203,12 +205,23 @@ export function TodayApprovalCenter({
       {completionMessage ? (
         <section
           aria-label="Aktueller Abschluss"
-          className="rounded-[2rem] border border-emerald-100 bg-white px-7 py-6 text-neutral-700 shadow-sm sm:px-10"
+          aria-live="polite"
+          className="rounded-[2rem] border border-neutral-200 bg-white px-6 py-5 text-neutral-700 shadow-sm sm:px-8"
         >
-          <p className="text-sm font-medium uppercase tracking-[0.18em] text-emerald-700">
-            Erledigt
-          </p>
-          <p className="mt-3 text-lg leading-8">{completionMessage}</p>
+          <div className="flex gap-4">
+            <span
+              aria-hidden="true"
+              className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full bg-neutral-950 text-sm font-semibold text-white"
+            >
+              ✓
+            </span>
+            <div>
+              <p className="text-sm font-medium uppercase tracking-[0.18em] text-neutral-500">
+                Erledigt
+              </p>
+              <p className="mt-1.5 text-base leading-7 text-neutral-700">{completionMessage}</p>
+            </div>
+          </div>
         </section>
       ) : null}
 
@@ -267,7 +280,7 @@ export function TodayApprovalCenter({
       ) : (
         <TodayEmptyState isVisible />
       )}
-    </>
+    </div>
   );
 }
 
