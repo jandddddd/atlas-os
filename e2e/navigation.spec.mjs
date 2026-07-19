@@ -145,6 +145,15 @@ test("Eine weitere Entscheidung wird zur Priorität, ohne die Queue zu veränder
   ).toBeVisible();
   await expect(page.getByRole("button", { name: "Angebotsentwurf Müller prüfen" })).toBeVisible();
   await expect(page.getByText("Atlas hat heute 5 Entscheidungen vorbereitet.")).toBeVisible();
+
+  await page.reload();
+
+  await expect(
+    page.getByRole("heading", { name: "Materialrückfrage für den nächsten Einkauf vormerken" }),
+  ).toBeVisible();
+  await expect(
+    page.getByText("Diese Entscheidung wurde manuell für Heute zuerst priorisiert."),
+  ).toBeVisible();
 });
 
 test("Eine neu priorisierte Entscheidung kann sofort freigegeben werden", async ({ page }) => {
@@ -219,6 +228,9 @@ test("Der primäre Freigabe-Button ist sichtbar, erreichbar und rückt die näch
   await expect(page.getByLabel("Aktueller Abschluss")).toContainText("Angebot für Familie Müller wurde freigegeben.");
   await expect(page.getByRole("heading", { name: offerTitle })).toHaveCount(0);
   await expectNextOpenDecision(page);
+  await expect(
+    page.getByText("Diese Entscheidung wurde manuell für Heute zuerst priorisiert."),
+  ).toHaveCount(0);
   await expect(page.getByText("Atlas hat heute 4 Entscheidungen vorbereitet.")).toBeVisible();
 });
 
@@ -322,6 +334,42 @@ test("Ein gültiger Cookie-Zustand wird gelesen", async ({ context, page }) => {
   await expect(page.getByText("Atlas hat heute 4 Entscheidungen vorbereitet.")).toBeVisible();
 });
 
+test("Ein Version-2-Cookie behält nur den manuellen Override", async ({ context, page }) => {
+  await context.addCookies([
+    {
+      name: todayDecisionCookieName,
+      value: JSON.stringify({
+        version: 2,
+        decisions: [],
+        decisionOrder: ["supplier-selection", "offer-mueller", "visit-weber"],
+      }),
+      url: "http://localhost:3000/today",
+      httpOnly: true,
+      sameSite: "Lax",
+    },
+  ]);
+
+  await page.goto("/today");
+
+  await expect(
+    page.getByRole("heading", { name: "Materialrückfrage für den nächsten Einkauf vormerken" }),
+  ).toBeVisible();
+  await expect(
+    page.getByText("Diese Entscheidung wurde manuell für Heute zuerst priorisiert."),
+  ).toBeVisible();
+
+  await page.getByRole("button", { name: "Rückfrage vormerken" }).click();
+
+  const decisionCookie = (await context.cookies(page.url())).find(
+    (cookie) => cookie.name === todayDecisionCookieName,
+  );
+  expect(decisionCookie).toBeDefined();
+  expect(JSON.parse(decodeURIComponent(decisionCookie.value))).toMatchObject({
+    version: 3,
+    manualPriorityDecisionId: null,
+  });
+});
+
 test("Doppelte decisionIds im Cookie behalten die erste gültige Aktion", async ({ context, page }) => {
   await context.addCookies([
     {
@@ -392,12 +440,14 @@ test("Die Freigabe schreibt ausschließlich das kompakte Entscheidungsmodell", a
 
   const persistedState = JSON.parse(decodeURIComponent(decisionCookie.value));
 
-  expect(persistedState.version).toBe(2);
+  expect(persistedState.version).toBe(3);
   expect(persistedState.decisions).toEqual([{ decisionId: "offer-mueller", action: "approve" }]);
-  expect(persistedState.decisionOrder).toHaveLength(5);
-  expect(new Set(persistedState.decisionOrder).size).toBe(5);
-  expect(persistedState.decisionOrder).toContain("offer-mueller");
-  expect(Object.keys(persistedState).sort()).toEqual(["decisionOrder", "decisions", "version"]);
+  expect(persistedState.manualPriorityDecisionId).toBeNull();
+  expect(Object.keys(persistedState).sort()).toEqual([
+    "decisions",
+    "manualPriorityDecisionId",
+    "version",
+  ]);
   expect(Object.keys(persistedState.decisions[0]).sort()).toEqual(["action", "decisionId"]);
 });
 
