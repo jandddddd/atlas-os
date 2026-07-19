@@ -46,13 +46,13 @@ type ActionStyle = "primary" | "secondary";
 function getActionClassName(style: ActionStyle, isUnavailable: boolean) {
   if (style === "primary") {
     return isUnavailable
-      ? "inline-flex min-h-11 w-full cursor-not-allowed items-center justify-center rounded-xl bg-neutral-700 px-5 py-2.5 text-sm font-semibold text-white sm:w-auto"
-      : "inline-flex min-h-11 w-full items-center justify-center rounded-xl bg-neutral-900 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-neutral-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-neutral-900 sm:w-auto";
+      ? "inline-flex min-h-12 w-full cursor-not-allowed items-center justify-center rounded-xl bg-neutral-700 px-5 py-3 text-sm font-semibold text-white sm:w-auto"
+      : "inline-flex min-h-12 w-full items-center justify-center rounded-xl bg-neutral-950 px-6 py-3 text-sm font-semibold text-white shadow-md transition hover:bg-neutral-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-neutral-950 sm:w-auto";
   }
 
   return isUnavailable
-    ? "inline-flex min-h-10 cursor-not-allowed items-center justify-center rounded-xl px-4 py-2 text-sm font-medium text-muted-foreground"
-    : "inline-flex min-h-10 items-center justify-center rounded-xl px-4 py-2 text-sm font-medium text-muted-foreground transition hover:bg-muted hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring";
+    ? "inline-flex min-h-12 cursor-not-allowed items-center justify-center rounded-xl px-4 py-3 text-sm font-medium text-muted-foreground"
+    : "inline-flex min-h-12 items-center justify-center rounded-xl px-4 py-3 text-sm font-medium text-muted-foreground transition hover:bg-white hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-neutral-950";
 }
 
 function getVisibleActionLabel(action: ApprovalCardAction, style: ActionStyle) {
@@ -77,7 +77,7 @@ function ApprovalCardActionControl({
 
   if (action.href && !action.isDisabled) {
     return (
-      <a className={className} href={action.href}>
+      <a className={className} href={action.href} aria-label={visibleLabel}>
         {visibleLabel}
       </a>
     );
@@ -135,7 +135,7 @@ export function ApprovalCard({
         </h2>
       </div>
 
-      <article className="rounded-[2rem] border border-border bg-card px-6 py-6 text-card-foreground shadow-sm sm:px-8 sm:py-7 lg:px-10">
+      <article className="rounded-[2rem] border border-border bg-card px-6 py-6 text-card-foreground shadow-sm sm:px-8 sm:py-8 lg:px-10">
         <div className="mx-auto max-w-4xl space-y-6">
           <header className="space-y-3">
             <p className="text-sm font-medium uppercase tracking-[0.18em] text-neutral-500">
@@ -151,9 +151,12 @@ export function ApprovalCard({
             </div>
           </header>
 
-          <dl className="grid gap-4 rounded-2xl bg-muted/60 px-5 py-4 sm:grid-cols-3">
+          <dl className="grid overflow-hidden rounded-2xl border border-border bg-muted/60 sm:grid-cols-3">
             {context.map((item) => (
-              <div key={`${item.label}-${item.value}`} className="space-y-1">
+              <div
+                key={`${item.label}-${item.value}`}
+                className="space-y-1 border-b border-border px-5 py-4 last:border-b-0 sm:border-b-0 sm:border-r sm:last:border-r-0"
+              >
                 <dt className="text-sm text-neutral-500">{item.label}</dt>
                 <dd className="text-base font-medium text-neutral-900">{item.value}</dd>
               </div>
@@ -162,19 +165,19 @@ export function ApprovalCard({
 
           <div className="grid gap-5 lg:grid-cols-[1.1fr_0.9fr] lg:gap-7">
             <div className="space-y-5">
-              <section aria-labelledby="atlas-recommendation" className="rounded-2xl border border-border px-5 py-4 space-y-2">
+              <section aria-labelledby="atlas-recommendation" className="rounded-2xl bg-neutral-950 px-5 py-5 text-white shadow-sm space-y-2">
                 <p
                   id="atlas-recommendation"
-                  className="text-sm font-medium text-neutral-500"
+                  className="text-sm font-medium text-neutral-300"
                 >
                   Empfehlung von Atlas
                 </p>
-                <p className="text-xl font-semibold leading-8 text-neutral-950">
+                <p className="text-xl font-semibold leading-8 text-white">
                   {recommendation}
                 </p>
               </section>
 
-              <section aria-labelledby="atlas-rationale" className="space-y-3">
+              <section aria-labelledby="atlas-rationale" className="rounded-2xl border border-border px-5 py-5 space-y-3">
                 <h4
                   id="atlas-rationale"
                   className="text-sm font-medium text-neutral-500"
@@ -195,9 +198,9 @@ export function ApprovalCard({
               </section>
             </div>
 
-            <aside className="space-y-5 rounded-2xl bg-muted/60 p-5">
+            <aside className="space-y-4 rounded-2xl bg-muted/60 p-5">
               {uncertainty ? (
-                <section aria-labelledby="atlas-uncertainty" className="space-y-3">
+                <section aria-labelledby="atlas-uncertainty" className="border-l-2 border-neutral-950 pl-4 space-y-2">
                   <h4
                     id="atlas-uncertainty"
                     className="text-sm font-medium text-neutral-500"
@@ -207,13 +210,13 @@ export function ApprovalCard({
                   <p className="text-base leading-7 text-neutral-700">
                     {uncertainty.description}
                   </p>
-                  <p className="text-sm leading-6 text-neutral-500">
+                  <p className="text-sm leading-6 text-neutral-600">
                     {uncertainty.nextStep}
                   </p>
                 </section>
               ) : null}
 
-              <section aria-labelledby="atlas-consequence" className="space-y-3">
+              <section aria-labelledby="atlas-consequence" className="border-t border-neutral-200 pt-4 space-y-2">
                 <h4
                   id="atlas-consequence"
                   className="text-sm font-medium text-neutral-500"
@@ -252,11 +255,11 @@ export function ApprovalCard({
             </section>
           ) : null}
 
-          <div className="flex flex-col gap-3 border-t border-border pt-5 sm:flex-row sm:flex-wrap sm:items-center">
+          <div className="flex flex-col gap-4 border-t border-border pt-6 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
             <div className="w-full sm:w-auto">
               <ApprovalCardActionControl action={primaryAction} style="primary" />
             </div>
-            <div className="flex flex-wrap gap-1 sm:ml-1">
+            <div className="flex flex-wrap gap-1 rounded-2xl bg-muted/60 p-1">
               {secondaryActions.map((action) => (
                 <ApprovalCardActionControl
                   key={action.label}

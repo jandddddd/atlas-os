@@ -10,6 +10,7 @@ import { TodayEmptyState } from "@/components/today/TodayEmptyState";
 import { TodayHeader } from "@/components/today/TodayHeader";
 
 type CompletionStatus = "offer-approved" | "change-requested" | null;
+type FeedbackStatus = "completed" | "deferred" | null;
 
 type TodayApprovalDecision = Omit<ApprovalCardProps, "primaryAction" | "secondaryActions" | "details" | "notice"> & {
   id: string;
@@ -58,6 +59,7 @@ export function TodayApprovalCenter({
     ),
   );
   const [completionMessage, setCompletionMessage] = useState<string | null>(null);
+  const [feedbackStatus, setFeedbackStatus] = useState<FeedbackStatus>(null);
   const [expandedDetailsId, setExpandedDetailsId] = useState<string | null>(null);
   const [editHintDecisionId, setEditHintDecisionId] = useState<string | null>(null);
   const [submissionError, setSubmissionError] = useState(false);
@@ -101,6 +103,7 @@ export function TodayApprovalCenter({
 
       setSubmissionError(false);
       setCompletionMessage(priorityDecision.completionMessage);
+      setFeedbackStatus("completed");
       setExpandedDetailsId(null);
       setEditHintDecisionId(null);
       setVisibleDecisionIds(
@@ -133,7 +136,10 @@ export function TodayApprovalCenter({
       }
 
       setSubmissionError(false);
-      setCompletionMessage(null);
+      setCompletionMessage(
+        "Die Entscheidung wurde für später eingeordnet. Atlas zeigt dir jetzt den nächsten Punkt.",
+      );
+      setFeedbackStatus("deferred");
       setExpandedDetailsId(null);
       setEditHintDecisionId(null);
       setVisibleDecisionIds(
@@ -175,6 +181,7 @@ export function TodayApprovalCenter({
       }
 
       setCompletionMessage(null);
+      setFeedbackStatus(null);
       setExpandedDetailsId(null);
       setEditHintDecisionId(null);
       setVisibleDecisionIds(
@@ -186,7 +193,7 @@ export function TodayApprovalCenter({
   }
 
   return (
-    <>
+    <div className="space-y-8 sm:space-y-10">
       <TodayHeader dateLabel={dateLabel} decisionCount={visibleDecisionIds.length} />
       <TodayCompletionNotice status={initialCompletionStatus} />
 
@@ -203,12 +210,27 @@ export function TodayApprovalCenter({
       {completionMessage ? (
         <section
           aria-label="Aktueller Abschluss"
-          className="rounded-[2rem] border border-emerald-100 bg-white px-7 py-6 text-neutral-700 shadow-sm sm:px-10"
+          aria-live="polite"
+          className="rounded-[2rem] border border-neutral-200 bg-white px-6 py-5 text-neutral-700 shadow-sm sm:px-8"
         >
-          <p className="text-sm font-medium uppercase tracking-[0.18em] text-emerald-700">
-            Erledigt
-          </p>
-          <p className="mt-3 text-lg leading-8">{completionMessage}</p>
+          <div className="flex gap-4">
+            <span
+              aria-hidden="true"
+              className={
+                feedbackStatus === "deferred"
+                  ? "mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full bg-neutral-200 text-sm font-semibold text-neutral-700"
+                  : "mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full bg-neutral-950 text-sm font-semibold text-white"
+              }
+            >
+              {feedbackStatus === "deferred" ? "◷" : "✓"}
+            </span>
+            <div>
+              <p className="text-sm font-medium uppercase tracking-[0.18em] text-neutral-500">
+                {feedbackStatus === "deferred" ? "Zurückgestellt" : "Erledigt"}
+              </p>
+              <p className="mt-1.5 text-base leading-7 text-neutral-700">{completionMessage}</p>
+            </div>
+          </div>
         </section>
       ) : null}
 
@@ -267,7 +289,7 @@ export function TodayApprovalCenter({
       ) : (
         <TodayEmptyState isVisible />
       )}
-    </>
+    </div>
   );
 }
 
