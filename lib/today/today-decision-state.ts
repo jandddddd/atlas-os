@@ -85,7 +85,10 @@ export function parseTodayDecisionState(value: string | undefined): TodayDecisio
 }
 
 export function serializeTodayDecisionState(state: TodayDecisionState): string {
-  return JSON.stringify(state);
+  return JSON.stringify({
+    version: 1,
+    decisions: normalizePersistedDecisions(state.decisions),
+  });
 }
 
 export function restrictTodayDecisionStateToKnownDecisions(

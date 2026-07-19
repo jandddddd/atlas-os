@@ -2,14 +2,11 @@
 
 import { fixtureTodayDecisionRepository } from "@/lib/today/fixture-decision-repository";
 import {
-  getTodayDecisionStateFromCookie,
-  saveTodayDecisionStateToCookie,
-} from "@/lib/today/today-decision-cookie";
-import {
   applyTodayDecisionState,
   recordTodayDecisionAction,
   restrictTodayDecisionStateToKnownDecisions,
 } from "@/lib/today/today-decision-state";
+import { todayDecisionStateStore } from "@/lib/today/today-decision-state-store";
 import type {
   TodayDecisionAction,
   TodayDecisionCommand,
@@ -41,7 +38,7 @@ export async function submitTodayDecision(
 
   const [decisions, persistedState] = await Promise.all([
     fixtureTodayDecisionRepository.getTodayDecisions(),
-    getTodayDecisionStateFromCookie(),
+    todayDecisionStateStore.read(),
   ]);
   const decisionExists = decisions.some((decision) => decision.id === command.decisionId);
 
@@ -56,7 +53,7 @@ export async function submitTodayDecision(
     return { success: false, error: "decision-not-current" };
   }
 
-  await saveTodayDecisionStateToCookie(
+  await todayDecisionStateStore.write(
     recordTodayDecisionAction(state, {
       decisionId: command.decisionId,
       action: command.action,
