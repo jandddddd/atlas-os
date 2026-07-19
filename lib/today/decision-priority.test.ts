@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   calculateTodayDecisionPriority,
+  createTodayDecisionManualPriorityExplanation,
   prioritizeTodayDecisions,
 } from "./decision-priority.ts";
 
@@ -59,6 +60,20 @@ test("returns explainability for the unchanged source-order priority", () => {
       sourceIndex: 1,
     },
   ]);
+});
+
+test("returns a manual-priority explanation while preserving the base score", () => {
+  const [{ priority }] = prioritizeTodayDecisions([{ id: "first" }]);
+
+  assert.deepEqual(createTodayDecisionManualPriorityExplanation(priority), {
+    score: 1,
+    reasons: [
+      {
+        code: "manual-priority",
+        description: "Diese Entscheidung wurde manuell für Heute zuerst priorisiert.",
+      },
+    ],
+  });
 });
 
 test("keeps an empty decision list empty", () => {

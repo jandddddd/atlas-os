@@ -7,7 +7,7 @@
  * score components while preserving this single entry point for ordering.
  */
 export type TodayDecisionPriorityReason = {
-  code: "source-order";
+  code: "source-order" | "manual-priority";
   description: string;
 };
 
@@ -42,6 +42,24 @@ function createTodayDecisionPriorityExplanation(
           sourceIndex === 0
             ? "Diese Entscheidung steht in der bestehenden Today-Reihenfolge an erster Stelle."
             : "Diese Entscheidung folgt der bestehenden Today-Reihenfolge.",
+      },
+    ],
+  };
+}
+
+/**
+ * Describes a manual Today reordering without changing the base score that
+ * the Decision Engine calculated from the source order.
+ */
+export function createTodayDecisionManualPriorityExplanation(
+  priority: TodayDecisionPriorityExplanation,
+): TodayDecisionPriorityExplanation {
+  return {
+    score: priority.score,
+    reasons: [
+      {
+        code: "manual-priority",
+        description: "Diese Entscheidung wurde manuell für Heute zuerst priorisiert.",
       },
     ],
   };

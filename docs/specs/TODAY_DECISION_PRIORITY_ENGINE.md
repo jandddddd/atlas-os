@@ -19,6 +19,12 @@ Die Approval Card zeigt diese von der Engine gelieferten Gründe. Sie erzeugt
 keine eigenen Priorisierungsbegründungen, damit Anzeige und fachliche
 Priorisierung nicht auseinanderlaufen.
 
+Wenn der TodayDecisionState eine Entscheidung manuell für „Heute zuerst“
+einordnet, verwendet er ebenfalls die von der Engine bereitgestellte
+Explainability mit dem Code `manual-priority`. Der numerische Basisscore und
+die `source-order`-Explainability aller nicht manuell umsortierten
+Entscheidungen bleiben erhalten.
+
 ## Aktueller Score
 
 Die aktuelle Reihenfolge der Fixture-Entscheidungen ist bereits der bestehende
