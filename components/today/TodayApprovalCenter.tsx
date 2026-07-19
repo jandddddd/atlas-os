@@ -31,6 +31,17 @@ type TodayApprovalCenterProps = {
   decisions: TodayApprovalDecision[];
 };
 
+function filterCompletedDecisionIds(
+  decisionIds: string[],
+  completionStatus: CompletionStatus,
+): string[] {
+  if (completionStatus === null) {
+    return decisionIds;
+  }
+
+  return decisionIds.filter((decisionId) => decisionId !== "offer-mueller");
+}
+
 export function TodayApprovalCenter({
   dateLabel,
   initialCompletionStatus,
@@ -40,15 +51,12 @@ export function TodayApprovalCenter({
     () => new Map(decisions.map((decision) => [decision.id, decision])),
     [decisions],
   );
-  const [visibleDecisionIds, setVisibleDecisionIds] = useState(() => {
-    if (initialCompletionStatus === null) {
-      return decisions.map((decision) => decision.id);
-    }
-
-    return decisions
-      .filter((decision) => decision.id !== "offer-mueller")
-      .map((decision) => decision.id);
-  });
+  const [visibleDecisionIds, setVisibleDecisionIds] = useState(() =>
+    filterCompletedDecisionIds(
+      decisions.map((decision) => decision.id),
+      initialCompletionStatus,
+    ),
+  );
   const [completionMessage, setCompletionMessage] = useState<string | null>(null);
   const [expandedDetailsId, setExpandedDetailsId] = useState<string | null>(null);
   const [editHintDecisionId, setEditHintDecisionId] = useState<string | null>(null);
@@ -95,7 +103,9 @@ export function TodayApprovalCenter({
       setCompletionMessage(priorityDecision.completionMessage);
       setExpandedDetailsId(null);
       setEditHintDecisionId(null);
-      setVisibleDecisionIds(result.decisionIds);
+      setVisibleDecisionIds(
+        filterCompletedDecisionIds(result.decisionIds, initialCompletionStatus),
+      );
     } finally {
       priorityDecisionSubmissionInProgress.current = false;
       setIsSubmittingPriorityDecision(false);
@@ -126,7 +136,9 @@ export function TodayApprovalCenter({
       setCompletionMessage(null);
       setExpandedDetailsId(null);
       setEditHintDecisionId(null);
-      setVisibleDecisionIds(result.decisionIds);
+      setVisibleDecisionIds(
+        filterCompletedDecisionIds(result.decisionIds, initialCompletionStatus),
+      );
     } finally {
       priorityDecisionSubmissionInProgress.current = false;
       setIsSubmittingPriorityDecision(false);
@@ -165,7 +177,9 @@ export function TodayApprovalCenter({
       setCompletionMessage(null);
       setExpandedDetailsId(null);
       setEditHintDecisionId(null);
-      setVisibleDecisionIds(result.decisionIds);
+      setVisibleDecisionIds(
+        filterCompletedDecisionIds(result.decisionIds, initialCompletionStatus),
+      );
     } finally {
       setIsSubmittingPriorityDecision(false);
     }

@@ -402,6 +402,27 @@ test("Today-Seite zeigt Abschlusszustand nach Angebotsfreigabe", async ({ page }
   await expect(page.getByRole("heading", { name: "Angebot für Familie Müller freigeben und senden" })).toHaveCount(0);
 });
 
+test("Der Angebotsabschluss bleibt nach Priorisieren und Verschieben wirksam", async ({ page }) => {
+  await page.goto("/today?offerApproved=true");
+
+  await expect(
+    page.getByRole("heading", { name: "Angebot für Familie Müller freigeben und senden" }),
+  ).toHaveCount(0);
+
+  await page.getByRole("button", { name: "Materialrückfrage vormerken" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Materialrückfrage für den nächsten Einkauf vormerken" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Angebot für Familie Müller freigeben und senden" }),
+  ).toHaveCount(0);
+
+  await page.getByRole("button", { name: "Später entscheiden" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Angebot für Familie Müller freigeben und senden" }),
+  ).toHaveCount(0);
+});
+
 test("Today-Seite zeigt Abschlusszustand nach Änderungsanforderung", async ({ page }) => {
   await page.goto("/today?changeRequested=true");
 
@@ -409,6 +430,17 @@ test("Today-Seite zeigt Abschlusszustand nach Änderungsanforderung", async ({ p
   await expect(page.getByRole("heading", { name: "Guten Morgen." })).toBeVisible();
   await expect(page.getByLabel("Abschlusszustand")).toContainText("Änderung für Angebot Müller wurde angefordert.");
   await expect(page.getByRole("heading", { name: "Angebot für Familie Müller freigeben und senden" })).toHaveCount(0);
+});
+
+test("Die Änderungsanforderung bleibt nach Priorisieren und Freigeben wirksam", async ({ page }) => {
+  await page.goto("/today?changeRequested=true");
+
+  await page.getByRole("button", { name: "Materialrückfrage vormerken" }).click();
+  await page.getByRole("button", { name: "Rückfrage vormerken" }).click();
+
+  await expect(
+    page.getByRole("heading", { name: "Angebot für Familie Müller freigeben und senden" }),
+  ).toHaveCount(0);
 });
 
 test("Inbox ist erreichbar", async ({ page }) => {
