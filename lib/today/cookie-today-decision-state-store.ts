@@ -1,4 +1,4 @@
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 
 import {
   parseTodayDecisionState,
@@ -6,14 +6,14 @@ import {
   type TodayDecisionState,
 } from "@/lib/today/today-decision-state";
 import type { TodayDecisionStateStore } from "@/lib/today/today-decision-state-store";
+import { shouldUseSecureTodayCookie } from "@/lib/today/today-decision-cookie-options";
 
 export const todayDecisionCookieName = "atlas-today-decisions";
 
 const todayDecisionCookieOptions = {
   httpOnly: true,
-  path: "/today",
+  path: "/",
   sameSite: "lax" as const,
-  secure: process.env.NODE_ENV === "production",
 };
 
 export const cookieTodayDecisionStateStore: TodayDecisionStateStore = {
@@ -24,12 +24,16 @@ export const cookieTodayDecisionStateStore: TodayDecisionStateStore = {
   },
 
   async write(state: TodayDecisionState): Promise<void> {
-    const cookieStore = await cookies();
+    const [cookieStore, requestHeaders] = await Promise.all([cookies(), headers()]);
+    const secure = shouldUseSecureTodayCookie(
+      requestHeaders.get("x-forwarded-proto"),
+      requestHeaders.get("origin"),
+    );
 
     cookieStore.set(
       todayDecisionCookieName,
       serializeTodayDecisionState(state),
-      todayDecisionCookieOptions,
+      { ...todayDecisionCookieOptions, secure },
     );
   },
 };

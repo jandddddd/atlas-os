@@ -1,9 +1,12 @@
 import type { TodayApprovalDecision } from "@/components/today/TodayApprovalCenter";
-import { createTodayDecisionManualPriorityExplanation } from "@/lib/today/decision-priority";
+import {
+  createTodayDecisionManualPriorityExplanation,
+  prioritizeTodayDecisions,
+} from "./decision-priority.ts";
 
 const persistedActions = ["approve", "later"] as const;
 const maximumPersistedDecisions = 20;
-const currentStateVersion = 2;
+const currentStateVersion = 3;
 
 type PersistedTodayDecisionAction = (typeof persistedActions)[number];
 
@@ -13,45 +16,16 @@ export type PersistedTodayDecision = {
 };
 
 export type TodayDecisionState = {
-  version: 2;
+  version: 3;
   decisions: PersistedTodayDecision[];
-  decisionOrder: string[];
+  manualPriorityDecisionId: string | null;
 };
 
 export const emptyTodayDecisionState: TodayDecisionState = {
   version: currentStateVersion,
   decisions: [],
-  decisionOrder: [],
+  manualPriorityDecisionId: null,
 };
-
-export function prioritizeTodayDecision(
-  decisionIds: string[],
-  priorityDecisionId: string,
-): string[] {
-  const priorityDecisionIndex = decisionIds.indexOf(priorityDecisionId);
-
-  if (priorityDecisionIndex <= 0) {
-    return decisionIds;
-  }
-
-  const [currentPriorityDecisionId] = decisionIds;
-
-  if (!currentPriorityDecisionId) {
-    return decisionIds;
-  }
-
-  return decisionIds.map((decisionId, index) => {
-    if (index === 0) {
-      return priorityDecisionId;
-    }
-
-    if (index === priorityDecisionIndex) {
-      return currentPriorityDecisionId;
-    }
-
-    return decisionId;
-  });
-}
 
 function isPersistedAction(action: unknown): action is PersistedTodayDecisionAction {
   return persistedActions.some((persistedAction) => persistedAction === action);
@@ -90,18 +64,20 @@ function normalizePersistedDecisions(values: unknown[]): PersistedTodayDecision[
   return decisions;
 }
 
-function normalizeDecisionIds(values: unknown[]): string[] {
-  const decisionIds = new Set<string>();
+function normalizeDecisionId(value: unknown): string | null {
+  return typeof value === "string" && value.trim().length > 0 ? value : null;
+}
 
+function firstValidLegacyPriorityDecisionId(values: unknown[]): string | null {
   for (const value of values) {
-    if (typeof value !== "string" || value.trim().length === 0) {
-      continue;
-    }
+    const decisionId = normalizeDecisionId(value);
 
-    decisionIds.add(value);
+    if (decisionId !== null) {
+      return decisionId;
+    }
   }
 
-  return [...decisionIds];
+  return null;
 }
 
 export function parseTodayDecisionState(value: string | undefined): TodayDecisionState {
@@ -124,7 +100,21 @@ export function parseTodayDecisionState(value: string | undefined): TodayDecisio
       return {
         version: currentStateVersion,
         decisions: normalizePersistedDecisions(parsed.decisions),
-        decisionOrder: [],
+        manualPriorityDecisionId: null,
+      };
+    }
+
+    if (
+      parsed.version === 2 &&
+      "decisions" in parsed &&
+      Array.isArray(parsed.decisions) &&
+      "decisionOrder" in parsed &&
+      Array.isArray(parsed.decisionOrder)
+    ) {
+      return {
+        version: currentStateVersion,
+        decisions: normalizePersistedDecisions(parsed.decisions),
+        manualPriorityDecisionId: firstValidLegacyPriorityDecisionId(parsed.decisionOrder),
       };
     }
 
@@ -132,8 +122,7 @@ export function parseTodayDecisionState(value: string | undefined): TodayDecisio
       parsed.version !== currentStateVersion ||
       !("decisions" in parsed) ||
       !Array.isArray(parsed.decisions) ||
-      !("decisionOrder" in parsed) ||
-      !Array.isArray(parsed.decisionOrder)
+      !("manualPriorityDecisionId" in parsed)
     ) {
       return emptyTodayDecisionState;
     }
@@ -141,7 +130,7 @@ export function parseTodayDecisionState(value: string | undefined): TodayDecisio
     return {
       version: currentStateVersion,
       decisions: normalizePersistedDecisions(parsed.decisions),
-      decisionOrder: normalizeDecisionIds(parsed.decisionOrder),
+      manualPriorityDecisionId: normalizeDecisionId(parsed.manualPriorityDecisionId),
     };
   } catch {
     return emptyTodayDecisionState;
@@ -152,7 +141,7 @@ export function serializeTodayDecisionState(state: TodayDecisionState): string {
   return JSON.stringify({
     version: currentStateVersion,
     decisions: normalizePersistedDecisions(state.decisions),
-    decisionOrder: normalizeDecisionIds(state.decisionOrder),
+    manualPriorityDecisionId: normalizeDecisionId(state.manualPriorityDecisionId),
   });
 }
 
@@ -165,7 +154,10 @@ export function restrictTodayDecisionStateToKnownDecisions(
   return {
     version: currentStateVersion,
     decisions: state.decisions.filter((decision) => knownDecisionIds.has(decision.decisionId)),
-    decisionOrder: state.decisionOrder.filter((decisionId) => knownDecisionIds.has(decisionId)),
+    manualPriorityDecisionId:
+      state.manualPriorityDecisionId !== null && knownDecisionIds.has(state.manualPriorityDecisionId)
+        ? state.manualPriorityDecisionId
+        : null,
   };
 }
 
@@ -179,13 +171,15 @@ export function recordTodayDecisionAction(
       ...state.decisions.filter((entry) => entry.decisionId !== decision.decisionId),
       decision,
     ].slice(-maximumPersistedDecisions),
-    decisionOrder: state.decisionOrder,
+    manualPriorityDecisionId:
+      decision.decisionId === state.manualPriorityDecisionId
+        ? null
+        : state.manualPriorityDecisionId,
   };
 }
 
-export function setTodayDecisionOrder(
+export function setTodayDecisionManualPriority(
   state: TodayDecisionState,
-  decisionOrder: string[],
   priorityDecisionId: string,
 ): TodayDecisionState {
   return {
@@ -194,7 +188,7 @@ export function setTodayDecisionOrder(
       (decision) =>
         decision.decisionId !== priorityDecisionId || decision.action !== "later",
     ),
-    decisionOrder: normalizeDecisionIds(decisionOrder),
+    manualPriorityDecisionId: priorityDecisionId,
   };
 }
 
@@ -211,43 +205,41 @@ export function applyTodayDecisionState(
   const availableDecisions = decisions.filter(
     (decision) => actionByDecisionId.get(decision.id) !== "approve",
   );
-  const postponedDecisionIdSet = new Set(postponedDecisionIds);
-  const orderedDecisionIds = state.decisionOrder.filter((decisionId) =>
-    availableDecisions.some((decision) => decision.id === decisionId),
+  const prioritizedAvailableDecisions = prioritizeTodayDecisions(availableDecisions).map(
+    ({ decision, priority }) => ({ ...decision, priority }),
   );
-  const orderedDecisionIdSet = new Set(orderedDecisionIds);
-  const queue = [
-    ...orderedDecisionIds,
-    ...availableDecisions
-      .map((decision) => decision.id)
-      .filter((decisionId) => !orderedDecisionIdSet.has(decisionId)),
-  ];
+  const postponedDecisionIdSet = new Set(postponedDecisionIds);
   const visibleDecisions = [
-    ...queue
-      .filter((decisionId) => !postponedDecisionIdSet.has(decisionId))
-      .map((decisionId) => availableDecisions.find((decision) => decision.id === decisionId))
-      .filter((decision): decision is TodayApprovalDecision => Boolean(decision)),
+    ...prioritizedAvailableDecisions.filter(
+      (decision) => !postponedDecisionIdSet.has(decision.id),
+    ),
     ...postponedDecisionIds
-      .map((decisionId) => queue.find((queueDecisionId) => queueDecisionId === decisionId))
-      .map((decisionId) => availableDecisions.find((decision) => decision.id === decisionId))
+      .map((decisionId) => prioritizedAvailableDecisions.find((decision) => decision.id === decisionId))
       .filter((decision): decision is TodayApprovalDecision => Boolean(decision)),
   ];
-  const [sourcePriorityDecision] = availableDecisions;
-  const [manuallyPrioritizedDecisionId] = orderedDecisionIds;
+  const [sourcePriorityDecision] = prioritizedAvailableDecisions;
+  const manuallyPrioritizedDecisionId = state.manualPriorityDecisionId;
   const hasManualPriorityOverride =
-    manuallyPrioritizedDecisionId !== undefined &&
+    manuallyPrioritizedDecisionId !== null &&
     manuallyPrioritizedDecisionId !== sourcePriorityDecision?.id;
 
   if (!hasManualPriorityOverride) {
     return visibleDecisions;
   }
 
-  return visibleDecisions.map((decision) => (
-    decision.id === manuallyPrioritizedDecisionId
-      ? {
-          ...decision,
-          priority: createTodayDecisionManualPriorityExplanation(decision.priority),
-        }
-      : decision
-  ));
+  const manuallyPrioritizedDecision = visibleDecisions.find(
+    (decision) => decision.id === manuallyPrioritizedDecisionId,
+  );
+
+  if (!manuallyPrioritizedDecision || postponedDecisionIdSet.has(manuallyPrioritizedDecision.id)) {
+    return visibleDecisions;
+  }
+
+  return [
+    {
+      ...manuallyPrioritizedDecision,
+      priority: createTodayDecisionManualPriorityExplanation(manuallyPrioritizedDecision.priority),
+    },
+    ...visibleDecisions.filter((decision) => decision.id !== manuallyPrioritizedDecision.id),
+  ];
 }
