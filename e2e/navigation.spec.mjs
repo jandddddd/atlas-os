@@ -257,14 +257,18 @@ test("Die Freigabe schreibt ausschließlich das kompakte Entscheidungsmodell", a
   expect(decisionCookie).toBeDefined();
   expect(decisionCookie).toMatchObject({
     name: "atlas-today-decisions",
-    value: JSON.stringify({
-      version: 1,
-      decisions: [{ decisionId: "offer-mueller", action: "approve" }],
-    }),
     httpOnly: true,
     sameSite: "Lax",
     path: "/today",
   });
+
+  const persistedState = JSON.parse(decodeURIComponent(decisionCookie.value));
+
+  expect(persistedState).toEqual({
+    version: 1,
+    decisions: [{ decisionId: "offer-mueller", action: "approve" }],
+  });
+  expect(Object.keys(persistedState.decisions[0]).sort()).toEqual(["action", "decisionId"]);
 });
 
 test("Eine bereits erledigte Entscheidung entfernt bei einem stale Submit nicht die nächste", async ({
