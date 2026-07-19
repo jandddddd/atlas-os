@@ -246,6 +246,9 @@ test("Die Freigabe schreibt ausschließlich das kompakte Entscheidungsmodell", a
   await page.goto("/today");
 
   await page.getByRole("button", { name: "Angebot senden" }).click();
+  await expect(page.getByLabel("Aktueller Abschluss")).toContainText(
+    "Angebot für Familie Müller wurde freigegeben.",
+  );
 
   const decisionCookie = (await context.cookies(page.url())).find(
     (cookie) => cookie.name === "atlas-today-decisions",
