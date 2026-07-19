@@ -1,5 +1,8 @@
 import type { TodayApprovalDecision } from "@/components/today/TodayApprovalCenter";
-import { createTodayDecisionManualPriorityExplanation } from "@/lib/today/decision-priority";
+import {
+  createTodayDecisionManualPriorityExplanation,
+  prioritizeTodayDecisions,
+} from "@/lib/today/decision-priority";
 
 const persistedActions = ["approve", "later"] as const;
 const maximumPersistedDecisions = 20;
@@ -211,28 +214,31 @@ export function applyTodayDecisionState(
   const availableDecisions = decisions.filter(
     (decision) => actionByDecisionId.get(decision.id) !== "approve",
   );
+  const prioritizedAvailableDecisions = prioritizeTodayDecisions(availableDecisions).map(
+    ({ decision, priority }) => ({ ...decision, priority }),
+  );
   const postponedDecisionIdSet = new Set(postponedDecisionIds);
   const orderedDecisionIds = state.decisionOrder.filter((decisionId) =>
-    availableDecisions.some((decision) => decision.id === decisionId),
+    prioritizedAvailableDecisions.some((decision) => decision.id === decisionId),
   );
   const orderedDecisionIdSet = new Set(orderedDecisionIds);
   const queue = [
     ...orderedDecisionIds,
-    ...availableDecisions
+    ...prioritizedAvailableDecisions
       .map((decision) => decision.id)
       .filter((decisionId) => !orderedDecisionIdSet.has(decisionId)),
   ];
   const visibleDecisions = [
     ...queue
       .filter((decisionId) => !postponedDecisionIdSet.has(decisionId))
-      .map((decisionId) => availableDecisions.find((decision) => decision.id === decisionId))
+      .map((decisionId) => prioritizedAvailableDecisions.find((decision) => decision.id === decisionId))
       .filter((decision): decision is TodayApprovalDecision => Boolean(decision)),
     ...postponedDecisionIds
       .map((decisionId) => queue.find((queueDecisionId) => queueDecisionId === decisionId))
-      .map((decisionId) => availableDecisions.find((decision) => decision.id === decisionId))
+      .map((decisionId) => prioritizedAvailableDecisions.find((decision) => decision.id === decisionId))
       .filter((decision): decision is TodayApprovalDecision => Boolean(decision)),
   ];
-  const [sourcePriorityDecision] = availableDecisions;
+  const [sourcePriorityDecision] = prioritizedAvailableDecisions;
   const [manuallyPrioritizedDecisionId] = orderedDecisionIds;
   const hasManualPriorityOverride =
     manuallyPrioritizedDecisionId !== undefined &&
