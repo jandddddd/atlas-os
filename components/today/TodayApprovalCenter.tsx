@@ -96,13 +96,19 @@ export function TodayApprovalCenter({
     }));
   const hasDecisions = visibleDecisionIds.length > 0;
 
-  function applyDecisionResult({
+  async function applyDecisionResult({
     decisionIds,
     priorityByDecisionId: nextPriorityByDecisionId,
   }: {
     decisionIds: string[];
     priorityByDecisionId: Record<string, TodayDecisionPriorityExplanation>;
   }) {
+    const response = await fetch("/api/today/legacy-cookie", { method: "POST" });
+
+    if (!response.ok) {
+      throw new Error("Could not remove the legacy Today cookie.");
+    }
+
     setPriorityByDecisionId(nextPriorityByDecisionId);
     setVisibleDecisionIds(filterCompletedDecisionIds(decisionIds, initialCompletionStatus));
   }
@@ -132,7 +138,7 @@ export function TodayApprovalCenter({
       setFeedbackStatus("completed");
       setExpandedDetailsId(null);
       setEditHintDecisionId(null);
-      applyDecisionResult(result);
+      await applyDecisionResult(result);
     } finally {
       priorityDecisionSubmissionInProgress.current = false;
       setIsSubmittingPriorityDecision(false);
@@ -166,7 +172,7 @@ export function TodayApprovalCenter({
       setFeedbackStatus("deferred");
       setExpandedDetailsId(null);
       setEditHintDecisionId(null);
-      applyDecisionResult(result);
+      await applyDecisionResult(result);
     } finally {
       priorityDecisionSubmissionInProgress.current = false;
       setIsSubmittingPriorityDecision(false);
@@ -206,7 +212,7 @@ export function TodayApprovalCenter({
       setFeedbackStatus(null);
       setExpandedDetailsId(null);
       setEditHintDecisionId(null);
-      applyDecisionResult(result);
+      await applyDecisionResult(result);
     } finally {
       setIsSubmittingPriorityDecision(false);
     }
