@@ -369,10 +369,13 @@ test("Ein Version-2-Cookie behält nur den manuellen Override", async ({ context
     (cookie) => cookie.name === todayDecisionCookieName,
   );
   expect(decisionCookies).toHaveLength(1);
-  const [decisionCookie] = decisionCookies;
-  expect(decisionCookie).toBeDefined();
-  expect(decisionCookie).toMatchObject({ path: "/today", secure: true });
-  expect(JSON.parse(decodeURIComponent(decisionCookie.value))).toEqual({
+  const canonicalCookie = decisionCookies.find((cookie) => cookie.path === "/today");
+  const legacyCookie = decisionCookies.find((cookie) => cookie.path === "/");
+
+  expect(canonicalCookie).toBeDefined();
+  expect(legacyCookie).toBeUndefined();
+  expect(canonicalCookie).toMatchObject({ path: "/today", secure: true });
+  expect(JSON.parse(decodeURIComponent(canonicalCookie.value))).toEqual({
     version: 3,
     decisions: [{ decisionId: "supplier-selection", action: "approve" }],
     manualPriorityDecisionId: null,
