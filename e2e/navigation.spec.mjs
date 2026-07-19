@@ -247,7 +247,11 @@ test("Die Freigabe schreibt ausschließlich das kompakte Entscheidungsmodell", a
 
   await page.getByRole("button", { name: "Angebot senden" }).click();
 
-  const [decisionCookie] = await context.cookies("http://127.0.0.1:3000/today");
+  const decisionCookie = (await context.cookies(page.url())).find(
+    (cookie) => cookie.name === "atlas-today-decisions",
+  );
+
+  expect(decisionCookie).toBeDefined();
   expect(decisionCookie).toMatchObject({
     name: "atlas-today-decisions",
     value: JSON.stringify({
