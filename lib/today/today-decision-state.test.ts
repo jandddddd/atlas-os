@@ -34,6 +34,24 @@ test("serializes version 3 state without the legacy queue order", () => {
   });
 });
 
+test("rewrites an approved version 2 override as a compact version 3 state", () => {
+  const migratedState = parseTodayDecisionState(JSON.stringify({
+    version: 2,
+    decisions: [],
+    decisionOrder: ["supplier-selection", "offer-mueller", "visit-weber"],
+  }));
+  const approvedState = recordTodayDecisionAction(migratedState, {
+    decisionId: "supplier-selection",
+    action: "approve",
+  });
+
+  assert.deepEqual(JSON.parse(serializeTodayDecisionState(approvedState)), {
+    version: 3,
+    decisions: [{ decisionId: "supplier-selection", action: "approve" }],
+    manualPriorityDecisionId: null,
+  });
+});
+
 test("clears the manual override when its decision is completed or deferred", () => {
   const manuallyPrioritizedState = setTodayDecisionManualPriority(
     emptyTodayDecisionState,
