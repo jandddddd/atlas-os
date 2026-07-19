@@ -77,6 +77,18 @@ test("Today-Seite ist erreichbar", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "Angebotsentwurf Müller prüfen" })).toHaveCount(0);
 });
 
+test("Die zweite weitere Entscheidung wird zur Priorität, ohne die Queue zu verändern", async ({ page }) => {
+  await page.goto("/today");
+
+  await page.getByRole("button", { name: "Materialrückfrage vormerken" }).click();
+
+  await expect(
+    page.getByRole("heading", { name: "Materialrückfrage für den nächsten Einkauf vormerken" }),
+  ).toBeVisible();
+  await expect(page.getByRole("button", { name: "Angebotsentwurf Müller prüfen" })).toBeVisible();
+  await expect(page.getByText("Atlas hat heute 5 Entscheidungen vorbereitet.")).toBeVisible();
+});
+
 test("Der primäre Freigabe-Button ist sichtbar, erreichbar und rückt die nächste Entscheidung nach", async ({ page }) => {
   await page.goto("/today");
 

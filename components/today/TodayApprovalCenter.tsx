@@ -8,6 +8,7 @@ import { DecisionOverviewList } from "@/components/today/DecisionOverviewList";
 import { TodayCompletionNotice } from "@/components/today/TodayCompletionNotice";
 import { TodayEmptyState } from "@/components/today/TodayEmptyState";
 import { TodayHeader } from "@/components/today/TodayHeader";
+import { prioritizeTodayDecision } from "@/lib/today/today-decision-state";
 
 type CompletionStatus = "offer-approved" | "change-requested" | null;
 
@@ -153,6 +154,19 @@ export function TodayApprovalCenter({
     setEditHintDecisionId(decisionId);
   }
 
+  function prioritizeDecision(decisionId: string) {
+    if (isSubmittingPriorityDecision) {
+      return;
+    }
+
+    setCompletionMessage(null);
+    setExpandedDetailsId(null);
+    setEditHintDecisionId(null);
+    setVisibleDecisionIds((currentDecisionIds) =>
+      prioritizeTodayDecision(currentDecisionIds, decisionId),
+    );
+  }
+
   return (
     <>
       <TodayHeader dateLabel={dateLabel} decisionCount={visibleDecisionIds.length} />
@@ -226,7 +240,11 @@ export function TodayApprovalCenter({
               },
             ]}
           />
-          <DecisionOverviewList decisions={overviewDecisions} />
+          <DecisionOverviewList
+            decisions={overviewDecisions}
+            onSelect={prioritizeDecision}
+            isDisabled={isSubmittingPriorityDecision}
+          />
         </>
       ) : (
         <TodayEmptyState isVisible />

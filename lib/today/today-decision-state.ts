@@ -19,6 +19,35 @@ export const emptyTodayDecisionState: TodayDecisionState = {
   decisions: [],
 };
 
+export function prioritizeTodayDecision(
+  decisionIds: string[],
+  priorityDecisionId: string,
+): string[] {
+  const priorityDecisionIndex = decisionIds.indexOf(priorityDecisionId);
+
+  if (priorityDecisionIndex <= 0) {
+    return decisionIds;
+  }
+
+  const [currentPriorityDecisionId] = decisionIds;
+
+  if (!currentPriorityDecisionId) {
+    return decisionIds;
+  }
+
+  return decisionIds.map((decisionId, index) => {
+    if (index === 0) {
+      return priorityDecisionId;
+    }
+
+    if (index === priorityDecisionIndex) {
+      return currentPriorityDecisionId;
+    }
+
+    return decisionId;
+  });
+}
+
 function isPersistedAction(action: unknown): action is TodayDecisionAction {
   return persistedActions.some((persistedAction) => persistedAction === action);
 }
