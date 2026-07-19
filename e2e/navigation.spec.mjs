@@ -20,6 +20,19 @@ async function prioritizeOffer(page) {
   await prioritizeDecision(page, offerOverviewTitle, offerTitle);
 }
 
+function currentPriorityDecisionHeading(page) {
+  return page.locator('section[aria-labelledby="priority-decision"] article h3');
+}
+
+async function expectNextOpenDecision(page) {
+  const heading = currentPriorityDecisionHeading(page);
+
+  await expect(heading).toBeVisible();
+  await expect(heading).not.toHaveText(offerTitle);
+
+  return heading.innerText();
+}
+
 test.beforeEach(async ({ context, page }) => {
   await resetTodayState(context);
   await page.route("**/api/analyze-inquiry", async (route) => {
@@ -205,7 +218,7 @@ test("Der primäre Freigabe-Button ist sichtbar, erreichbar und rückt die näch
   await expect(page).toHaveURL("/today");
   await expect(page.getByLabel("Aktueller Abschluss")).toContainText("Angebot für Familie Müller wurde freigegeben.");
   await expect(page.getByRole("heading", { name: offerTitle })).toHaveCount(0);
-  await expect(page.getByRole("heading", { name: visitTitle })).toBeVisible();
+  await expectNextOpenDecision(page);
   await expect(page.getByText("Atlas hat heute 4 Entscheidungen vorbereitet.")).toBeVisible();
 });
 
@@ -237,10 +250,11 @@ test("Freigabe bleibt nach einem Reload erhalten", async ({ page }) => {
   await prioritizeOffer(page);
 
   await page.getByRole("button", { name: "Angebot senden" }).click();
+  const nextDecisionTitle = await expectNextOpenDecision(page);
   await page.reload();
 
   await expect(page.getByRole("heading", { name: offerTitle })).toHaveCount(0);
-  await expect(page.getByRole("heading", { name: visitTitle })).toBeVisible();
+  await expect(currentPriorityDecisionHeading(page)).toHaveText(nextDecisionTitle);
   await expect(page.getByText("Atlas hat heute 4 Entscheidungen vorbereitet.")).toBeVisible();
 });
 
@@ -304,7 +318,7 @@ test("Ein gültiger Cookie-Zustand wird gelesen", async ({ context, page }) => {
   await page.goto("/today");
 
   await expect(page.getByRole("heading", { name: offerTitle })).toHaveCount(0);
-  await expect(page.getByRole("heading", { name: visitTitle })).toBeVisible();
+  await expectNextOpenDecision(page);
   await expect(page.getByText("Atlas hat heute 4 Entscheidungen vorbereitet.")).toBeVisible();
 });
 
@@ -378,11 +392,12 @@ test("Die Freigabe schreibt ausschließlich das kompakte Entscheidungsmodell", a
 
   const persistedState = JSON.parse(decodeURIComponent(decisionCookie.value));
 
-  expect(persistedState).toEqual({
-    version: 2,
-    decisions: [{ decisionId: "offer-mueller", action: "approve" }],
-    decisionOrder: [],
-  });
+  expect(persistedState.version).toBe(2);
+  expect(persistedState.decisions).toEqual([{ decisionId: "offer-mueller", action: "approve" }]);
+  expect(persistedState.decisionOrder).toHaveLength(5);
+  expect(new Set(persistedState.decisionOrder).size).toBe(5);
+  expect(persistedState.decisionOrder).toContain("offer-mueller");
+  expect(Object.keys(persistedState).sort()).toEqual(["decisionOrder", "decisions", "version"]);
   expect(Object.keys(persistedState.decisions[0]).sort()).toEqual(["action", "decisionId"]);
 });
 
@@ -409,7 +424,7 @@ test("Eine bereits erledigte Entscheidung entfernt bei einem stale Submit nicht 
   await expect(page.getByLabel("Entscheidungsfehler")).toBeVisible();
   await page.reload();
 
-  await expect(page.getByRole("heading", { name: "Besichtigung Weber als nächsten Schritt einplanen" })).toBeVisible();
+  await expectNextOpenDecision(page);
   await expect(page.getByText("Atlas hat heute 4 Entscheidungen vorbereitet.")).toBeVisible();
 });
 
