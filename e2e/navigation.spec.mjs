@@ -162,7 +162,7 @@ test("Beschädigte Cookie-Daten werden ignoriert", async ({ context, page }) => 
     {
       name: "atlas-today-decisions",
       value: "not-json",
-      url: "http://127.0.0.1:3000/today",
+      url: "http://localhost:3000/today",
       httpOnly: true,
       sameSite: "Lax",
     },
@@ -172,6 +172,27 @@ test("Beschädigte Cookie-Daten werden ignoriert", async ({ context, page }) => 
 
   await expect(page.getByRole("heading", { name: "Angebot für Familie Müller freigeben und senden" })).toBeVisible();
   await expect(page.getByText("Atlas hat heute 5 Entscheidungen vorbereitet.")).toBeVisible();
+});
+
+test("Ein gültiger Cookie-Zustand wird gelesen", async ({ context, page }) => {
+  await context.addCookies([
+    {
+      name: "atlas-today-decisions",
+      value: JSON.stringify({
+        version: 1,
+        decisions: [{ decisionId: "offer-mueller", action: "approve" }],
+      }),
+      url: "http://localhost:3000/today",
+      httpOnly: true,
+      sameSite: "Lax",
+    },
+  ]);
+
+  await page.goto("/today");
+
+  await expect(page.getByRole("heading", { name: "Angebot für Familie Müller freigeben und senden" })).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "Besichtigung Weber als nächsten Schritt einplanen" })).toBeVisible();
+  await expect(page.getByText("Atlas hat heute 4 Entscheidungen vorbereitet.")).toBeVisible();
 });
 
 test("Doppelte decisionIds im Cookie behalten die erste gültige Aktion", async ({ context, page }) => {
@@ -185,7 +206,7 @@ test("Doppelte decisionIds im Cookie behalten die erste gültige Aktion", async 
           { decisionId: "offer-mueller", action: "approve" },
         ],
       }),
-      url: "http://127.0.0.1:3000/today",
+      url: "http://localhost:3000/today",
       httpOnly: true,
       sameSite: "Lax",
     },
@@ -196,6 +217,58 @@ test("Doppelte decisionIds im Cookie behalten die erste gültige Aktion", async 
   await expect(page.getByRole("heading", { name: "Besichtigung Weber als nächsten Schritt einplanen" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Angebotsentwurf Müller prüfen" })).toBeVisible();
   await expect(page.getByText("Atlas hat heute 5 Entscheidungen vorbereitet.")).toBeVisible();
+});
+
+test("Unbekannte IDs und ungültige Aktionen im Cookie werden ignoriert", async ({ context, page }) => {
+  await context.addCookies([
+    {
+      name: "atlas-today-decisions",
+      value: JSON.stringify({
+        version: 1,
+        decisions: [
+          { decisionId: "nicht-bekannt", action: "approve" },
+          { decisionId: "offer-mueller", action: "ungueltig" },
+        ],
+      }),
+      url: "http://localhost:3000/today",
+      httpOnly: true,
+      sameSite: "Lax",
+    },
+  ]);
+
+  await page.goto("/today");
+
+  await expect(page.getByRole("heading", { name: "Angebot für Familie Müller freigeben und senden" })).toBeVisible();
+  await expect(page.getByText("Atlas hat heute 5 Entscheidungen vorbereitet.")).toBeVisible();
+});
+
+test("Die Freigabe schreibt ausschließlich das kompakte Entscheidungsmodell", async ({ context, page }) => {
+  await page.goto("/today");
+
+  await page.getByRole("button", { name: "Angebot senden" }).click();
+  await expect(page.getByLabel("Aktueller Abschluss")).toContainText(
+    "Angebot für Familie Müller wurde freigegeben.",
+  );
+
+  const decisionCookie = (await context.cookies(page.url())).find(
+    (cookie) => cookie.name === "atlas-today-decisions",
+  );
+
+  expect(decisionCookie).toBeDefined();
+  expect(decisionCookie).toMatchObject({
+    name: "atlas-today-decisions",
+    httpOnly: true,
+    sameSite: "Lax",
+    path: "/today",
+  });
+
+  const persistedState = JSON.parse(decodeURIComponent(decisionCookie.value));
+
+  expect(persistedState).toEqual({
+    version: 1,
+    decisions: [{ decisionId: "offer-mueller", action: "approve" }],
+  });
+  expect(Object.keys(persistedState.decisions[0]).sort()).toEqual(["action", "decisionId"]);
 });
 
 test("Eine bereits erledigte Entscheidung entfernt bei einem stale Submit nicht die nächste", async ({
@@ -210,7 +283,7 @@ test("Eine bereits erledigte Entscheidung entfernt bei einem stale Submit nicht 
         version: 1,
         decisions: [{ decisionId: "offer-mueller", action: "approve" }],
       }),
-      url: "http://127.0.0.1:3000/today",
+      url: "http://localhost:3000/today",
       httpOnly: true,
       sameSite: "Lax",
     },

@@ -8,12 +8,12 @@ export default defineConfig({
   workers: process.env.CI ? 1 : undefined,
   reporter: process.env.CI ? "github" : "list",
   use: {
-    baseURL: "http://127.0.0.1:3000",
+    baseURL: "http://localhost:3000",
     trace: "on-first-retry",
   },
   webServer: {
     command: "npm run start",
-    url: "http://127.0.0.1:3000",
+    url: "http://localhost:3000",
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,
   },
