@@ -1,5 +1,7 @@
 "use client";
 
+import type { TodayDecisionPriorityExplanation } from "@/lib/today/decision-priority";
+
 export type ApprovalCardAction = {
   label: string;
   pendingLabel?: string;
@@ -20,8 +22,7 @@ export type ApprovalCardProps = {
   title: string;
   context: ApprovalCardContextItem[];
   summary: string;
-  recommendation: string;
-  rationale: string[];
+  priority: TodayDecisionPriorityExplanation;
   uncertainty?: {
     title: string;
     description: string;
@@ -112,8 +113,7 @@ export function ApprovalCard({
   title,
   context,
   summary,
-  recommendation,
-  rationale,
+  priority,
   uncertainty,
   consequence,
   primaryAction,
@@ -173,7 +173,7 @@ export function ApprovalCard({
                   Empfehlung von Atlas
                 </p>
                 <p className="text-xl font-semibold leading-8 text-white">
-                  {recommendation}
+                  {priority.reasons[0]?.description}
                 </p>
               </section>
 
@@ -185,13 +185,13 @@ export function ApprovalCard({
                   Begründung
                 </h4>
                 <ul className="space-y-2 text-base leading-7 text-neutral-600">
-                  {rationale.map((reason) => (
-                    <li key={reason} className="flex gap-3">
+                  {priority.reasons.map((reason) => (
+                    <li key={reason.code} className="flex gap-3">
                       <span
                         aria-hidden="true"
                         className="mt-3 h-1.5 w-1.5 shrink-0 rounded-full bg-neutral-300"
                       />
-                      <span>{reason}</span>
+                      <span>{reason.description}</span>
                     </li>
                   ))}
                 </ul>
