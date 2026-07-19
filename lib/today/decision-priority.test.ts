@@ -7,85 +7,88 @@ import {
   prioritizeTodayDecisions,
 } from "./decision-priority.ts";
 
-test("assigns higher scores to decisions earlier in the current Today order", () => {
-  assert.equal(calculateTodayDecisionPriority(0, 5), 5);
-  assert.equal(calculateTodayDecisionPriority(1, 5), 4);
-  assert.equal(calculateTodayDecisionPriority(4, 5), 1);
+test("assigns a higher score to higher urgency", () => {
+  assert.ok(
+    calculateTodayDecisionPriority({ urgency: "high", economicImpact: "low" }) >
+      calculateTodayDecisionPriority({ urgency: "medium", economicImpact: "low" }),
+  );
 });
 
-test("preserves the supplied decision order", () => {
+test("assigns a higher score to higher economic impact", () => {
+  assert.ok(
+    calculateTodayDecisionPriority({ urgency: "low", economicImpact: "high" }) >
+      calculateTodayDecisionPriority({ urgency: "low", economicImpact: "medium" }),
+  );
+});
+
+test("orders decisions by their combined priority factors", () => {
   const decisions = [
-    { id: "offer-mueller" },
-    { id: "visit-weber" },
-    { id: "supplier-selection" },
-    { id: "customer-reply" },
-    { id: "measurement-gap" },
+    { id: "economic-impact", urgency: "medium" as const, economicImpact: "high" as const },
+    { id: "urgent", urgency: "high" as const, economicImpact: "low" as const },
+    { id: "low", urgency: "low" as const, economicImpact: "low" as const },
   ];
 
   assert.deepEqual(
     prioritizeTodayDecisions(decisions).map(({ decision }) => decision.id),
-    decisions.map((decision) => decision.id),
+    ["urgent", "economic-impact", "low"],
   );
 });
 
-test("returns explainability for the unchanged source-order priority", () => {
-  const decisions = [{ id: "first" }, { id: "second" }];
-
-  assert.deepEqual(prioritizeTodayDecisions(decisions), [
-    {
-      decision: { id: "first" },
-      priority: {
-        score: 2,
-        reasons: [
-          {
-            code: "source-order",
-            description:
-              "Diese Entscheidung steht in der bestehenden Today-Reihenfolge an erster Stelle.",
-          },
-        ],
-      },
-      sourceIndex: 0,
-    },
-    {
-      decision: { id: "second" },
-      priority: {
-        score: 1,
-        reasons: [
-          {
-            code: "source-order",
-            description: "Diese Entscheidung folgt der bestehenden Today-Reihenfolge.",
-          },
-        ],
-      },
-      sourceIndex: 1,
-    },
-  ]);
-});
-
-test("replaces source-order explainability when a decision is manually moved to Today first", () => {
-  const [sourcePriorityDecision, manuallyPrioritizedDecision] = prioritizeTodayDecisions([
-    { id: "first" },
-    { id: "manually-prioritized" },
-  ]);
+test("keeps supplied order as a stable tie-breaker for equal scores", () => {
+  const decisions = [
+    { id: "first", urgency: "medium" as const, economicImpact: "medium" as const },
+    { id: "second", urgency: "medium" as const, economicImpact: "medium" as const },
+  ];
 
   assert.deepEqual(
-    createTodayDecisionManualPriorityExplanation(manuallyPrioritizedDecision.priority),
-    {
-      score: 1,
-      reasons: [
-        {
-          code: "manual-priority",
-          description: "Diese Entscheidung wurde manuell für Heute zuerst priorisiert.",
-        },
-      ],
-    },
+    prioritizeTodayDecisions(decisions).map(({ decision }) => decision.id),
+    ["first", "second"],
   );
-  assert.deepEqual(sourcePriorityDecision.priority.reasons, [
+});
+
+test("returns explainability for every priority factor used in the score", () => {
+  const [decision] = prioritizeTodayDecisions([
+    { id: "urgent-and-economic", urgency: "high" as const, economicImpact: "medium" as const },
+  ]);
+
+  assert.deepEqual(decision.priority, {
+    score: 70,
+    reasons: [
+      { code: "urgency", description: "Dringlichkeit: hoch." },
+      {
+        code: "economic-impact",
+        description: "Wirtschaftliche Auswirkung: mittel.",
+      },
+    ],
+  });
+});
+
+test("keeps manual prioritization dominant without automatic factor reasons", () => {
+  const [sourcePriorityDecision, manuallyPrioritizedDecision] = prioritizeTodayDecisions([
+    { id: "first", urgency: "high" as const, economicImpact: "high" as const },
+    { id: "manually-prioritized", urgency: "low" as const, economicImpact: "low" as const },
+  ]);
+  const manuallyOrderedDecisions = [
     {
-      code: "source-order",
-      description:
-        "Diese Entscheidung steht in der bestehenden Today-Reihenfolge an erster Stelle.",
+      ...manuallyPrioritizedDecision,
+      priority: createTodayDecisionManualPriorityExplanation(manuallyPrioritizedDecision.priority),
     },
+    sourcePriorityDecision,
+  ];
+
+  assert.equal(manuallyOrderedDecisions[0]?.decision.id, "manually-prioritized");
+  assert.deepEqual(manuallyOrderedDecisions[0]?.priority, {
+    score: 0,
+    reasons: [
+      {
+        code: "manual-priority",
+        description: "Diese Entscheidung wurde manuell für Heute zuerst priorisiert.",
+      },
+    ],
+  });
+  assert.deepEqual(sourcePriorityDecision.priority.reasons, [
+    { code: "urgency", description: "Dringlichkeit: hoch." },
+    { code: "economic-impact", description: "Wirtschaftliche Auswirkung: hoch." },
   ]);
 });
 
