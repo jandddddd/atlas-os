@@ -73,6 +73,7 @@ export async function submitTodayDecision(
           currentDecisions.map((decision) => decision.id),
           command.decisionId,
         ),
+        command.decisionId,
       )
     : recordTodayDecisionAction(state, {
         decisionId: command.decisionId,

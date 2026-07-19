@@ -108,6 +108,36 @@ test("Eine neu priorisierte Entscheidung kann sofort freigegeben werden", async 
   await expect(page.getByLabel("Entscheidungsfehler")).toHaveCount(0);
 });
 
+test("Eine erneut priorisierte Entscheidung verliert ihren Später-Status", async ({
+  context,
+  page,
+}) => {
+  await page.goto("/today");
+
+  await page.getByRole("button", { name: "Später entscheiden" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Besichtigung Weber als nächsten Schritt einplanen" }),
+  ).toBeVisible();
+
+  await page.getByRole("button", { name: "Später entscheiden" }).click();
+  await page.getByRole("button", { name: "Besichtigung Weber einordnen" }).click();
+
+  await expect(
+    page.getByRole("heading", { name: "Besichtigung Weber als nächsten Schritt einplanen" }),
+  ).toBeVisible();
+
+  const decisionCookie = (await context.cookies(page.url())).find(
+    (cookie) => cookie.name === "atlas-today-decisions",
+  );
+  expect(decisionCookie).toBeDefined();
+  const persistedState = JSON.parse(decodeURIComponent(decisionCookie.value));
+
+  expect(persistedState.decisions).not.toContainEqual({
+    decisionId: "visit-weber",
+    action: "later",
+  });
+});
+
 test("Der primäre Freigabe-Button ist sichtbar, erreichbar und rückt die nächste Entscheidung nach", async ({ page }) => {
   await page.goto("/today");
 

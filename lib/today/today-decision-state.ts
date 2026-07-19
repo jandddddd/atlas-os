@@ -185,9 +185,14 @@ export function recordTodayDecisionAction(
 export function setTodayDecisionOrder(
   state: TodayDecisionState,
   decisionOrder: string[],
+  priorityDecisionId: string,
 ): TodayDecisionState {
   return {
     ...state,
+    decisions: state.decisions.filter(
+      (decision) =>
+        decision.decisionId !== priorityDecisionId || decision.action !== "later",
+    ),
     decisionOrder: normalizeDecisionIds(decisionOrder),
   };
 }
