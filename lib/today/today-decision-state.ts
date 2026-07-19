@@ -2,7 +2,7 @@ import type { TodayApprovalDecision } from "@/components/today/TodayApprovalCent
 import {
   createTodayDecisionManualPriorityExplanation,
   prioritizeTodayDecisions,
-} from "@/lib/today/decision-priority";
+} from "./decision-priority.ts";
 
 const persistedActions = ["approve", "later"] as const;
 const maximumPersistedDecisions = 20;

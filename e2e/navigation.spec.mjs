@@ -33,6 +33,12 @@ async function expectNextOpenDecision(page) {
   return heading.innerText();
 }
 
+function manualPriorityExplanation(page) {
+  return page
+    .locator('section[aria-labelledby="atlas-rationale"]')
+    .getByText("Diese Entscheidung wurde manuell für Heute zuerst priorisiert.", { exact: true });
+}
+
 test.beforeEach(async ({ context, page }) => {
   await resetTodayState(context);
   await page.route("**/api/analyze-inquiry", async (route) => {
@@ -151,9 +157,7 @@ test("Eine weitere Entscheidung wird manuell priorisiert, während die übrige Q
   await expect(
     page.getByRole("heading", { name: "Materialrückfrage für den nächsten Einkauf vormerken" }),
   ).toBeVisible();
-  await expect(
-    page.getByText("Diese Entscheidung wurde manuell für Heute zuerst priorisiert."),
-  ).toBeVisible();
+  await expect(manualPriorityExplanation(page)).toBeVisible();
   await expect(page.getByRole("button", { name: "Besichtigung Weber einordnen" })).toBeVisible();
 });
 
@@ -355,9 +359,7 @@ test("Ein Version-2-Cookie behält nur den manuellen Override", async ({ context
   await expect(
     page.getByRole("heading", { name: "Materialrückfrage für den nächsten Einkauf vormerken" }),
   ).toBeVisible();
-  await expect(
-    page.getByText("Diese Entscheidung wurde manuell für Heute zuerst priorisiert."),
-  ).toBeVisible();
+  await expect(manualPriorityExplanation(page)).toBeVisible();
   await expect(page.getByRole("button", { name: "Besichtigung Weber einordnen" })).toBeVisible();
 
   await page.getByRole("button", { name: "Rückfrage vormerken" }).click();
