@@ -4,6 +4,7 @@ const todayDecisionCookieName = "atlas-today-decisions";
 const offerTitle = "Angebot für Familie Müller freigeben und senden";
 const offerOverviewTitle = "Angebotsentwurf Müller prüfen";
 const visitTitle = "Besichtigung Weber als nächsten Schritt einplanen";
+const visitOverviewTitle = "Besichtigung Weber einordnen";
 const measurementTitle = "Fehlendes Maß vor der nächsten Einschätzung kennzeichnen";
 const measurementOverviewTitle = "Fehlendes Maß kennzeichnen";
 
@@ -290,16 +291,28 @@ test("Später entscheiden verschiebt die Priorität ans Ende", async ({ page }) 
   await expect(page.getByText("Atlas hat heute 5 Entscheidungen vorbereitet.")).toBeVisible();
 });
 
-test("Später entscheiden bleibt nach einem Reload am Ende der Queue", async ({ page }) => {
+test("Später entscheiden bleibt nach einem Reload in der offenen Queue", async ({ context, page }) => {
   await page.goto("/today");
-  const deferredDecisionTitle = await currentPriorityDecisionHeading(page).innerText();
+  const deferredDecision = {
+    id: "visit-weber",
+    overviewTitle: visitOverviewTitle,
+  };
 
   await page.getByRole("button", { name: "Später entscheiden" }).click();
   await page.reload();
 
-  await expect(currentPriorityDecisionHeading(page)).not.toHaveText(deferredDecisionTitle);
-  await expect(page.getByRole("button", { name: "Besichtigung Weber einordnen" })).toBeVisible();
+  await expect(page.getByRole("button", { name: deferredDecision.overviewTitle })).toBeVisible();
   await expect(page.getByText("Atlas hat heute 5 Entscheidungen vorbereitet.")).toBeVisible();
+
+  const decisionCookie = (await context.cookies()).find(
+    (cookie) => cookie.name === todayDecisionCookieName && cookie.path === "/",
+  );
+  expect(decisionCookie).toBeDefined();
+  const persistedState = JSON.parse(decodeURIComponent(decisionCookie.value));
+  expect(persistedState.decisions).toContainEqual({
+    decisionId: deferredDecision.id,
+    action: "later",
+  });
 });
 
 test("Beschädigte Cookie-Daten werden ignoriert", async ({ context, page }) => {
@@ -365,19 +378,23 @@ test("Ein Version-2-Cookie behält nur den manuellen Override", async ({ context
   await expect(page.getByRole("button", { name: "Besichtigung Weber einordnen" })).toBeVisible();
 
   await page.getByRole("button", { name: "Rückfrage vormerken" }).click();
-
-  const decisionCookies = (await context.cookies()).filter(
-    (cookie) => cookie.name === todayDecisionCookieName,
+  await expect(page.getByLabel("Aktueller Abschluss")).toContainText(
+    "Materialrückfrage wurde vorgemerkt.",
   );
-  expect(decisionCookies).toHaveLength(1);
-  const [decisionCookie] = decisionCookies;
+
+  const decisionCookie = (await context.cookies()).find(
+    (cookie) => cookie.name === todayDecisionCookieName && cookie.path === "/",
+  );
   expect(decisionCookie).toBeDefined();
   expect(decisionCookie).toMatchObject({ path: "/", secure: false });
-  expect(JSON.parse(decodeURIComponent(decisionCookie.value))).toEqual({
-    version: 3,
-    decisions: [{ decisionId: "supplier-selection", action: "approve" }],
-    manualPriorityDecisionId: null,
+  const persistedState = JSON.parse(decodeURIComponent(decisionCookie.value));
+  expect(persistedState.version).toBe(3);
+  expect(persistedState.decisions).toContainEqual({
+    decisionId: "supplier-selection",
+    action: "approve",
   });
+  expect(persistedState.manualPriorityDecisionId).toBeNull();
+  expect(persistedState).not.toHaveProperty("decisionOrder");
 
   await page.reload();
 
