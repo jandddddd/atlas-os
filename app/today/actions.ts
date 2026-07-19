@@ -3,10 +3,9 @@
 import { fixtureTodayDecisionRepository } from "@/lib/today/fixture-decision-repository";
 import {
   applyTodayDecisionState,
-  prioritizeTodayDecision,
   recordTodayDecisionAction,
   restrictTodayDecisionStateToKnownDecisions,
-  setTodayDecisionOrder,
+  setTodayDecisionManualPriority,
 } from "@/lib/today/today-decision-state";
 import { todayDecisionStateStore } from "@/lib/today/today-decision-state-store";
 import type {
@@ -67,14 +66,7 @@ export async function submitTodayDecision(
   }
 
   const nextState = command.action === "prioritize"
-    ? setTodayDecisionOrder(
-        state,
-        prioritizeTodayDecision(
-          currentDecisions.map((decision) => decision.id),
-          command.decisionId,
-        ),
-        command.decisionId,
-      )
+    ? setTodayDecisionManualPriority(state, command.decisionId)
     : recordTodayDecisionAction(state, {
         decisionId: command.decisionId,
         action: command.action,

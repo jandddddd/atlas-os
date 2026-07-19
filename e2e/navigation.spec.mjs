@@ -1,6 +1,46 @@
 import { expect, test } from "@playwright/test";
 
-test.beforeEach(async ({ page }) => {
+const todayDecisionCookieName = "atlas-today-decisions";
+const offerTitle = "Angebot für Familie Müller freigeben und senden";
+const offerOverviewTitle = "Angebotsentwurf Müller prüfen";
+const visitTitle = "Besichtigung Weber als nächsten Schritt einplanen";
+const measurementTitle = "Fehlendes Maß vor der nächsten Einschätzung kennzeichnen";
+const measurementOverviewTitle = "Fehlendes Maß kennzeichnen";
+
+async function resetTodayState(context) {
+  await context.clearCookies();
+}
+
+async function prioritizeDecision(page, overviewTitle, expectedTitle) {
+  await page.getByRole("button", { name: overviewTitle }).click();
+  await expect(page.getByRole("heading", { name: expectedTitle })).toBeVisible();
+}
+
+async function prioritizeOffer(page) {
+  await prioritizeDecision(page, offerOverviewTitle, offerTitle);
+}
+
+function currentPriorityDecisionHeading(page) {
+  return page.locator('section[aria-labelledby="priority-decision"] article h3');
+}
+
+async function expectNextOpenDecision(page) {
+  const heading = currentPriorityDecisionHeading(page);
+
+  await expect(heading).toBeVisible();
+  await expect(heading).not.toHaveText(offerTitle);
+
+  return heading.innerText();
+}
+
+function manualPriorityExplanation(page) {
+  return page
+    .locator('section[aria-labelledby="atlas-rationale"]')
+    .getByText("Diese Entscheidung wurde manuell für Heute zuerst priorisiert.", { exact: true });
+}
+
+test.beforeEach(async ({ context, page }) => {
+  await resetTodayState(context);
   await page.route("**/api/analyze-inquiry", async (route) => {
     await route.fulfill({
       status: 200,
@@ -73,11 +113,35 @@ test("Today-Seite ist erreichbar", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "Guten Morgen." })).toBeVisible();
   await expect(page.getByText("Atlas hat heute 5 Entscheidungen vorbereitet.")).toBeVisible();
   await expect(page.getByRole("heading", { name: "Heute zuerst" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Angebot für Familie Müller freigeben und senden" })).toHaveCount(1);
-  await expect(page.getByRole("heading", { name: "Angebotsentwurf Müller prüfen" })).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: visitTitle })).toHaveCount(1);
+  await expect(page.getByRole("heading", { name: offerOverviewTitle })).toHaveCount(1);
 });
 
-test("Die zweite weitere Entscheidung wird zur Priorität, ohne die Queue zu verändern", async ({ page }) => {
+test("Dependencies halten wartende Entscheidungen zurück und schalten Folgeentscheidungen frei", async ({ page }) => {
+  await page.goto("/today");
+
+  await expect(page.getByRole("heading", { name: visitTitle })).toBeVisible();
+  await expect(page.getByRole("heading", { name: offerTitle })).toHaveCount(0);
+
+  await page.getByRole("button", { name: "Später entscheiden" }).click();
+  await page.getByRole("button", { name: "Später entscheiden" }).click();
+
+  await expect(page.getByRole("heading", { name: measurementTitle })).toBeVisible();
+  await expect(
+    page.getByText("Blockiert weitere Arbeiten: Voraussetzung für Folgeentscheidung."),
+  ).toBeVisible();
+  await expect(page.getByRole("button", { name: measurementOverviewTitle })).toHaveCount(0);
+
+  await page.getByRole("button", { name: "Prüfpunkt markieren" }).click();
+
+  await expect(page.getByRole("heading", { name: offerTitle })).toBeVisible();
+  await expect(page.getByText("Wartet auf vorherige Entscheidung.")).toHaveCount(0);
+  await expect(
+    page.getByText("Blockiert weitere Arbeiten: Voraussetzung für Folgeentscheidung."),
+  ).toBeVisible();
+});
+
+test("Eine weitere Entscheidung wird manuell priorisiert, während die übrige Queue von der Engine kommt", async ({ page }) => {
   await page.goto("/today");
 
   await page.getByRole("button", { name: "Materialrückfrage vormerken" }).click();
@@ -85,8 +149,16 @@ test("Die zweite weitere Entscheidung wird zur Priorität, ohne die Queue zu ver
   await expect(
     page.getByRole("heading", { name: "Materialrückfrage für den nächsten Einkauf vormerken" }),
   ).toBeVisible();
-  await expect(page.getByRole("button", { name: "Angebotsentwurf Müller prüfen" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Besichtigung Weber einordnen" })).toBeVisible();
   await expect(page.getByText("Atlas hat heute 5 Entscheidungen vorbereitet.")).toBeVisible();
+
+  await page.reload();
+
+  await expect(
+    page.getByRole("heading", { name: "Materialrückfrage für den nächsten Einkauf vormerken" }),
+  ).toBeVisible();
+  await expect(manualPriorityExplanation(page)).toBeVisible();
+  await expect(page.getByRole("button", { name: "Besichtigung Weber einordnen" })).toBeVisible();
 });
 
 test("Eine neu priorisierte Entscheidung kann sofort freigegeben werden", async ({ page }) => {
@@ -116,7 +188,7 @@ test("Eine erneut priorisierte Entscheidung verliert ihren Später-Status", asyn
 
   await page.getByRole("button", { name: "Später entscheiden" }).click();
   await expect(
-    page.getByRole("heading", { name: "Besichtigung Weber als nächsten Schritt einplanen" }),
+    page.getByRole("heading", { name: "Materialrückfrage für den nächsten Einkauf vormerken" }),
   ).toBeVisible();
 
   await page.getByRole("button", { name: "Später entscheiden" }).click();
@@ -127,7 +199,7 @@ test("Eine erneut priorisierte Entscheidung verliert ihren Später-Status", asyn
   ).toBeVisible();
 
   const decisionCookie = (await context.cookies(page.url())).find(
-    (cookie) => cookie.name === "atlas-today-decisions",
+    (cookie) => cookie.name === todayDecisionCookieName,
   );
   expect(decisionCookie).toBeDefined();
   const persistedState = JSON.parse(decodeURIComponent(decisionCookie.value));
@@ -140,6 +212,7 @@ test("Eine erneut priorisierte Entscheidung verliert ihren Später-Status", asyn
 
 test("Der primäre Freigabe-Button ist sichtbar, erreichbar und rückt die nächste Entscheidung nach", async ({ page }) => {
   await page.goto("/today");
+  await prioritizeOffer(page);
 
   const approveButton = page.getByRole("button", { name: "Angebot senden" });
   await expect(approveButton).toBeVisible();
@@ -158,13 +231,17 @@ test("Der primäre Freigabe-Button ist sichtbar, erreichbar und rückt die näch
 
   await expect(page).toHaveURL("/today");
   await expect(page.getByLabel("Aktueller Abschluss")).toContainText("Angebot für Familie Müller wurde freigegeben.");
-  await expect(page.getByRole("heading", { name: "Angebot für Familie Müller freigeben und senden" })).toHaveCount(0);
-  await expect(page.getByRole("heading", { name: "Besichtigung Weber als nächsten Schritt einplanen" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: offerTitle })).toHaveCount(0);
+  await expectNextOpenDecision(page);
+  await expect(
+    page.getByText("Diese Entscheidung wurde manuell für Heute zuerst priorisiert."),
+  ).toHaveCount(0);
   await expect(page.getByText("Atlas hat heute 4 Entscheidungen vorbereitet.")).toBeVisible();
 });
 
 test("Während der Freigabe bleiben alle Aktionen sichtbar, aber gesperrt", async ({ page }) => {
   await page.goto("/today");
+  await prioritizeOffer(page);
   await page.route("**/today", async (route) => {
     if (route.request().method() === "POST") {
       await new Promise((resolve) => setTimeout(resolve, 500));
@@ -187,12 +264,14 @@ test("Während der Freigabe bleiben alle Aktionen sichtbar, aber gesperrt", asyn
 
 test("Freigabe bleibt nach einem Reload erhalten", async ({ page }) => {
   await page.goto("/today");
+  await prioritizeOffer(page);
 
   await page.getByRole("button", { name: "Angebot senden" }).click();
+  const nextDecisionTitle = await expectNextOpenDecision(page);
   await page.reload();
 
-  await expect(page.getByRole("heading", { name: "Angebot für Familie Müller freigeben und senden" })).toHaveCount(0);
-  await expect(page.getByRole("heading", { name: "Besichtigung Weber als nächsten Schritt einplanen" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: offerTitle })).toHaveCount(0);
+  await expect(currentPriorityDecisionHeading(page)).toHaveText(nextDecisionTitle);
   await expect(page.getByText("Atlas hat heute 4 Entscheidungen vorbereitet.")).toBeVisible();
 });
 
@@ -206,8 +285,8 @@ test("Später entscheiden verschiebt die Priorität ans Ende", async ({ page }) 
     "Die Entscheidung wurde für später eingeordnet.",
   );
   await expect(page.getByLabel("Aktueller Abschluss")).toContainText("Zurückgestellt");
-  await expect(page.getByRole("heading", { name: "Besichtigung Weber als nächsten Schritt einplanen" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Angebotsentwurf Müller prüfen" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Materialrückfrage für den nächsten Einkauf vormerken" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Besichtigung Weber einordnen" })).toBeVisible();
   await expect(page.getByText("Atlas hat heute 5 Entscheidungen vorbereitet.")).toBeVisible();
 });
 
@@ -217,15 +296,15 @@ test("Später entscheiden bleibt nach einem Reload am Ende der Queue", async ({ 
   await page.getByRole("button", { name: "Später entscheiden" }).click();
   await page.reload();
 
-  await expect(page.getByRole("heading", { name: "Besichtigung Weber als nächsten Schritt einplanen" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Angebotsentwurf Müller prüfen" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Materialrückfrage für den nächsten Einkauf vormerken" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Besichtigung Weber einordnen" })).toBeVisible();
   await expect(page.getByText("Atlas hat heute 5 Entscheidungen vorbereitet.")).toBeVisible();
 });
 
 test("Beschädigte Cookie-Daten werden ignoriert", async ({ context, page }) => {
   await context.addCookies([
     {
-      name: "atlas-today-decisions",
+      name: todayDecisionCookieName,
       value: "not-json",
       url: "http://localhost:3000/today",
       httpOnly: true,
@@ -235,14 +314,14 @@ test("Beschädigte Cookie-Daten werden ignoriert", async ({ context, page }) => 
 
   await page.goto("/today");
 
-  await expect(page.getByRole("heading", { name: "Angebot für Familie Müller freigeben und senden" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: visitTitle })).toBeVisible();
   await expect(page.getByText("Atlas hat heute 5 Entscheidungen vorbereitet.")).toBeVisible();
 });
 
 test("Ein gültiger Cookie-Zustand wird gelesen", async ({ context, page }) => {
   await context.addCookies([
     {
-      name: "atlas-today-decisions",
+      name: todayDecisionCookieName,
       value: JSON.stringify({
         version: 1,
         decisions: [{ decisionId: "offer-mueller", action: "approve" }],
@@ -255,15 +334,65 @@ test("Ein gültiger Cookie-Zustand wird gelesen", async ({ context, page }) => {
 
   await page.goto("/today");
 
-  await expect(page.getByRole("heading", { name: "Angebot für Familie Müller freigeben und senden" })).toHaveCount(0);
-  await expect(page.getByRole("heading", { name: "Besichtigung Weber als nächsten Schritt einplanen" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: offerTitle })).toHaveCount(0);
+  await expectNextOpenDecision(page);
+  await expect(page.getByText("Atlas hat heute 4 Entscheidungen vorbereitet.")).toBeVisible();
+});
+
+test("Ein Version-2-Cookie behält nur den manuellen Override", async ({ context, page }) => {
+  await context.addCookies([
+    {
+      name: todayDecisionCookieName,
+      value: JSON.stringify({
+        version: 2,
+        decisions: [],
+        decisionOrder: ["supplier-selection", "offer-mueller", "visit-weber"],
+      }),
+      url: "http://localhost:3000/",
+      httpOnly: true,
+      sameSite: "Lax",
+      secure: false,
+    },
+  ]);
+
+  await page.goto("/today");
+
+  await expect(
+    page.getByRole("heading", { name: "Materialrückfrage für den nächsten Einkauf vormerken" }),
+  ).toBeVisible();
+  await expect(manualPriorityExplanation(page)).toBeVisible();
+  await expect(page.getByRole("button", { name: "Besichtigung Weber einordnen" })).toBeVisible();
+
+  await page.getByRole("button", { name: "Rückfrage vormerken" }).click();
+
+  const decisionCookies = (await context.cookies()).filter(
+    (cookie) => cookie.name === todayDecisionCookieName,
+  );
+  expect(decisionCookies).toHaveLength(1);
+  const canonicalCookie = decisionCookies.find((cookie) => cookie.path === "/today");
+  const legacyCookie = decisionCookies.find((cookie) => cookie.path === "/");
+
+  expect(canonicalCookie).toBeDefined();
+  expect(legacyCookie).toBeUndefined();
+  expect(canonicalCookie).toMatchObject({ path: "/today", secure: false });
+  expect(JSON.parse(decodeURIComponent(canonicalCookie.value))).toEqual({
+    version: 3,
+    decisions: [{ decisionId: "supplier-selection", action: "approve" }],
+    manualPriorityDecisionId: null,
+  });
+
+  await page.reload();
+
+  await expect(
+    page.getByRole("heading", { name: "Materialrückfrage für den nächsten Einkauf vormerken" }),
+  ).toHaveCount(0);
   await expect(page.getByText("Atlas hat heute 4 Entscheidungen vorbereitet.")).toBeVisible();
 });
 
 test("Doppelte decisionIds im Cookie behalten die erste gültige Aktion", async ({ context, page }) => {
   await context.addCookies([
     {
-      name: "atlas-today-decisions",
+      name: todayDecisionCookieName,
       value: JSON.stringify({
         version: 1,
         decisions: [
@@ -279,15 +408,15 @@ test("Doppelte decisionIds im Cookie behalten die erste gültige Aktion", async 
 
   await page.goto("/today");
 
-  await expect(page.getByRole("heading", { name: "Besichtigung Weber als nächsten Schritt einplanen" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Angebotsentwurf Müller prüfen" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: visitTitle })).toBeVisible();
+  await expect(page.getByRole("heading", { name: offerOverviewTitle })).toBeVisible();
   await expect(page.getByText("Atlas hat heute 5 Entscheidungen vorbereitet.")).toBeVisible();
 });
 
 test("Unbekannte IDs und ungültige Aktionen im Cookie werden ignoriert", async ({ context, page }) => {
   await context.addCookies([
     {
-      name: "atlas-today-decisions",
+      name: todayDecisionCookieName,
       value: JSON.stringify({
         version: 1,
         decisions: [
@@ -303,12 +432,13 @@ test("Unbekannte IDs und ungültige Aktionen im Cookie werden ignoriert", async 
 
   await page.goto("/today");
 
-  await expect(page.getByRole("heading", { name: "Angebot für Familie Müller freigeben und senden" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: visitTitle })).toBeVisible();
   await expect(page.getByText("Atlas hat heute 5 Entscheidungen vorbereitet.")).toBeVisible();
 });
 
 test("Die Freigabe schreibt ausschließlich das kompakte Entscheidungsmodell", async ({ context, page }) => {
   await page.goto("/today");
+  await prioritizeOffer(page);
 
   await page.getByRole("button", { name: "Angebot senden" }).click();
   await expect(page.getByLabel("Aktueller Abschluss")).toContainText(
@@ -316,12 +446,12 @@ test("Die Freigabe schreibt ausschließlich das kompakte Entscheidungsmodell", a
   );
 
   const decisionCookie = (await context.cookies(page.url())).find(
-    (cookie) => cookie.name === "atlas-today-decisions",
+    (cookie) => cookie.name === todayDecisionCookieName,
   );
 
   expect(decisionCookie).toBeDefined();
   expect(decisionCookie).toMatchObject({
-    name: "atlas-today-decisions",
+    name: todayDecisionCookieName,
     httpOnly: true,
     sameSite: "Lax",
     path: "/today",
@@ -329,11 +459,14 @@ test("Die Freigabe schreibt ausschließlich das kompakte Entscheidungsmodell", a
 
   const persistedState = JSON.parse(decodeURIComponent(decisionCookie.value));
 
-  expect(persistedState).toEqual({
-    version: 2,
-    decisions: [{ decisionId: "offer-mueller", action: "approve" }],
-    decisionOrder: [],
-  });
+  expect(persistedState.version).toBe(3);
+  expect(persistedState.decisions).toEqual([{ decisionId: "offer-mueller", action: "approve" }]);
+  expect(persistedState.manualPriorityDecisionId).toBeNull();
+  expect(Object.keys(persistedState).sort()).toEqual([
+    "decisions",
+    "manualPriorityDecisionId",
+    "version",
+  ]);
   expect(Object.keys(persistedState.decisions[0]).sort()).toEqual(["action", "decisionId"]);
 });
 
@@ -342,9 +475,10 @@ test("Eine bereits erledigte Entscheidung entfernt bei einem stale Submit nicht 
   page,
 }) => {
   await page.goto("/today");
+  await prioritizeOffer(page);
   await context.addCookies([
     {
-      name: "atlas-today-decisions",
+      name: todayDecisionCookieName,
       value: JSON.stringify({
         version: 1,
         decisions: [{ decisionId: "offer-mueller", action: "approve" }],
@@ -359,12 +493,13 @@ test("Eine bereits erledigte Entscheidung entfernt bei einem stale Submit nicht 
   await expect(page.getByLabel("Entscheidungsfehler")).toBeVisible();
   await page.reload();
 
-  await expect(page.getByRole("heading", { name: "Besichtigung Weber als nächsten Schritt einplanen" })).toBeVisible();
+  await expectNextOpenDecision(page);
   await expect(page.getByText("Atlas hat heute 4 Entscheidungen vorbereitet.")).toBeVisible();
 });
 
 test("Details lassen sich öffnen und schließen", async ({ page }) => {
   await page.goto("/today");
+  await prioritizeOffer(page);
 
   const detailsButton = page.getByRole("button", { name: "Details ansehen" });
   await expect(detailsButton).toHaveAttribute("aria-expanded", "false");
@@ -382,6 +517,7 @@ test("Details lassen sich öffnen und schließen", async ({ page }) => {
 
 test("Ändern erzeugt keinen falschen Abschlussstatus", async ({ page }) => {
   await page.goto("/today");
+  await prioritizeOffer(page);
 
   await page.getByRole("link", { name: "Ändern" }).click();
 
