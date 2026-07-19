@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   calculateTodayDecisionPriority,
+  createTodayDecisionManualPriorityExplanation,
   prioritizeTodayDecisions,
 } from "./decision-priority.ts";
 
@@ -22,9 +23,70 @@ test("preserves the supplied decision order", () => {
   ];
 
   assert.deepEqual(
-    prioritizeTodayDecisions(decisions).map((decision) => decision.id),
+    prioritizeTodayDecisions(decisions).map(({ decision }) => decision.id),
     decisions.map((decision) => decision.id),
   );
+});
+
+test("returns explainability for the unchanged source-order priority", () => {
+  const decisions = [{ id: "first" }, { id: "second" }];
+
+  assert.deepEqual(prioritizeTodayDecisions(decisions), [
+    {
+      decision: { id: "first" },
+      priority: {
+        score: 2,
+        reasons: [
+          {
+            code: "source-order",
+            description:
+              "Diese Entscheidung steht in der bestehenden Today-Reihenfolge an erster Stelle.",
+          },
+        ],
+      },
+      sourceIndex: 0,
+    },
+    {
+      decision: { id: "second" },
+      priority: {
+        score: 1,
+        reasons: [
+          {
+            code: "source-order",
+            description: "Diese Entscheidung folgt der bestehenden Today-Reihenfolge.",
+          },
+        ],
+      },
+      sourceIndex: 1,
+    },
+  ]);
+});
+
+test("replaces source-order explainability when a decision is manually moved to Today first", () => {
+  const [sourcePriorityDecision, manuallyPrioritizedDecision] = prioritizeTodayDecisions([
+    { id: "first" },
+    { id: "manually-prioritized" },
+  ]);
+
+  assert.deepEqual(
+    createTodayDecisionManualPriorityExplanation(manuallyPrioritizedDecision.priority),
+    {
+      score: 1,
+      reasons: [
+        {
+          code: "manual-priority",
+          description: "Diese Entscheidung wurde manuell für Heute zuerst priorisiert.",
+        },
+      ],
+    },
+  );
+  assert.deepEqual(sourcePriorityDecision.priority.reasons, [
+    {
+      code: "source-order",
+      description:
+        "Diese Entscheidung steht in der bestehenden Today-Reihenfolge an erster Stelle.",
+    },
+  ]);
 });
 
 test("keeps an empty decision list empty", () => {

@@ -83,5 +83,11 @@ export async function submitTodayDecision(
 
   await todayDecisionStateStore.write(nextState);
 
-  return { success: true, decisionIds: nextDecisions.map((decision) => decision.id) };
+  return {
+    success: true,
+    decisionIds: nextDecisions.map((decision) => decision.id),
+    priorityByDecisionId: Object.fromEntries(
+      nextDecisions.map((decision) => [decision.id, decision.priority]),
+    ),
+  };
 }

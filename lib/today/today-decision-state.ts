@@ -1,4 +1,5 @@
 import type { TodayApprovalDecision } from "@/components/today/TodayApprovalCenter";
+import { createTodayDecisionManualPriorityExplanation } from "@/lib/today/decision-priority";
 
 const persistedActions = ["approve", "later"] as const;
 const maximumPersistedDecisions = 20;
@@ -221,8 +222,7 @@ export function applyTodayDecisionState(
       .map((decision) => decision.id)
       .filter((decisionId) => !orderedDecisionIdSet.has(decisionId)),
   ];
-
-  return [
+  const visibleDecisions = [
     ...queue
       .filter((decisionId) => !postponedDecisionIdSet.has(decisionId))
       .map((decisionId) => availableDecisions.find((decision) => decision.id === decisionId))
@@ -232,4 +232,22 @@ export function applyTodayDecisionState(
       .map((decisionId) => availableDecisions.find((decision) => decision.id === decisionId))
       .filter((decision): decision is TodayApprovalDecision => Boolean(decision)),
   ];
+  const [sourcePriorityDecision] = availableDecisions;
+  const [manuallyPrioritizedDecisionId] = orderedDecisionIds;
+  const hasManualPriorityOverride =
+    manuallyPrioritizedDecisionId !== undefined &&
+    manuallyPrioritizedDecisionId !== sourcePriorityDecision?.id;
+
+  if (!hasManualPriorityOverride) {
+    return visibleDecisions;
+  }
+
+  return visibleDecisions.map((decision) => (
+    decision.id === manuallyPrioritizedDecisionId
+      ? {
+          ...decision,
+          priority: createTodayDecisionManualPriorityExplanation(decision.priority),
+        }
+      : decision
+  ));
 }
