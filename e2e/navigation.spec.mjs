@@ -348,10 +348,10 @@ test("Ein Version-2-Cookie behält nur den manuellen Override", async ({ context
         decisions: [],
         decisionOrder: ["supplier-selection", "offer-mueller", "visit-weber"],
       }),
-      url: "http://localhost:3000/today",
+      url: "http://localhost:3000/",
       httpOnly: true,
       sameSite: "Lax",
-      secure: true,
+      secure: false,
     },
   ]);
 
@@ -371,11 +371,19 @@ test("Ein Version-2-Cookie behält nur den manuellen Override", async ({ context
   expect(decisionCookies).toHaveLength(1);
   const [decisionCookie] = decisionCookies;
   expect(decisionCookie).toBeDefined();
+  expect(decisionCookie).toMatchObject({ path: "/today", secure: true });
   expect(JSON.parse(decodeURIComponent(decisionCookie.value))).toEqual({
     version: 3,
     decisions: [{ decisionId: "supplier-selection", action: "approve" }],
     manualPriorityDecisionId: null,
   });
+
+  await page.reload();
+
+  await expect(
+    page.getByRole("heading", { name: "Materialrückfrage für den nächsten Einkauf vormerken" }),
+  ).toHaveCount(0);
+  await expect(page.getByText("Atlas hat heute 4 Entscheidungen vorbereitet.")).toBeVisible();
 });
 
 test("Doppelte decisionIds im Cookie behalten die erste gültige Aktion", async ({ context, page }) => {

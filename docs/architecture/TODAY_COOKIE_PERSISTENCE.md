@@ -45,6 +45,8 @@ Version 1 cookies remain readable. Their payload had no manual override and stor
 
 When a valid v1 cookie is read, Atlas applies the valid compact actions with no manual override. Version 2 cookies remain readable as well: their first valid `decisionOrder` entry becomes the single manual override, while the rest of the legacy order is discarded. This keeps the intentional user choice without freezing the remaining queue. The next successful cookie write serializes the v3 schema.
 
+During that first successful write, Atlas also expires the legacy cookie on path `/`. The canonical v3 cookie is then the only `atlas-today-decisions` cookie and remains scoped to `/today`.
+
 Malformed payloads, unsupported versions, unknown decision IDs, unsupported actions, and invalid order entries are ignored defensively. They do not create decisions and do not replace the fixture/repository as the source of truth.
 
 ## Server actions and queue updates
