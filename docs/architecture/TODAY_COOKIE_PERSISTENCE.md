@@ -14,7 +14,7 @@ The current versioned payload has the following shape:
   decisions: [
     {
       decisionId: string,
-      action: "approve" | "reject" | "later"
+      action: "approve" | "later"
     }
   ],
   decisionOrder: string[]
@@ -33,7 +33,7 @@ For example:
 }
 ```
 
-`decisions` records compact outcome or deferral state only. It is capped at 20 entries and is intentionally not an event history. Duplicate IDs are normalized defensively: the first valid action is retained and later duplicate entries are ignored.
+`decisions` records compact outcome or deferral state only. Currently, only `approve` and `later` are persisted. It is capped at 20 entries and is intentionally not an event history. Duplicate IDs are normalized defensively: the first valid action is retained and later duplicate entries are ignored.
 
 `decisionOrder` stores the persisted order of known, open decisions. A decision selected as the priority is placed first in this array. When the state is applied, IDs that are unknown, malformed, or no longer present in the fixture/repository are ignored defensively; the authoritative fixture/repository order supplies any remaining known open decisions.
 
@@ -49,7 +49,7 @@ Malformed payloads, unsupported versions, unknown decision IDs, unsupported acti
 
 ## Server actions and queue updates
 
-The earlier rule that every server action may target only the current queue item is no longer sufficient. `approve`, `reject`, and `later` continue to apply to the current priority decision. `prioritize` may select any known open decision, persists its queue position through `decisionOrder`, and then makes it the current priority for subsequent actions.
+The earlier rule that every server action may target only the current queue item is no longer sufficient. `approve` and `later` continue to apply to the current priority decision. `prioritize` may select any known open decision, persists its queue position through `decisionOrder`, and then makes it the current priority for subsequent actions.
 
 After every successful action, the server derives the resulting queue from fixtures/repository data plus the validated cookie state. The client renders that returned order; a reload rebuilds the same queue server-side from the same inputs. Controlled errors leave persistence unchanged.
 
