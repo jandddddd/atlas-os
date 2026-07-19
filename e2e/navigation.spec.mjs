@@ -89,6 +89,25 @@ test("Die zweite weitere Entscheidung wird zur Priorität, ohne die Queue zu ver
   await expect(page.getByText("Atlas hat heute 5 Entscheidungen vorbereitet.")).toBeVisible();
 });
 
+test("Eine neu priorisierte Entscheidung kann sofort freigegeben werden", async ({ page }) => {
+  await page.goto("/today");
+
+  await page.getByRole("button", { name: "Materialrückfrage vormerken" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Materialrückfrage für den nächsten Einkauf vormerken" }),
+  ).toBeVisible();
+
+  await page.getByRole("button", { name: "Rückfrage vormerken" }).click();
+
+  await expect(page.getByLabel("Aktueller Abschluss")).toContainText(
+    "Materialrückfrage wurde vorgemerkt.",
+  );
+  await expect(
+    page.getByRole("heading", { name: "Materialrückfrage für den nächsten Einkauf vormerken" }),
+  ).toHaveCount(0);
+  await expect(page.getByLabel("Entscheidungsfehler")).toHaveCount(0);
+});
+
 test("Der primäre Freigabe-Button ist sichtbar, erreichbar und rückt die nächste Entscheidung nach", async ({ page }) => {
   await page.goto("/today");
 
@@ -277,8 +296,9 @@ test("Die Freigabe schreibt ausschließlich das kompakte Entscheidungsmodell", a
   const persistedState = JSON.parse(decodeURIComponent(decisionCookie.value));
 
   expect(persistedState).toEqual({
-    version: 1,
+    version: 2,
     decisions: [{ decisionId: "offer-mueller", action: "approve" }],
+    decisionOrder: [],
   });
   expect(Object.keys(persistedState.decisions[0]).sort()).toEqual(["action", "decisionId"]);
 });

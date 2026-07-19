@@ -1,22 +1,26 @@
-import type { TodayDecisionAction } from "@/app/today/decision-types";
 import type { TodayApprovalDecision } from "@/components/today/TodayApprovalCenter";
 
 const persistedActions = ["approve", "later"] as const;
 const maximumPersistedDecisions = 20;
+const currentStateVersion = 2;
+
+type PersistedTodayDecisionAction = (typeof persistedActions)[number];
 
 export type PersistedTodayDecision = {
   decisionId: string;
-  action: TodayDecisionAction;
+  action: PersistedTodayDecisionAction;
 };
 
 export type TodayDecisionState = {
-  version: 1;
+  version: 2;
   decisions: PersistedTodayDecision[];
+  decisionOrder: string[];
 };
 
 export const emptyTodayDecisionState: TodayDecisionState = {
-  version: 1,
+  version: currentStateVersion,
   decisions: [],
+  decisionOrder: [],
 };
 
 export function prioritizeTodayDecision(
@@ -48,7 +52,7 @@ export function prioritizeTodayDecision(
   });
 }
 
-function isPersistedAction(action: unknown): action is TodayDecisionAction {
+function isPersistedAction(action: unknown): action is PersistedTodayDecisionAction {
   return persistedActions.some((persistedAction) => persistedAction === action);
 }
 
@@ -85,6 +89,20 @@ function normalizePersistedDecisions(values: unknown[]): PersistedTodayDecision[
   return decisions;
 }
 
+function normalizeDecisionIds(values: unknown[]): string[] {
+  const decisionIds = new Set<string>();
+
+  for (const value of values) {
+    if (typeof value !== "string" || value.trim().length === 0) {
+      continue;
+    }
+
+    decisionIds.add(value);
+  }
+
+  return [...decisionIds];
+}
+
 export function parseTodayDecisionState(value: string | undefined): TodayDecisionState {
   if (!value) {
     return emptyTodayDecisionState;
@@ -93,20 +111,36 @@ export function parseTodayDecisionState(value: string | undefined): TodayDecisio
   try {
     const parsed: unknown = JSON.parse(value);
 
+    if (typeof parsed !== "object" || parsed === null || !("version" in parsed)) {
+      return emptyTodayDecisionState;
+    }
+
     if (
-      typeof parsed !== "object" ||
-      parsed === null ||
-      !("version" in parsed) ||
-      parsed.version !== 1 ||
+      parsed.version === 1 &&
+      "decisions" in parsed &&
+      Array.isArray(parsed.decisions)
+    ) {
+      return {
+        version: currentStateVersion,
+        decisions: normalizePersistedDecisions(parsed.decisions),
+        decisionOrder: [],
+      };
+    }
+
+    if (
+      parsed.version !== currentStateVersion ||
       !("decisions" in parsed) ||
-      !Array.isArray(parsed.decisions)
+      !Array.isArray(parsed.decisions) ||
+      !("decisionOrder" in parsed) ||
+      !Array.isArray(parsed.decisionOrder)
     ) {
       return emptyTodayDecisionState;
     }
 
     return {
-      version: 1,
+      version: currentStateVersion,
       decisions: normalizePersistedDecisions(parsed.decisions),
+      decisionOrder: normalizeDecisionIds(parsed.decisionOrder),
     };
   } catch {
     return emptyTodayDecisionState;
@@ -115,8 +149,9 @@ export function parseTodayDecisionState(value: string | undefined): TodayDecisio
 
 export function serializeTodayDecisionState(state: TodayDecisionState): string {
   return JSON.stringify({
-    version: 1,
+    version: currentStateVersion,
     decisions: normalizePersistedDecisions(state.decisions),
+    decisionOrder: normalizeDecisionIds(state.decisionOrder),
   });
 }
 
@@ -127,8 +162,9 @@ export function restrictTodayDecisionStateToKnownDecisions(
   const knownDecisionIds = new Set(decisions.map((decision) => decision.id));
 
   return {
-    version: 1,
+    version: currentStateVersion,
     decisions: state.decisions.filter((decision) => knownDecisionIds.has(decision.decisionId)),
+    decisionOrder: state.decisionOrder.filter((decisionId) => knownDecisionIds.has(decisionId)),
   };
 }
 
@@ -137,11 +173,22 @@ export function recordTodayDecisionAction(
   decision: PersistedTodayDecision,
 ): TodayDecisionState {
   return {
-    version: 1,
+    version: currentStateVersion,
     decisions: [
       ...state.decisions.filter((entry) => entry.decisionId !== decision.decisionId),
       decision,
     ].slice(-maximumPersistedDecisions),
+    decisionOrder: state.decisionOrder,
+  };
+}
+
+export function setTodayDecisionOrder(
+  state: TodayDecisionState,
+  decisionOrder: string[],
+): TodayDecisionState {
+  return {
+    ...state,
+    decisionOrder: normalizeDecisionIds(decisionOrder),
   };
 }
 
@@ -159,10 +206,24 @@ export function applyTodayDecisionState(
     (decision) => actionByDecisionId.get(decision.id) !== "approve",
   );
   const postponedDecisionIdSet = new Set(postponedDecisionIds);
+  const orderedDecisionIds = state.decisionOrder.filter((decisionId) =>
+    availableDecisions.some((decision) => decision.id === decisionId),
+  );
+  const orderedDecisionIdSet = new Set(orderedDecisionIds);
+  const queue = [
+    ...orderedDecisionIds,
+    ...availableDecisions
+      .map((decision) => decision.id)
+      .filter((decisionId) => !orderedDecisionIdSet.has(decisionId)),
+  ];
 
   return [
-    ...availableDecisions.filter((decision) => !postponedDecisionIdSet.has(decision.id)),
+    ...queue
+      .filter((decisionId) => !postponedDecisionIdSet.has(decisionId))
+      .map((decisionId) => availableDecisions.find((decision) => decision.id === decisionId))
+      .filter((decision): decision is TodayApprovalDecision => Boolean(decision)),
     ...postponedDecisionIds
+      .map((decisionId) => queue.find((queueDecisionId) => queueDecisionId === decisionId))
       .map((decisionId) => availableDecisions.find((decision) => decision.id === decisionId))
       .filter((decision): decision is TodayApprovalDecision => Boolean(decision)),
   ];

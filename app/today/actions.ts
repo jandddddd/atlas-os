@@ -3,8 +3,10 @@
 import { fixtureTodayDecisionRepository } from "@/lib/today/fixture-decision-repository";
 import {
   applyTodayDecisionState,
+  prioritizeTodayDecision,
   recordTodayDecisionAction,
   restrictTodayDecisionStateToKnownDecisions,
+  setTodayDecisionOrder,
 } from "@/lib/today/today-decision-state";
 import { todayDecisionStateStore } from "@/lib/today/today-decision-state-store";
 import type {
@@ -13,7 +15,7 @@ import type {
   TodayDecisionResult,
 } from "@/app/today/decision-types";
 
-const todayDecisionActions = ["approve", "later"] as const;
+const todayDecisionActions = ["approve", "later", "prioritize"] as const;
 
 function isTodayDecisionAction(action: unknown): action is TodayDecisionAction {
   return todayDecisionActions.some((todayDecisionAction) => todayDecisionAction === action);
@@ -47,18 +49,38 @@ export async function submitTodayDecision(
   }
 
   const state = restrictTodayDecisionStateToKnownDecisions(persistedState, decisions);
-  const [currentDecision] = applyTodayDecisionState(decisions, state);
+  const currentDecisions = applyTodayDecisionState(decisions, state);
+  const [currentDecision] = currentDecisions;
 
-  if (currentDecision?.id !== command.decisionId) {
+  if (
+    command.action === "prioritize" &&
+    !currentDecisions.some((decision) => decision.id === command.decisionId)
+  ) {
     return { success: false, error: "decision-not-current" };
   }
 
-  await todayDecisionStateStore.write(
-    recordTodayDecisionAction(state, {
-      decisionId: command.decisionId,
-      action: command.action,
-    }),
-  );
+  if (
+    command.action !== "prioritize" &&
+    currentDecision?.id !== command.decisionId
+  ) {
+    return { success: false, error: "decision-not-current" };
+  }
 
-  return { success: true };
+  const nextState = command.action === "prioritize"
+    ? setTodayDecisionOrder(
+        state,
+        prioritizeTodayDecision(
+          currentDecisions.map((decision) => decision.id),
+          command.decisionId,
+        ),
+      )
+    : recordTodayDecisionAction(state, {
+        decisionId: command.decisionId,
+        action: command.action,
+      });
+  const nextDecisions = applyTodayDecisionState(decisions, nextState);
+
+  await todayDecisionStateStore.write(nextState);
+
+  return { success: true, decisionIds: nextDecisions.map((decision) => decision.id) };
 }

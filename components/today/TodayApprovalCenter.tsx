@@ -8,7 +8,6 @@ import { DecisionOverviewList } from "@/components/today/DecisionOverviewList";
 import { TodayCompletionNotice } from "@/components/today/TodayCompletionNotice";
 import { TodayEmptyState } from "@/components/today/TodayEmptyState";
 import { TodayHeader } from "@/components/today/TodayHeader";
-import { prioritizeTodayDecision } from "@/lib/today/today-decision-state";
 
 type CompletionStatus = "offer-approved" | "change-requested" | null;
 
@@ -31,16 +30,6 @@ type TodayApprovalCenterProps = {
   initialCompletionStatus: CompletionStatus;
   decisions: TodayApprovalDecision[];
 };
-
-function moveFirstDecisionToEnd(decisionIds: string[]) {
-  const [currentDecisionId, ...remainingDecisionIds] = decisionIds;
-
-  if (!currentDecisionId) {
-    return decisionIds;
-  }
-
-  return [...remainingDecisionIds, currentDecisionId];
-}
 
 export function TodayApprovalCenter({
   dateLabel,
@@ -106,7 +95,7 @@ export function TodayApprovalCenter({
       setCompletionMessage(priorityDecision.completionMessage);
       setExpandedDetailsId(null);
       setEditHintDecisionId(null);
-      setVisibleDecisionIds((currentDecisionIds) => currentDecisionIds.slice(1));
+      setVisibleDecisionIds(result.decisionIds);
     } finally {
       priorityDecisionSubmissionInProgress.current = false;
       setIsSubmittingPriorityDecision(false);
@@ -137,7 +126,7 @@ export function TodayApprovalCenter({
       setCompletionMessage(null);
       setExpandedDetailsId(null);
       setEditHintDecisionId(null);
-      setVisibleDecisionIds(moveFirstDecisionToEnd);
+      setVisibleDecisionIds(result.decisionIds);
     } finally {
       priorityDecisionSubmissionInProgress.current = false;
       setIsSubmittingPriorityDecision(false);
@@ -154,17 +143,32 @@ export function TodayApprovalCenter({
     setEditHintDecisionId(decisionId);
   }
 
-  function prioritizeDecision(decisionId: string) {
+  async function prioritizeDecision(decisionId: string) {
     if (isSubmittingPriorityDecision) {
       return;
     }
 
-    setCompletionMessage(null);
-    setExpandedDetailsId(null);
-    setEditHintDecisionId(null);
-    setVisibleDecisionIds((currentDecisionIds) =>
-      prioritizeTodayDecision(currentDecisionIds, decisionId),
-    );
+    setIsSubmittingPriorityDecision(true);
+    setSubmissionError(false);
+
+    try {
+      const result = await submitTodayDecision({
+        decisionId,
+        action: "prioritize",
+      });
+
+      if (!result.success) {
+        setSubmissionError(true);
+        return;
+      }
+
+      setCompletionMessage(null);
+      setExpandedDetailsId(null);
+      setEditHintDecisionId(null);
+      setVisibleDecisionIds(result.decisionIds);
+    } finally {
+      setIsSubmittingPriorityDecision(false);
+    }
   }
 
   return (
