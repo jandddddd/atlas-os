@@ -348,9 +348,11 @@ test("Ein Version-2-Cookie behält nur den manuellen Override", async ({ context
         decisions: [],
         decisionOrder: ["supplier-selection", "offer-mueller", "visit-weber"],
       }),
-      url: "http://localhost:3000/today",
+      domain: "localhost",
+      path: "/today",
       httpOnly: true,
       sameSite: "Lax",
+      secure: true,
     },
   ]);
 
@@ -364,12 +366,15 @@ test("Ein Version-2-Cookie behält nur den manuellen Override", async ({ context
 
   await page.getByRole("button", { name: "Rückfrage vormerken" }).click();
 
-  const decisionCookie = (await context.cookies(page.url())).find(
+  const decisionCookies = (await context.cookies()).filter(
     (cookie) => cookie.name === todayDecisionCookieName,
   );
+  expect(decisionCookies).toHaveLength(1);
+  const [decisionCookie] = decisionCookies;
   expect(decisionCookie).toBeDefined();
-  expect(JSON.parse(decodeURIComponent(decisionCookie.value))).toMatchObject({
+  expect(JSON.parse(decodeURIComponent(decisionCookie.value))).toEqual({
     version: 3,
+    decisions: [{ decisionId: "supplier-selection", action: "approve" }],
     manualPriorityDecisionId: null,
   });
 });
