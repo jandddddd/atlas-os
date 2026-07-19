@@ -205,6 +205,7 @@ test("Später entscheiden verschiebt die Priorität ans Ende", async ({ page }) 
   await expect(page.getByLabel("Aktueller Abschluss")).toContainText(
     "Die Entscheidung wurde für später eingeordnet.",
   );
+  await expect(page.getByLabel("Aktueller Abschluss")).toContainText("Zurückgestellt");
   await expect(page.getByRole("heading", { name: "Besichtigung Weber als nächsten Schritt einplanen" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Angebotsentwurf Müller prüfen" })).toBeVisible();
   await expect(page.getByText("Atlas hat heute 5 Entscheidungen vorbereitet.")).toBeVisible();
