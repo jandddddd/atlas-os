@@ -25,7 +25,10 @@ export const cookieTodayDecisionStateStore: TodayDecisionStateStore = {
 
   async write(state: TodayDecisionState): Promise<void> {
     const [cookieStore, requestHeaders] = await Promise.all([cookies(), headers()]);
-    const secure = shouldUseSecureTodayCookie(requestHeaders.get("x-forwarded-proto"));
+    const secure = shouldUseSecureTodayCookie(
+      requestHeaders.get("x-forwarded-proto"),
+      requestHeaders.get("origin"),
+    );
 
     cookieStore.set(
       todayDecisionCookieName,

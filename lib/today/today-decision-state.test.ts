@@ -24,6 +24,21 @@ test("migrates a version 2 order to only its manual override", () => {
   );
 });
 
+test("migrates the first valid version 2 priority ID", () => {
+  assert.deepEqual(
+    parseTodayDecisionState(JSON.stringify({
+      version: 2,
+      decisions: [],
+      decisionOrder: [null, 7, {}, "", "   ", "offer-mueller", "visit-weber"],
+    })),
+    {
+      version: 3,
+      decisions: [],
+      manualPriorityDecisionId: "offer-mueller",
+    },
+  );
+});
+
 test("serializes version 3 state without the legacy queue order", () => {
   const state = setTodayDecisionManualPriority(emptyTodayDecisionState, "supplier-selection");
 

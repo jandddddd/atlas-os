@@ -68,6 +68,18 @@ function normalizeDecisionId(value: unknown): string | null {
   return typeof value === "string" && value.trim().length > 0 ? value : null;
 }
 
+function firstValidLegacyPriorityDecisionId(values: unknown[]): string | null {
+  for (const value of values) {
+    const decisionId = normalizeDecisionId(value);
+
+    if (decisionId !== null) {
+      return decisionId;
+    }
+  }
+
+  return null;
+}
+
 export function parseTodayDecisionState(value: string | undefined): TodayDecisionState {
   if (!value) {
     return emptyTodayDecisionState;
@@ -102,7 +114,7 @@ export function parseTodayDecisionState(value: string | undefined): TodayDecisio
       return {
         version: currentStateVersion,
         decisions: normalizePersistedDecisions(parsed.decisions),
-        manualPriorityDecisionId: normalizeDecisionId(parsed.decisionOrder[0]),
+        manualPriorityDecisionId: firstValidLegacyPriorityDecisionId(parsed.decisionOrder),
       };
     }
 
