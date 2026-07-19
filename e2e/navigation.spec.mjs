@@ -292,12 +292,13 @@ test("Später entscheiden verschiebt die Priorität ans Ende", async ({ page }) 
 
 test("Später entscheiden bleibt nach einem Reload am Ende der Queue", async ({ page }) => {
   await page.goto("/today");
+  const deferredDecisionTitle = await currentPriorityDecisionHeading(page).innerText();
 
   await page.getByRole("button", { name: "Später entscheiden" }).click();
   await page.reload();
 
-  await expect(page.getByRole("heading", { name: "Materialrückfrage für den nächsten Einkauf vormerken" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Besichtigung Weber einordnen" })).toBeVisible();
+  await expect(currentPriorityDecisionHeading(page)).not.toHaveText(deferredDecisionTitle);
+  await expect(page.getByRole("button", { name: "Besichtigung Weber einordnen" })).toBeVisible();
   await expect(page.getByText("Atlas hat heute 5 Entscheidungen vorbereitet.")).toBeVisible();
 });
 
@@ -369,13 +370,10 @@ test("Ein Version-2-Cookie behält nur den manuellen Override", async ({ context
     (cookie) => cookie.name === todayDecisionCookieName,
   );
   expect(decisionCookies).toHaveLength(1);
-  const canonicalCookie = decisionCookies.find((cookie) => cookie.path === "/today");
-  const legacyCookie = decisionCookies.find((cookie) => cookie.path === "/");
-
-  expect(canonicalCookie).toBeDefined();
-  expect(legacyCookie).toBeUndefined();
-  expect(canonicalCookie).toMatchObject({ path: "/today", secure: false });
-  expect(JSON.parse(decodeURIComponent(canonicalCookie.value))).toEqual({
+  const [decisionCookie] = decisionCookies;
+  expect(decisionCookie).toBeDefined();
+  expect(decisionCookie).toMatchObject({ path: "/", secure: false });
+  expect(JSON.parse(decodeURIComponent(decisionCookie.value))).toEqual({
     version: 3,
     decisions: [{ decisionId: "supplier-selection", action: "approve" }],
     manualPriorityDecisionId: null,
@@ -454,7 +452,7 @@ test("Die Freigabe schreibt ausschließlich das kompakte Entscheidungsmodell", a
     name: todayDecisionCookieName,
     httpOnly: true,
     sameSite: "Lax",
-    path: "/today",
+    path: "/",
   });
 
   const persistedState = JSON.parse(decodeURIComponent(decisionCookie.value));

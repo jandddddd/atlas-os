@@ -12,7 +12,7 @@ export const todayDecisionCookieName = "atlas-today-decisions";
 
 const todayDecisionCookieOptions = {
   httpOnly: true,
-  path: "/today",
+  path: "/",
   sameSite: "lax" as const,
 };
 
@@ -27,7 +27,6 @@ export const cookieTodayDecisionStateStore: TodayDecisionStateStore = {
     const [cookieStore, requestHeaders] = await Promise.all([cookies(), headers()]);
     const secure = shouldUseSecureTodayCookie(requestHeaders.get("x-forwarded-proto"));
 
-    cookieStore.delete({ name: todayDecisionCookieName, path: "/" });
     cookieStore.set(
       todayDecisionCookieName,
       serializeTodayDecisionState(state),

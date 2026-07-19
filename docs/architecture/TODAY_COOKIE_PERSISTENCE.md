@@ -45,7 +45,7 @@ Version 1 cookies remain readable. Their payload had no manual override and stor
 
 When a valid v1 cookie is read, Atlas applies the valid compact actions with no manual override. Version 2 cookies remain readable as well: their first valid `decisionOrder` entry becomes the single manual override, while the rest of the legacy order is discarded. This keeps the intentional user choice without freezing the remaining queue. The next successful cookie write serializes the v3 schema.
 
-During that first successful write, Atlas also expires the legacy cookie on path `/`. The canonical v3 cookie is then the only `atlas-today-decisions` cookie and remains scoped to `/today`.
+The canonical cookie is scoped to `/`. A successful write replaces a v1 or v2 cookie in place with the v3 payload, so there are no parallel cookies with the same name on different paths.
 
 Malformed payloads, unsupported versions, unknown decision IDs, unsupported actions, and invalid order entries are ignored defensively. They do not create decisions and do not replace the fixture/repository as the source of truth.
 
@@ -57,6 +57,6 @@ After every successful action, the server derives the resulting queue from fixtu
 
 ## Cookie properties and limits
 
-The cookie is `httpOnly`, `sameSite=lax`, scoped to `/today`, and marked `secure` in production. It is not encrypted because it contains no secret data. Cookie manipulation must therefore never be treated as proof of authorization or an audit trail.
+The cookie is `httpOnly`, `sameSite=lax`, scoped to `/`, and marked `secure` for HTTPS requests. It is not encrypted because it contains no secret data. Cookie manipulation must therefore never be treated as proof of authorization or an audit trail.
 
 This is not production-grade persistence: browser cookies have limited size, are user-controlled, are not shared between devices, and have no durable audit or concurrency guarantees. A database-backed `TodayDecisionRepository` can replace the cookie module later while keeping the typed action state and queue-application helper; it should store validated decision outcomes per authenticated user or workspace and return the same state to the application layer.
