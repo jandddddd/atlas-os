@@ -135,7 +135,7 @@ test("Dependencies halten wartende Entscheidungen zurück und schalten Folgeents
   ).toBeVisible();
 });
 
-test("Eine weitere Entscheidung wird zur Priorität, ohne die Queue zu verändern", async ({ page }) => {
+test("Eine weitere Entscheidung wird manuell priorisiert, während die übrige Queue von der Engine kommt", async ({ page }) => {
   await page.goto("/today");
 
   await page.getByRole("button", { name: "Materialrückfrage vormerken" }).click();
@@ -143,7 +143,7 @@ test("Eine weitere Entscheidung wird zur Priorität, ohne die Queue zu veränder
   await expect(
     page.getByRole("heading", { name: "Materialrückfrage für den nächsten Einkauf vormerken" }),
   ).toBeVisible();
-  await expect(page.getByRole("button", { name: "Angebotsentwurf Müller prüfen" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Besichtigung Weber einordnen" })).toBeVisible();
   await expect(page.getByText("Atlas hat heute 5 Entscheidungen vorbereitet.")).toBeVisible();
 
   await page.reload();
@@ -154,6 +154,7 @@ test("Eine weitere Entscheidung wird zur Priorität, ohne die Queue zu veränder
   await expect(
     page.getByText("Diese Entscheidung wurde manuell für Heute zuerst priorisiert."),
   ).toBeVisible();
+  await expect(page.getByRole("button", { name: "Besichtigung Weber einordnen" })).toBeVisible();
 });
 
 test("Eine neu priorisierte Entscheidung kann sofort freigegeben werden", async ({ page }) => {
@@ -357,6 +358,7 @@ test("Ein Version-2-Cookie behält nur den manuellen Override", async ({ context
   await expect(
     page.getByText("Diese Entscheidung wurde manuell für Heute zuerst priorisiert."),
   ).toBeVisible();
+  await expect(page.getByRole("button", { name: "Besichtigung Weber einordnen" })).toBeVisible();
 
   await page.getByRole("button", { name: "Rückfrage vormerken" }).click();
 
