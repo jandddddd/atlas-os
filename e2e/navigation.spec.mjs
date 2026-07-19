@@ -77,6 +77,67 @@ test("Today-Seite ist erreichbar", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "Angebotsentwurf Müller prüfen" })).toHaveCount(0);
 });
 
+test("Die zweite weitere Entscheidung wird zur Priorität, ohne die Queue zu verändern", async ({ page }) => {
+  await page.goto("/today");
+
+  await page.getByRole("button", { name: "Materialrückfrage vormerken" }).click();
+
+  await expect(
+    page.getByRole("heading", { name: "Materialrückfrage für den nächsten Einkauf vormerken" }),
+  ).toBeVisible();
+  await expect(page.getByRole("button", { name: "Angebotsentwurf Müller prüfen" })).toBeVisible();
+  await expect(page.getByText("Atlas hat heute 5 Entscheidungen vorbereitet.")).toBeVisible();
+});
+
+test("Eine neu priorisierte Entscheidung kann sofort freigegeben werden", async ({ page }) => {
+  await page.goto("/today");
+
+  await page.getByRole("button", { name: "Materialrückfrage vormerken" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Materialrückfrage für den nächsten Einkauf vormerken" }),
+  ).toBeVisible();
+
+  await page.getByRole("button", { name: "Rückfrage vormerken" }).click();
+
+  await expect(page.getByLabel("Aktueller Abschluss")).toContainText(
+    "Materialrückfrage wurde vorgemerkt.",
+  );
+  await expect(
+    page.getByRole("heading", { name: "Materialrückfrage für den nächsten Einkauf vormerken" }),
+  ).toHaveCount(0);
+  await expect(page.getByLabel("Entscheidungsfehler")).toHaveCount(0);
+});
+
+test("Eine erneut priorisierte Entscheidung verliert ihren Später-Status", async ({
+  context,
+  page,
+}) => {
+  await page.goto("/today");
+
+  await page.getByRole("button", { name: "Später entscheiden" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Besichtigung Weber als nächsten Schritt einplanen" }),
+  ).toBeVisible();
+
+  await page.getByRole("button", { name: "Später entscheiden" }).click();
+  await page.getByRole("button", { name: "Besichtigung Weber einordnen" }).click();
+
+  await expect(
+    page.getByRole("heading", { name: "Besichtigung Weber als nächsten Schritt einplanen" }),
+  ).toBeVisible();
+
+  const decisionCookie = (await context.cookies(page.url())).find(
+    (cookie) => cookie.name === "atlas-today-decisions",
+  );
+  expect(decisionCookie).toBeDefined();
+  const persistedState = JSON.parse(decodeURIComponent(decisionCookie.value));
+
+  expect(persistedState.decisions).not.toContainEqual({
+    decisionId: "visit-weber",
+    action: "later",
+  });
+});
+
 test("Der primäre Freigabe-Button ist sichtbar, erreichbar und rückt die nächste Entscheidung nach", async ({ page }) => {
   await page.goto("/today");
 
@@ -265,8 +326,9 @@ test("Die Freigabe schreibt ausschließlich das kompakte Entscheidungsmodell", a
   const persistedState = JSON.parse(decodeURIComponent(decisionCookie.value));
 
   expect(persistedState).toEqual({
-    version: 1,
+    version: 2,
     decisions: [{ decisionId: "offer-mueller", action: "approve" }],
+    decisionOrder: [],
   });
   expect(Object.keys(persistedState.decisions[0]).sort()).toEqual(["action", "decisionId"]);
 });
@@ -340,6 +402,27 @@ test("Today-Seite zeigt Abschlusszustand nach Angebotsfreigabe", async ({ page }
   await expect(page.getByRole("heading", { name: "Angebot für Familie Müller freigeben und senden" })).toHaveCount(0);
 });
 
+test("Der Angebotsabschluss bleibt nach Priorisieren und Verschieben wirksam", async ({ page }) => {
+  await page.goto("/today?offerApproved=true");
+
+  await expect(
+    page.getByRole("heading", { name: "Angebot für Familie Müller freigeben und senden" }),
+  ).toHaveCount(0);
+
+  await page.getByRole("button", { name: "Materialrückfrage vormerken" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Materialrückfrage für den nächsten Einkauf vormerken" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Angebot für Familie Müller freigeben und senden" }),
+  ).toHaveCount(0);
+
+  await page.getByRole("button", { name: "Später entscheiden" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Angebot für Familie Müller freigeben und senden" }),
+  ).toHaveCount(0);
+});
+
 test("Today-Seite zeigt Abschlusszustand nach Änderungsanforderung", async ({ page }) => {
   await page.goto("/today?changeRequested=true");
 
@@ -347,6 +430,17 @@ test("Today-Seite zeigt Abschlusszustand nach Änderungsanforderung", async ({ p
   await expect(page.getByRole("heading", { name: "Guten Morgen." })).toBeVisible();
   await expect(page.getByLabel("Abschlusszustand")).toContainText("Änderung für Angebot Müller wurde angefordert.");
   await expect(page.getByRole("heading", { name: "Angebot für Familie Müller freigeben und senden" })).toHaveCount(0);
+});
+
+test("Die Änderungsanforderung bleibt nach Priorisieren und Freigeben wirksam", async ({ page }) => {
+  await page.goto("/today?changeRequested=true");
+
+  await page.getByRole("button", { name: "Materialrückfrage vormerken" }).click();
+  await page.getByRole("button", { name: "Rückfrage vormerken" }).click();
+
+  await expect(
+    page.getByRole("heading", { name: "Angebot für Familie Müller freigeben und senden" }),
+  ).toHaveCount(0);
 });
 
 test("Inbox ist erreichbar", async ({ page }) => {
