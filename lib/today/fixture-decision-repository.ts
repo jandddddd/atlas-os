@@ -4,6 +4,11 @@ import { prioritizeTodayDecisions } from "@/lib/today/decision-priority";
 
 export const fixtureTodayDecisionRepository: TodayDecisionRepository = {
   async getTodayDecisions() {
-    return prioritizeTodayDecisions(structuredClone(todayDecisionFixtures));
+    return prioritizeTodayDecisions(structuredClone(todayDecisionFixtures)).map(
+      ({ decision, priority }) => ({
+        ...decision,
+        priority,
+      }),
+    );
   },
 };

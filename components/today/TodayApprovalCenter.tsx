@@ -8,6 +8,7 @@ import { DecisionOverviewList } from "@/components/today/DecisionOverviewList";
 import { TodayCompletionNotice } from "@/components/today/TodayCompletionNotice";
 import { TodayEmptyState } from "@/components/today/TodayEmptyState";
 import { TodayHeader } from "@/components/today/TodayHeader";
+import type { TodayDecisionPriorityExplanation } from "@/lib/today/decision-priority";
 
 type CompletionStatus = "offer-approved" | "change-requested" | null;
 type FeedbackStatus = "completed" | "deferred" | null;
@@ -25,6 +26,8 @@ type TodayApprovalDecision = Omit<ApprovalCardProps, "primaryAction" | "secondar
     items: string[];
   };
 };
+
+type TodayApprovalDecisionInput = Omit<TodayApprovalDecision, "priority">;
 
 type TodayApprovalCenterProps = {
   dateLabel: string;
@@ -48,9 +51,18 @@ export function TodayApprovalCenter({
   initialCompletionStatus,
   decisions,
 }: TodayApprovalCenterProps) {
+  const [priorityByDecisionId, setPriorityByDecisionId] = useState<
+    Record<string, TodayDecisionPriorityExplanation>
+  >(() => Object.fromEntries(decisions.map((decision) => [decision.id, decision.priority])));
   const decisionById = useMemo(
-    () => new Map(decisions.map((decision) => [decision.id, decision])),
-    [decisions],
+    () => new Map(decisions.map((decision) => [
+      decision.id,
+      {
+        ...decision,
+        priority: priorityByDecisionId[decision.id] ?? decision.priority,
+      },
+    ])),
+    [decisions, priorityByDecisionId],
   );
   const [visibleDecisionIds, setVisibleDecisionIds] = useState(() =>
     filterCompletedDecisionIds(
@@ -81,6 +93,17 @@ export function TodayApprovalCenter({
     }));
   const hasDecisions = visibleDecisionIds.length > 0;
 
+  function applyDecisionResult({
+    decisionIds,
+    priorityByDecisionId: nextPriorityByDecisionId,
+  }: {
+    decisionIds: string[];
+    priorityByDecisionId: Record<string, TodayDecisionPriorityExplanation>;
+  }) {
+    setPriorityByDecisionId(nextPriorityByDecisionId);
+    setVisibleDecisionIds(filterCompletedDecisionIds(decisionIds, initialCompletionStatus));
+  }
+
   async function approvePriorityDecision() {
     if (!priorityDecision || priorityDecisionSubmissionInProgress.current) {
       return;
@@ -106,9 +129,7 @@ export function TodayApprovalCenter({
       setFeedbackStatus("completed");
       setExpandedDetailsId(null);
       setEditHintDecisionId(null);
-      setVisibleDecisionIds(
-        filterCompletedDecisionIds(result.decisionIds, initialCompletionStatus),
-      );
+      applyDecisionResult(result);
     } finally {
       priorityDecisionSubmissionInProgress.current = false;
       setIsSubmittingPriorityDecision(false);
@@ -142,9 +163,7 @@ export function TodayApprovalCenter({
       setFeedbackStatus("deferred");
       setExpandedDetailsId(null);
       setEditHintDecisionId(null);
-      setVisibleDecisionIds(
-        filterCompletedDecisionIds(result.decisionIds, initialCompletionStatus),
-      );
+      applyDecisionResult(result);
     } finally {
       priorityDecisionSubmissionInProgress.current = false;
       setIsSubmittingPriorityDecision(false);
@@ -184,9 +203,7 @@ export function TodayApprovalCenter({
       setFeedbackStatus(null);
       setExpandedDetailsId(null);
       setEditHintDecisionId(null);
-      setVisibleDecisionIds(
-        filterCompletedDecisionIds(result.decisionIds, initialCompletionStatus),
-      );
+      applyDecisionResult(result);
     } finally {
       setIsSubmittingPriorityDecision(false);
     }
@@ -293,4 +310,4 @@ export function TodayApprovalCenter({
   );
 }
 
-export type { TodayApprovalDecision };
+export type { TodayApprovalDecision, TodayApprovalDecisionInput };
