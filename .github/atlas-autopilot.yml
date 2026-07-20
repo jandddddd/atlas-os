@@ -25,7 +25,10 @@ auto_merge: false
 repair:
   enabled: false
   mode: manual
+  execution_mode: manual
   maximum_attempts_per_commit: 1
+  require_plan_artifact: true
+  require_expected_head_sha: true
   allowed_block_reasons:
     - required_check_failed
     - blocking_review_found
@@ -41,7 +44,10 @@ repair:
   require_same_repository: true
   require_non_fork: true
   require_label: "atlas-repair"
+  allowed_base_branches:
+    - main
   never_run_labels:
     - "do-not-merge"
     - "security"
     - "product-decision"
+  auto_merge: false

@@ -30,12 +30,28 @@ Vor der Datensammlung und unmittelbar vor Plan- und Artefakterzeugung wird der a
 
 Sprint 2B führt keinen Repair aus und verändert keinen Code. `repair.enabled` bleibt `false`; es gibt keinen Codex- oder OpenAI-Aufruf und kein `OPENAI_API_KEY` ist erforderlich. Der Workflow hat ausschließlich `contents: read`, `pull-requests: read`, `checks: read` und `actions: read`. Er erstellt weder Commits, Branches oder PR-Kommentare noch schreibt er auf den PR-Branch oder führt Merge-Aktionen aus.
 
-Sprint 2C wird später separat spezifiziert, sicherheitsgeprüft, freigegeben und implementiert. Erst diese eigenständige Stufe darf einen kontrollierten Repair und die dafür erforderlichen Rechte oder Secrets in Betracht ziehen.
+## Sprint 2C: Manuelle, einmalige Reparatur
+
+Sprint 2C ergänzt den separaten Workflow `atlas-pr-repair-execute.yml`. Er wird ausschließlich über `workflow_dispatch` mit PR-Nummer, vollständigem erwartetem Head-SHA, der Run-ID eines Sprint-2B-Plans und der exakten Bestätigung `EXECUTE_REPAIR` gestartet. Pro manueller Auslösung gibt es genau einen Codex-Aufruf, keine Retry-Schleife, keinen Folgelauf, keinen neuen PR und keinen Merge. `repair.enabled` bleibt nach der Implementierung zunächst `false`; der Workflow beendet sich deshalb vor jeder Schreibaktion. Die Aktivierung erfordert später eine eigene, ausdrücklich geprüfte Policy-Änderung auf `main`.
+
+Der Workflow checkt zuerst ausschließlich vertrauenswürdiges `main` aus und lädt die dortige Policy und die dortigen Validierungsmodule. Er akzeptiert nur offene, nicht geforkte PRs aus demselben Repository auf einer erlaubten Base-Branch, mit `atlas-repair` und ohne Never-run-Label. Der aktuelle PR-Head muss dem vollständigen `expected_head_sha` entsprechen. Die angegebene Plan-Run-ID muss zu einem erfolgreichen, manuell ausgelösten Lauf von `atlas-pr-repair.yml` auf `main` gehören. Das heruntergeladene Artefakt darf nur `repair-plan.json` und `repair-plan.md` enthalten; Status, `safeToStart`, PR, SHA und `attemptKey` werden vor dem Checkout des PR-Heads validiert.
+
+Der `attemptKey` hat weiterhin die Form `<pr-number>:<full-head-sha>`. Vor dem Codex-Aufruf reserviert der Workflow ihn als dauerhaftes, eindeutig benanntes Git-Tag `atlas-repair-attempt/<pr-number>-<full-head-sha>`. Eine SHA-spezifische Concurrency-Gruppe verhindert parallele Reservierungen; die Tag-Existenz wird vor jeder Ausführung geprüft. Die Sperre bleibt damit unabhängig von der sieben Tage langen Artefakt-Aufbewahrung bestehen. Ein neuer Versuch setzt einen neuen PR-Head-SHA und einen daran gebundenen Plan voraus.
+
+Die Reparatur verwendet die offizielle `openai/codex-action@v1` und eine fest gesetzte Codex-CLI-Version. Der Prompt stammt ausschließlich aus dem validierten JSON-Plan und wird nur als temporäre Datei innerhalb der Git-Metadaten bereitgestellt. Codex läuft mit `workspace-write`, ohne direkte GitHub-Credentials und ohne Netzwerkzugriff aus dem Sandbox-Workspace. Der API-Key ist ausschließlich am Vorprüfungs- und Codex-Schritt verfügbar; PR-Code, Tests, Lint und Build erhalten ihn nicht. Der Prompt übernimmt keine unbereinigten vollständigen CI-Logs und Review-Kommentare werden nicht als ungeprüfte Shell-Befehle ausgeführt.
+
+Als erlaubte Reparaturpfade gelten ausschließlich die in `allowedAreas` des Plans gebundenen Dateien. Zusätzlich blockiert die Policy insbesondere Workflows, `.github/atlas-autopilot.yml`, `.env`-Varianten, `migrations/` und `prisma/`. Nach Codex werden getrackte und ungetrackte Änderungen, Binärdateien, maximal zehn Dateien und maximal 500 hinzugefügte oder entfernte Zeilen geprüft. Danach müssen Unit-Tests, Lint, Build und `git diff --check` erfolgreich sein. Unmittelbar vor Commit und normalem Push wird der Remote-Head erneut mit dem erwarteten SHA verglichen. Nur dann entsteht genau ein Commit auf der bestehenden PR-Branch; Force-Push, direkter Push auf `main`, Merge und neuer PR sind ausgeschlossen.
+
+Der erfolgreiche Lauf veröffentlicht für sieben Tage `repair-execution-report.json` und `repair-execution-report.md`. Der Report nennt PR, SHA, `attemptKey`, Plan-Run-ID, Zeitpunkte, Status, geänderte Dateien, Prüfergebnisse und gegebenenfalls Commit-SHA und bestätigt ausdrücklich, dass kein Merge ausgeführt wurde. Er enthält weder vollständige Logs noch Secrets.
+
+### Repository-Secret einrichten
+
+Vor einer späteren Aktivierung muss eine Repository-Administration unter **Settings → Secrets and variables → Actions → New repository secret** ein Secret namens `OPENAI_API_KEY` anlegen. Es soll ein dedizierter, eng begrenzter Schlüssel sein. Der Wert gehört niemals in Policy, Workflow-Datei, Prompt, Report, Log, Screenshot oder PR-Code. Ein fehlendes Secret beendet den Ausführungsworkflow ohne Codex-Aufruf und ohne Push.
 
 ## Geplante Stufen
 
 1. **Bewertung:** deterministische Policy-Prüfung und zusammengefasster PR-Kommentar (Sprint 1).
-2. **Reparatur:** manueller Diagnoseplan in Sprint 2A, Audit-Artefakte in Sprint 2B und ein erst später separat freizugebender Repair in Sprint 2C.
+2. **Reparatur:** manueller Diagnoseplan in Sprint 2A, Audit-Artefakte in Sprint 2B und manuelle, einmalige Ausführung in Sprint 2C (weiterhin per Kill-Switch deaktiviert).
 3. **Auto-Merge risikoarmer PRs:** nur nach zusätzlicher Risikoklassifizierung, Schutzregeln und ausdrücklicher Aktivierung.
 4. **Nächste Aufgabe starten:** nach erfolgreichem Abschluss die nächste freigegebene Aufgabe aus einer Sprint-Queue anstoßen.
 
@@ -56,7 +72,7 @@ Jede Stufe benötigt eine eigene Sicherheitsprüfung und Aktivierung. Eine spät
 
 ## Audit und Secrets für spätere Stufen
 
-Sprint 1, Sprint 2A und Sprint 2B benötigen keine zusätzlichen Repository-Secrets; die Workflows verwenden ausschließlich das kurzlebige `GITHUB_TOKEN` mit minimalen Berechtigungen. Job Summary, die sieben Tage aufbewahrten JSON- und Markdown-Pläne, `attemptKey` und der Workflow Run bilden den Audit-Pfad für eine manuelle Entscheidung. Erst ein separat freigegebener Sprint 2C kann einen dedizierten, eng begrenzten `OPENAI_API_KEY` benötigen. Eine spätere Merge- oder Queue-Integration kann außerdem eine GitHub App mit minimalen, explizit dokumentierten Repository-Berechtigungen erfordern.
+Sprint 1, Sprint 2A und Sprint 2B benötigen keine zusätzlichen Repository-Secrets; die Workflows verwenden ausschließlich das kurzlebige `GITHUB_TOKEN` mit minimalen Berechtigungen. Job Summary, die sieben Tage aufbewahrten JSON- und Markdown-Pläne, `attemptKey` und der Workflow Run bilden den Audit-Pfad für eine manuelle Entscheidung. Sprint 2C benötigt nach seiner ausdrücklichen Aktivierung einen dedizierten, eng begrenzten `OPENAI_API_KEY`. Eine spätere Merge- oder Queue-Integration kann außerdem eine GitHub App mit minimalen, explizit dokumentierten Repository-Berechtigungen erfordern.
 
 Solche Secrets dürfen erst bei Implementierung der jeweiligen Stufe eingerichtet werden. Sie dürfen niemals an PR-Code, Forks, Logs oder Client-Code weitergegeben werden. Persönliche Zugriffstokens mit breiten Rechten sind nicht vorgesehen.
 
