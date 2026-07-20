@@ -75,6 +75,13 @@ test("stale expected SHA aborts", () => {
   assert.match(workflow, /core\.setFailed/);
 });
 
+test("revalidates the SHA immediately before plan creation", () => {
+  const validation = workflow.indexOf("name: Revalidate head SHA before plan creation");
+  const plan = workflow.indexOf("name: Create deterministic repair plan");
+  assert.ok(validation >= 0 && plan > validation);
+  assert.match(workflow.slice(validation, plan), /expected_head_sha is stale/);
+});
+
 test("prompt contains diagnostics and findings but redacts known secrets", () => {
   const result = plan({
     failedChecks: [{ name: "CI / verify", logExcerpt: "failure token=topsecretvalue sk-abcdefghijklmnop" }],

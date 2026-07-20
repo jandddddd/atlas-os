@@ -27,6 +27,12 @@ export function deduplicateCheckRuns(checkRuns) {
   return [...uniqueChecks.values()];
 }
 
+export function normalizeCheckName(workflowName, checkName) {
+  const workflow = String(workflowName ?? "").trim();
+  const job = String(checkName ?? "").trim();
+  return workflow && job ? `${workflow} / ${job}` : job || workflow;
+}
+
 function parseScalar(value) {
   const trimmed = value.trim();
   if (trimmed === "true") return true;

@@ -76,7 +76,7 @@ jobs:
           script: |
             const fs = require("node:fs");
             const { pathToFileURL } = require("node:url");
-            const { deduplicateCheckRuns, findReviewPriority } = await import(
+            const { deduplicateCheckRuns, findReviewPriority, normalizeCheckName } = await import(
               pathToFileURL(`${process.env.GITHUB_WORKSPACE}/scripts/atlas-pr-supervisor.mjs`).href
             );
             const pullNumber = Number(process.env.PR_NUMBER);
@@ -96,8 +96,22 @@ jobs:
               ref: pull.head.sha,
               per_page: 100,
             }));
+            const workflowNames = new Map();
+            for (const check of rawChecks) {
+              const match = check.details_url?.match(/\/actions\/runs\/(\d+)/);
+              if (!match || workflowNames.has(match[1])) continue;
+              try {
+                const { data: run } = await github.rest.actions.getWorkflowRun({ ...context.repo, run_id: Number(match[1]) });
+                workflowNames.set(match[1], run.name);
+              } catch (error) {
+                core.warning(`Could not resolve workflow name for check ${check.name}: ${error.message}`);
+              }
+            }
             const checks = rawChecks.map((check) => ({
-              name: check.name,
+              name: normalizeCheckName(
+                workflowNames.get(check.details_url?.match(/\/actions\/runs\/(\d+)/)?.[1]) ?? "",
+                check.name,
+              ),
               status: check.status,
               conclusion: check.conclusion,
             }));
@@ -123,7 +137,13 @@ jobs:
                   `${annotation.path ?? "unknown"}:${annotation.start_line ?? 0}: ${annotation.message ?? ""}`
                 ),
               ].filter(Boolean).join("\n").slice(0, 8_000);
-              failedChecks.push({ name: check.name, logExcerpt: excerpt });
+              failedChecks.push({
+                name: normalizeCheckName(
+                  workflowNames.get(check.details_url?.match(/\/actions\/runs\/(\d+)/)?.[1]) ?? "",
+                  check.name,
+                ),
+                logExcerpt: excerpt,
+              });
             }
 
             const reviewThreads = [];
@@ -213,10 +233,7 @@ jobs:
             const blockingReview = input.reviewThreads.some((thread) =>
               !thread.resolved && config.blocking_review_priorities.includes(thread.priority)
             );
-            const explained = supervisor.reasons.every((reason) =>
-              (requiredFailed && (reason.startsWith("Check ") || reason.startsWith("Erforderlicher Check "))) ||
-              (blockingReview && /offene P[12]-Review-Kommentar/.test(reason))
-            );
+            const explained = requiredFailed || blockingReview;
             input.supervisor = supervisor;
             input.blockReasons = [
               ...(requiredFailed ? ["required_check_failed"] : []),
@@ -224,6 +241,21 @@ jobs:
               ...(supervisor.status === "BLOCKED" && !explained ? ["other_supervisor_block"] : []),
             ];
             fs.writeFileSync(inputPath, JSON.stringify(input));
+
+      - name: Revalidate head SHA before plan creation
+        uses: actions/github-script@v7
+        env:
+          PR_NUMBER: ${{ steps.pull.outputs.number }}
+          EXPECTED_HEAD_SHA: ${{ steps.pull.outputs.head-sha }}
+        with:
+          script: |
+            const { data: pull } = await github.rest.pulls.get({
+              ...context.repo,
+              pull_number: Number(process.env.PR_NUMBER),
+            });
+            if (pull.head.sha !== process.env.EXPECTED_HEAD_SHA) {
+              core.setFailed("expected_head_sha is stale; the pull request head has changed before plan creation.");
+            }
 
       - name: Create deterministic repair plan
         run: >-

@@ -4,6 +4,7 @@ import test from "node:test";
 
 import {
   deduplicateCheckRuns,
+  normalizeCheckName,
   evaluatePullRequest,
   findReviewPriority,
   isOwnedSupervisorComment,
@@ -45,6 +46,10 @@ function evaluate(overrides = {}) {
 
 test("vollständig grüner PR ist MERGE_READY", () => {
   assert.deepEqual(evaluate(), { status: "MERGE_READY", reasons: [], safeToMerge: true });
+});
+
+test("normalizes workflow and job names", () => {
+  assert.equal(normalizeCheckName("CI", "verify"), "CI / verify");
 });
 
 test("verschachtelte Repair-Policy verändert die Supervisor-Policy nicht", () => {
