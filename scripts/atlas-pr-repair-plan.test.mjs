@@ -1,8 +1,16 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 
-import { createRepairPlan, parseRepairConfig, validateExpectedHeadSha } from "./atlas-pr-repair-plan.mjs";
+import {
+  createRepairPlan,
+  parseRepairConfig,
+  renderRepairPlanMarkdown,
+  validateExpectedHeadSha,
+  writeRepairPlanArtifacts,
+} from "./atlas-pr-repair-plan.mjs";
 
 const policySource = readFileSync(new URL("../.github/atlas-autopilot.yml", import.meta.url), "utf8");
 const policy = parseRepairConfig(policySource);
@@ -82,6 +90,15 @@ test("revalidates the SHA immediately before plan creation", () => {
   assert.match(workflow.slice(validation, plan), /expected_head_sha is stale/);
 });
 
+test("a stale SHA prevents plan and artifact creation steps", () => {
+  const validation = workflow.indexOf("name: Revalidate head SHA before plan creation");
+  const creation = workflow.indexOf("name: Create deterministic repair plan");
+  const upload = workflow.indexOf("name: Upload repair plan artifact");
+  assert.ok(validation >= 0 && creation > validation && upload > creation);
+  assert.doesNotMatch(workflow.slice(creation, upload), /if:\s*always\(\)/);
+  assert.doesNotMatch(workflow.slice(upload), /if:\s*(?:always|failure)\(\)/);
+});
+
 test("prompt contains diagnostics and findings but redacts known secrets", () => {
   const result = plan({
     failedChecks: [{ name: "CI / verify", logExcerpt: "failure token=topsecretvalue sk-abcdefghijklmnop" }],
@@ -94,11 +111,57 @@ test("prompt contains diagnostics and findings but redacts known secrets", () =>
   assert.doesNotMatch(result.prompt, /topsecretvalue|sk-abcdefghijklmnop|abc\.def\.ghi/);
 });
 
+test("writes complete JSON and a redacted Markdown audit artifact", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "atlas-repair-plan-"));
+  try {
+    const result = plan({
+      supervisor: { status: "BLOCKED", reasons: ["token=supersecretvalue"] },
+      failedChecks: [{ name: "CI / verify", logExcerpt: "api_key=anothersecretvalue" }],
+    });
+    await writeRepairPlanArtifacts(directory, result, `atlas-repair-plan-pr-42-${sha.slice(0, 12)}`);
+    const written = JSON.parse(readFileSync(join(directory, "repair-plan.json"), "utf8"));
+    const markdown = readFileSync(join(directory, "repair-plan.md"), "utf8");
+    assert.deepEqual(written, result);
+    assert.match(markdown, /PR number:\*\* 42/);
+    assert.match(markdown, new RegExp(sha));
+    assert.match(markdown, /Repair status:\*\* REPAIR_ELIGIBLE/);
+    assert.match(markdown, /Reasons/);
+    assert.match(markdown, new RegExp(`42:${sha}`));
+    assert.match(markdown, /\[REDACTED\]/);
+    assert.doesNotMatch(markdown, /supersecretvalue|anothersecretvalue/);
+    assert.deepEqual(readdirSync(directory, { withFileTypes: true }).map((entry) => entry.name).sort(), [
+      "repair-plan.json",
+      "repair-plan.md",
+    ]);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+for (const [status, overrides] of [
+  ["REPAIR_ELIGIBLE", {}],
+  ["REPAIR_BLOCKED", { labels: [] }],
+  ["NO_REPAIR_NEEDED", { supervisor: { status: "MERGE_READY", reasons: [] }, blockReasons: [] }],
+]) {
+  test(`Markdown represents ${status}`, () => {
+    assert.match(renderRepairPlanMarkdown(plan(overrides), "artifact"), new RegExp(`Repair status:\\*\\* ${status}`));
+  });
+}
+
 test("workflow is manual, read-only, trusted-main planning only", () => {
   assert.match(workflow, /^on:\n  workflow_dispatch:/m);
   assert.doesNotMatch(workflow, /pull_request_target:|pull_request:|schedule:/);
   assert.match(workflow, /contents: read\n  pull-requests: read\n  checks: read\n  actions: read/);
   assert.match(workflow, /ref: main/);
   assert.match(workflow, /persist-credentials: false/);
-  assert.doesNotMatch(workflow, /OPENAI_API_KEY|codex|git push|contents: write|pull-requests: write/);
+  assert.doesNotMatch(workflow, /OPENAI_API_KEY|codex|openai|git push|contents: write|pull-requests: write|issues: write/iu);
+});
+
+test("workflow uploads exactly the two repair plan files for seven days", () => {
+  assert.match(workflow, /uses: actions\/upload-artifact@v4/);
+  assert.match(workflow, /name: atlas-repair-plan-pr-\$\{\{ steps\.pull\.outputs\.number \}\}-\$\{\{ steps\.pull\.outputs\.short-head-sha \}\}/);
+  const upload = workflow.slice(workflow.indexOf("name: Upload repair plan artifact"));
+  const paths = [...upload.matchAll(/\$\{\{ runner\.temp \}\}\/atlas-repair-plan\/(repair-plan\.(?:json|md))/g)].map((match) => match[1]);
+  assert.deepEqual(paths, ["repair-plan.json", "repair-plan.md"]);
+  assert.match(upload, /retention-days: 7/);
 });

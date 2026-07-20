@@ -18,20 +18,24 @@ Sprint 2A ergänzt einen ausschließlich manuell ausgelösten Planungs- und Frei
 
 Der Workflow sammelt Supervisor-Fakten, geänderte Pfade, fehlgeschlagene Checks mit begrenzten Diagnoseauszügen sowie offene P1/P2-Review-Threads. `scripts/atlas-pr-repair-plan.mjs` bewertet diesen Snapshot deterministisch und erzeugt einen der Zustände `REPAIR_ELIGIBLE`, `REPAIR_BLOCKED` oder `NO_REPAIR_NEEDED`. Der Prompt enthält nur bereinigte und längenbegrenzte Diagnosen, Review-Findings, die bereits im PR geänderten und damit für die Reparatur vorgesehenen Dateien, Validierungsbefehle und feste Sicherheitsgrenzen. Bekannte Token-, Schlüssel- und Secret-Muster werden entfernt; vollständige unbereinigte Logs werden nicht übernommen.
 
-`repair.enabled` bleibt in Sprint 2A bewusst `false`. Dadurch kann ein Kandidat als `REPAIR_ELIGIBLE` diagnostiziert werden, `safeToStart` bleibt aber `false`: Der Kill-Switch verhindert weiterhin jeden Reparaturlauf. Der Workflow erstellt lediglich einen Job Summary und ein 30 Tage aufbewahrtes JSON-Audit-Artefakt. Er benötigt keinen `OPENAI_API_KEY`, besitzt nur lesende Repository-Berechtigungen, schreibt nicht auf den PR-Branch und startet keinen Codex-Aufruf.
+`repair.enabled` bleibt in Sprint 2A bewusst `false`. Dadurch kann ein Kandidat als `REPAIR_ELIGIBLE` diagnostiziert werden, `safeToStart` bleibt aber `false`: Der Kill-Switch verhindert weiterhin jeden Reparaturlauf. Er benötigt keinen `OPENAI_API_KEY`, besitzt nur lesende Repository-Berechtigungen, schreibt nicht auf den PR-Branch und startet keinen Codex-Aufruf.
 
 Jeder Plan enthält den `attemptKey` `<pr-number>:<head-sha>`. Für einen Head-SHA ist höchstens ein späterer Reparaturlauf zulässig. Ein weiterer manueller Versuch setzt einen neuen Commit und damit einen neuen SHA voraus. Es gibt weder automatische Retries noch eine Reparaturschleife innerhalb eines Workflow-Laufs.
 
-## Sprint 2B: Kontrollierter Schreibzugriff
+## Sprint 2B: Veröffentlichung von Audit-Artefakten
 
-Sprint 2B ist eine separate, später zu prüfende Freigabestufe. Erst dort darf ein begrenzter Codex-Lauf den genehmigten Plan auf dem bestehenden PR-Branch umsetzen. Dann werden auch die sichere Bereitstellung eines `OPENAI_API_KEY`, die technische Durchsetzung des Attempt-Limits, explizite Schreibberechtigungen und die Prüfung des erzeugten Diffs spezifiziert. Das Secret wird vor Sprint 2B weder benötigt noch eingerichtet.
+Sprint 2B veröffentlicht den deterministisch erzeugten Repair-Plan ausschließlich als Audit- und Diagnose-Artefakt sowie im Job Summary. Das sieben Tage aufbewahrte GitHub-Actions-Artefakt enthält nur `repair-plan.json` und `repair-plan.md`. Die JSON-Datei enthält die vollständige strukturierte Planausgabe; die Markdown-Datei fasst PR, gebundenen Head-SHA, Status, Gründe, erlaubte und verbotene Bereiche, bereinigte Check-Diagnosen, offene P1/P2-Findings, Prompt und `attemptKey` zusammen. Auch `REPAIR_BLOCKED` und `NO_REPAIR_NEEDED` dürfen so nachvollziehbar dokumentiert werden.
 
-Auch Sprint 2B darf niemals direkt auf `main` pushen, automatisch mergen, Folgeaufgaben starten oder bestehende Branch-Protection umgehen. Eine Reparatur erteilt keine fachliche Freigabe und keine Merge-Berechtigung.
+Vor der Datensammlung und unmittelbar vor Plan- und Artefakterzeugung wird der aktuelle PR-Head erneut gegen den manuell angegebenen vollständigen SHA geprüft. Ein veralteter SHA beendet den Workflow ohne Artefakt. Der Artefaktname enthält PR-Nummer und einen kurzen Head-SHA; der Plan bleibt über den `attemptKey` `<pr-number>:<full-head-sha>` eindeutig an den vollständigen Commit gebunden.
+
+Sprint 2B führt keinen Repair aus und verändert keinen Code. `repair.enabled` bleibt `false`; es gibt keinen Codex- oder OpenAI-Aufruf und kein `OPENAI_API_KEY` ist erforderlich. Der Workflow hat ausschließlich `contents: read`, `pull-requests: read`, `checks: read` und `actions: read`. Er erstellt weder Commits, Branches oder PR-Kommentare noch schreibt er auf den PR-Branch oder führt Merge-Aktionen aus.
+
+Sprint 2C wird später separat spezifiziert, sicherheitsgeprüft, freigegeben und implementiert. Erst diese eigenständige Stufe darf einen kontrollierten Repair und die dafür erforderlichen Rechte oder Secrets in Betracht ziehen.
 
 ## Geplante Stufen
 
 1. **Bewertung:** deterministische Policy-Prüfung und zusammengefasster PR-Kommentar (Sprint 1).
-2. **Reparatur:** manueller Diagnoseplan in Sprint 2A; späterer, separat freizugebender Codex-Schreibzugriff in Sprint 2B.
+2. **Reparatur:** manueller Diagnoseplan in Sprint 2A, Audit-Artefakte in Sprint 2B und ein erst später separat freizugebender Repair in Sprint 2C.
 3. **Auto-Merge risikoarmer PRs:** nur nach zusätzlicher Risikoklassifizierung, Schutzregeln und ausdrücklicher Aktivierung.
 4. **Nächste Aufgabe starten:** nach erfolgreichem Abschluss die nächste freigegebene Aufgabe aus einer Sprint-Queue anstoßen.
 
@@ -52,7 +56,7 @@ Jede Stufe benötigt eine eigene Sicherheitsprüfung und Aktivierung. Eine spät
 
 ## Audit und Secrets für spätere Stufen
 
-Sprint 1 und Sprint 2A benötigen keine zusätzlichen Repository-Secrets; die Workflows verwenden ausschließlich das kurzlebige `GITHUB_TOKEN` mit minimalen Berechtigungen. Job Summary, JSON-Plan, `attemptKey` und der Workflow Run bilden den Audit-Pfad für eine manuelle Entscheidung. Erst Sprint 2B kann einen dedizierten, eng begrenzten `OPENAI_API_KEY` benötigen. Eine spätere Merge- oder Queue-Integration kann außerdem eine GitHub App mit minimalen, explizit dokumentierten Repository-Berechtigungen erfordern.
+Sprint 1, Sprint 2A und Sprint 2B benötigen keine zusätzlichen Repository-Secrets; die Workflows verwenden ausschließlich das kurzlebige `GITHUB_TOKEN` mit minimalen Berechtigungen. Job Summary, die sieben Tage aufbewahrten JSON- und Markdown-Pläne, `attemptKey` und der Workflow Run bilden den Audit-Pfad für eine manuelle Entscheidung. Erst ein separat freigegebener Sprint 2C kann einen dedizierten, eng begrenzten `OPENAI_API_KEY` benötigen. Eine spätere Merge- oder Queue-Integration kann außerdem eine GitHub App mit minimalen, explizit dokumentierten Repository-Berechtigungen erfordern.
 
 Solche Secrets dürfen erst bei Implementierung der jeweiligen Stufe eingerichtet werden. Sie dürfen niemals an PR-Code, Forks, Logs oder Client-Code weitergegeben werden. Persönliche Zugriffstokens mit breiten Rechten sind nicht vorgesehen.
 

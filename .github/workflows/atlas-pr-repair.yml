@@ -66,6 +66,7 @@ jobs:
             }
             core.setOutput("number", pull.number);
             core.setOutput("head-sha", pull.head.sha);
+            core.setOutput("short-head-sha", pull.head.sha.slice(0, 12));
 
       - name: Collect bounded pull request diagnostics
         uses: actions/github-script@v7
@@ -258,35 +259,26 @@ jobs:
             }
 
       - name: Create deterministic repair plan
+        id: plan
+        env:
+          ARTIFACT_NAME: atlas-repair-plan-pr-${{ steps.pull.outputs.number }}-${{ steps.pull.outputs.short-head-sha }}
         run: >-
           node scripts/atlas-pr-repair-plan.mjs
           --config .github/atlas-autopilot.yml
+          --output-dir "$RUNNER_TEMP/atlas-repair-plan"
+          --artifact-name "$ARTIFACT_NAME"
           < "$RUNNER_TEMP/atlas-pr-repair-input.json"
           > "$RUNNER_TEMP/atlas-pr-repair-plan.json"
 
       - name: Write repair plan summary
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const fs = require("node:fs");
-            const plan = JSON.parse(fs.readFileSync(`${process.env.RUNNER_TEMP}/atlas-pr-repair-plan.json`, "utf8"));
-            await core.summary
-              .addHeading("Atlas PR Repair Plan")
-              .addTable([
-                [{ data: "Status", header: true }, plan.status],
-                [{ data: "Attempt key", header: true }, plan.attemptKey],
-                [{ data: "Safe to start", header: true }, String(plan.safeToStart)],
-              ])
-              .addHeading("Reasons", 2)
-              .addList(plan.reasons.length ? plan.reasons : ["None"])
-              .addHeading("Proposed prompt", 2)
-              .addCodeBlock(plan.prompt || "No repair prompt was created.", "text")
-              .write();
+        run: cat "$RUNNER_TEMP/atlas-repair-plan/repair-plan.md" >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Upload repair plan audit artifact
+      - name: Upload repair plan artifact
         uses: actions/upload-artifact@v4
         with:
-          name: atlas-pr-repair-plan-${{ steps.pull.outputs.number }}-${{ steps.pull.outputs.head-sha }}
-          path: ${{ runner.temp }}/atlas-pr-repair-plan.json
+          name: atlas-repair-plan-pr-${{ steps.pull.outputs.number }}-${{ steps.pull.outputs.short-head-sha }}
+          path: |
+            ${{ runner.temp }}/atlas-repair-plan/repair-plan.json
+            ${{ runner.temp }}/atlas-repair-plan/repair-plan.md
           if-no-files-found: error
-          retention-days: 30
+          retention-days: 7
