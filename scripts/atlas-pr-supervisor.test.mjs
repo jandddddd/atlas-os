@@ -4,9 +4,11 @@ import test from "node:test";
 
 import {
   deduplicateCheckRuns,
+  normalizeCheckName,
   evaluatePullRequest,
   findReviewPriority,
   isOwnedSupervisorComment,
+  parseConfig,
 } from "./atlas-pr-supervisor.mjs";
 
 const workflow = readFileSync(new URL("../.github/workflows/atlas-pr-supervisor.yml", import.meta.url), "utf8");
@@ -44,6 +46,18 @@ function evaluate(overrides = {}) {
 
 test("vollständig grüner PR ist MERGE_READY", () => {
   assert.deepEqual(evaluate(), { status: "MERGE_READY", reasons: [], safeToMerge: true });
+});
+
+test("normalizes workflow and job names", () => {
+  assert.equal(normalizeCheckName("CI", "verify"), "CI / verify");
+});
+
+test("verschachtelte Repair-Policy verändert die Supervisor-Policy nicht", () => {
+  const completePolicy = readFileSync(new URL("../.github/atlas-autopilot.yml", import.meta.url), "utf8");
+  const parsed = parseConfig(completePolicy);
+  assert.equal(parsed.enabled, true);
+  assert.equal(parsed.mode, "dry-run");
+  assert.equal(parsed.repair, undefined);
 });
 
 test("Draft-PR ist WAITING und niemals merge-sicher", () => {

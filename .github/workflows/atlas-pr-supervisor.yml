@@ -91,7 +91,7 @@ jobs:
           script: |
             const fs = require("node:fs");
             const { pathToFileURL } = require("node:url");
-            const { deduplicateCheckRuns, findReviewPriority } = await import(
+            const { deduplicateCheckRuns, findReviewPriority, normalizeCheckName } = await import(
               pathToFileURL(`${process.env.GITHUB_WORKSPACE}/scripts/atlas-pr-supervisor.mjs`).href
             );
             const pullNumber = Number(process.env.PR_NUMBER);
@@ -137,9 +137,7 @@ jobs:
             const checks = rawChecks.flatMap((check) => {
               const runId = check.details_url?.match(/\/actions\/runs\/(\d+)/)?.[1];
               if (runId === String(context.runId)) return [];
-              const qualifiedName = runId && workflowNames.get(runId)
-                ? `${workflowNames.get(runId)} / ${check.name}`
-                : check.name;
+              const qualifiedName = normalizeCheckName(runId ? workflowNames.get(runId) : "", check.name);
               const value = { name: qualifiedName, status: check.status, conclusion: check.conclusion };
               return [value];
             });
