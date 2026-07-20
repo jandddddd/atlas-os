@@ -136,7 +136,9 @@ test("workflow performs exactly one gated commit and normal push", () => {
   assert.doesNotMatch(workflow, /pull_request_target:|pull_request:|schedule:/);
   assert.match(workflow, /contents: write\n  pull-requests: read\n  actions: read\n  checks: read/);
   assert.doesNotMatch(workflow, /pull-requests: write|issues: write/);
-  assert.equal((workflow.match(/git commit /g) ?? []).length, 1);
+  assert.equal((workflow.match(/commit -m /g) ?? []).length, 1);
+  assert.match(workflow, /git -c core\.hooksPath=\/dev\/null commit /);
+  assert.doesNotMatch(workflow, /git config core\.hooksPath/);
   assert.equal((workflow.match(/\bpush origin\b/g) ?? []).length, 1);
   assert.match(workflow, /fix\(autopilot\): apply approved repair plan/);
   assert.doesNotMatch(workflow, /push[^\n]*(?:--force|-f\b)|gh pr create|pulls\.create|pulls\.merge/i);
