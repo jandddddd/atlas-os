@@ -123,7 +123,7 @@ test("Inbox-Analyse wird als vorbereitete Entscheidung auf Today geladen", async
   await page.getByRole("button", { name: "Anfrage analysieren" }).click();
 
   await expect(
-    page.getByText("Angebotsentwurf Familie Schneider vorbereiten"),
+    page.getByRole("heading", { name: "Analyse abgeschlossen" }),
   ).toBeVisible();
 
   await page.goto("/today");
