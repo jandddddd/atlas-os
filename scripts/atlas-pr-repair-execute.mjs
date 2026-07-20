@@ -46,6 +46,12 @@ export function validateDispatch({ confirm, prNumber, expectedHeadSha, planRunId
   if (!Number.isInteger(planRunId) || planRunId < 1) throw new Error("A valid repair_plan_run_id is required.");
 }
 
+export function isTrustedRepairPlanWorkflowPath(value) {
+  if (typeof value !== "string") return false;
+  const [workflowPath] = value.split("@", 2);
+  return workflowPath === ".github/workflows/atlas-pr-repair.yml";
+}
+
 export function requireOpenAiApiKey(value) {
   if (typeof value !== "string" || value.length === 0) throw new Error("OPENAI_API_KEY is not configured.");
 }

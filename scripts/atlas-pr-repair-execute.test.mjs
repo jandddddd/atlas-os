@@ -14,6 +14,7 @@ import {
   validateExecutionPolicy,
   validatePlanArtifact,
   validatePullRequest,
+  isTrustedRepairPlanWorkflowPath,
 } from "./atlas-pr-repair-execute.mjs";
 import { parseRepairConfig } from "./atlas-pr-repair-plan.mjs";
 
@@ -45,6 +46,12 @@ test("repair.enabled false blocks execution", () => {
 
 test("wrong confirmation blocks", () => {
   assert.throws(() => validateDispatch({ confirm: "REPAIR", prNumber: 42, expectedHeadSha: sha, planRunId: 7 }), /EXECUTE_REPAIR/);
+});
+
+test("trusted plan workflow accepts GitHub workflow ref suffix", () => {
+  assert.equal(isTrustedRepairPlanWorkflowPath(".github/workflows/atlas-pr-repair.yml"), true);
+  assert.equal(isTrustedRepairPlanWorkflowPath(".github/workflows/atlas-pr-repair.yml@main"), true);
+  assert.equal(isTrustedRepairPlanWorkflowPath(".github/workflows/other.yml@main"), false);
 });
 
 test("missing OPENAI_API_KEY blocks", () => {
@@ -123,6 +130,9 @@ test("workflow performs exactly one gated commit and normal push", () => {
   assert.equal((workflow.match(/\bpush origin\b/g) ?? []).length, 1);
   assert.match(workflow, /fix\(autopilot\): apply approved repair plan/);
   assert.doesNotMatch(workflow, /push[^\n]*(?:--force|-f\b)|gh pr create|pulls\.create|pulls\.merge/i);
+  assert.match(workflow, /isTrustedRepairPlanWorkflowPath\(run\.path\)/);
+  assert.match(workflow, /execFileSync\("git", \["diff", "HEAD", "--name-only", "-z"\]/);
+  assert.match(workflow, /execFileSync\("git", \["diff", "HEAD", "--numstat"\]/);
 });
 
 test("tests and safety gates precede commit and push", () => {

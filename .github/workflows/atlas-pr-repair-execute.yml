@@ -87,7 +87,7 @@ jobs:
             const { parseRepairConfig } = await import(
               pathToFileURL(`${process.env.GITHUB_WORKSPACE}/scripts/atlas-pr-repair-plan.mjs`).href
             );
-            const { attemptTagName, validatePullRequest } = await import(
+            const { attemptTagName, isTrustedRepairPlanWorkflowPath, validatePullRequest } = await import(
               pathToFileURL(`${process.env.GITHUB_WORKSPACE}/scripts/atlas-pr-repair-execute.mjs`).href
             );
             const policy = parseRepairConfig(fs.readFileSync(".github/atlas-autopilot.yml", "utf8"));
@@ -98,7 +98,7 @@ jobs:
             const validated = validatePullRequest(pull, policy, `${context.repo.owner}/${context.repo.repo}`, expected);
             const { data: run } = await github.rest.actions.getWorkflowRun({ ...context.repo, run_id: planRunId });
             if (run.event !== "workflow_dispatch" || run.head_branch !== "main" || run.conclusion !== "success" ||
-                run.path !== ".github/workflows/atlas-pr-repair.yml") {
+                !isTrustedRepairPlanWorkflowPath(run.path)) {
               throw new Error("repair_plan_run_id is not a successful trusted-main repair-plan run.");
             }
             const tagName = attemptTagName(pullNumber, expected);
@@ -198,7 +198,7 @@ jobs:
 
       - name: Validate repair scope and size
         run: |
-          git diff --binary > "$RUNNER_TEMP/atlas-repair.diff"
+          git diff HEAD --binary > "$RUNNER_TEMP/atlas-repair.diff"
           git ls-files --others --exclude-standard -z > "$RUNNER_TEMP/atlas-repair-untracked.zlist"
           node --input-type=module <<'NODE'
           import { execFileSync } from "node:child_process";
@@ -209,9 +209,9 @@ jobs:
           const { validateChangedFiles } = await import(pathToFileURL(`${trusted}/atlas-pr-repair-execute.mjs`).href);
           const plan = JSON.parse(readFileSync(`${process.env.RUNNER_TEMP}/atlas-validated-plan.json`, "utf8"));
           const policy = parseRepairConfig(readFileSync(`${trusted}/atlas-autopilot.yml`, "utf8"));
-          const tracked = execFileSync("git", ["diff", "--name-only", "-z"]).toString().split("\0").filter(Boolean);
+          const tracked = execFileSync("git", ["diff", "HEAD", "--name-only", "-z"]).toString().split("\0").filter(Boolean);
           const untracked = readFileSync(`${process.env.RUNNER_TEMP}/atlas-repair-untracked.zlist`).toString().split("\0").filter(Boolean);
-          const shortstat = execFileSync("git", ["diff", "--numstat"]).toString().trim().split("\n").filter(Boolean);
+          const shortstat = execFileSync("git", ["diff", "HEAD", "--numstat"]).toString().trim().split("\n").filter(Boolean);
           let additions = 0, deletions = 0;
           for (const line of shortstat) {
             const [added, deleted] = line.split("\t");
@@ -237,7 +237,7 @@ jobs:
         run: npm run build
 
       - name: Check patch whitespace
-        run: git diff --check
+        run: git diff HEAD --check
 
       - name: Revalidate remote head before commit
         env:
