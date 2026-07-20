@@ -134,6 +134,28 @@ test("Inbox-Analyse wird als vorbereitete Entscheidung auf Today geladen", async
   ).toBeVisible();
 });
 
+test("Inbox-Reset entfernt die vorbereitete Entscheidung aus Today", async ({ page }) => {
+  await page.goto("/inbox");
+  await page.getByRole("button", { name: "Anfrage analysieren" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Analyse abgeschlossen" }),
+  ).toBeVisible();
+
+  await page
+    .getByRole("button", { name: "Gespeicherten Vorgang zurücksetzen" })
+    .click();
+  await expect(
+    page.getByRole("button", { name: "Anfrage analysieren" }),
+  ).toBeVisible();
+
+  await page.goto("/today");
+
+  await expect(page.getByText("Atlas hat heute 5 Entscheidungen vorbereitet.")).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Angebotsentwurf Familie Schneider vorbereiten" }),
+  ).toHaveCount(0);
+});
+
 test("Dependencies halten wartende Entscheidungen zurück und schalten Folgeentscheidungen frei", async ({ page }) => {
   await page.goto("/today");
 

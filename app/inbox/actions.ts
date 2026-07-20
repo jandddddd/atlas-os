@@ -3,6 +3,7 @@
 import type { AnalysisResult } from "@/components/inbox/types";
 import { inboxTodayDecisionId } from "@/lib/today/inbox-today-decision";
 import {
+  clearInboxTodayDecision,
   isAnalysisResult,
   writeInboxTodayDecision,
 } from "@/lib/today/inbox-today-decision-store";
@@ -28,4 +29,18 @@ export async function persistInboxTodayDecision(
   ]);
 
   return wasStored;
+}
+
+export async function resetInboxTodayDecision(): Promise<void> {
+  const state = await todayDecisionStateStore.read();
+
+  await Promise.all([
+    clearInboxTodayDecision(),
+    todayDecisionStateStore.write({
+      ...state,
+      decisions: state.decisions.filter(
+        (decision) => decision.decisionId !== inboxTodayDecisionId,
+      ),
+    }),
+  ]);
 }

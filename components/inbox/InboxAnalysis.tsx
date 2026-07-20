@@ -3,7 +3,10 @@
 import { useEffect, useRef, useState } from "react";
 import { ScanSearch, Sparkles, TriangleAlert } from "lucide-react";
 
-import { persistInboxTodayDecision } from "@/app/inbox/actions";
+import {
+  persistInboxTodayDecision,
+  resetInboxTodayDecision,
+} from "@/app/inbox/actions";
 
 import { AnalysisResultView } from "./AnalysisResultView";
 import { OfferDraftView } from "./OfferDraftView";
@@ -159,9 +162,10 @@ export function InboxAnalysis() {
     setIsEditingOffer(false);
   }
 
-  function resetInboxWorkflow() {
+  async function resetInboxWorkflow() {
     workflowVersion.current += 1;
     clearInboxWorkflow();
+    await resetInboxTodayDecision();
     setIsEditingOffer(false);
     setStatus("idle");
     setAnalysis(null);

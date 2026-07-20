@@ -1,10 +1,12 @@
 import { cookies } from "next/headers";
-
 import type { AnalysisResult } from "@/components/inbox/types";
+import {
+  canStoreInboxTodayDecision,
+  inboxTodayDecisionCookieName,
+  inboxTodayDecisionCookieOptions,
+} from "@/lib/today/inbox-today-decision-cookie";
 
-export const inboxTodayDecisionCookieName = "atlas-inbox-today-decision";
-
-const maximumInboxTodayDecisionCookieBytes = 3_800;
+export { inboxTodayDecisionCookieName };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -59,21 +61,19 @@ export async function readInboxTodayDecision(): Promise<AnalysisResult | null> {
 export async function writeInboxTodayDecision(
   analysis: AnalysisResult,
 ): Promise<boolean> {
-  const value = JSON.stringify(analysis);
-
-  if (
-    new TextEncoder().encode(value).byteLength >
-    maximumInboxTodayDecisionCookieBytes
-  ) {
+  if (!canStoreInboxTodayDecision(analysis)) {
     return false;
   }
 
-  (await cookies()).set(inboxTodayDecisionCookieName, value, {
-    httpOnly: true,
-    sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
-    path: "/",
-  });
+  (await cookies()).set(
+    inboxTodayDecisionCookieName,
+    JSON.stringify(analysis),
+    inboxTodayDecisionCookieOptions,
+  );
 
   return true;
+}
+
+export async function clearInboxTodayDecision(): Promise<void> {
+  (await cookies()).delete(inboxTodayDecisionCookieName);
 }
