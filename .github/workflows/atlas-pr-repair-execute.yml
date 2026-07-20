@@ -87,7 +87,7 @@ jobs:
             const { parseRepairConfig } = await import(
               pathToFileURL(`${process.env.GITHUB_WORKSPACE}/scripts/atlas-pr-repair-plan.mjs`).href
             );
-            const { attemptArtifactName, assertAttemptAvailable, validatePullRequest } = await import(
+            const { attemptTagName, validatePullRequest } = await import(
               pathToFileURL(`${process.env.GITHUB_WORKSPACE}/scripts/atlas-pr-repair-execute.mjs`).href
             );
             const policy = parseRepairConfig(fs.readFileSync(".github/atlas-autopilot.yml", "utf8"));
@@ -101,13 +101,22 @@ jobs:
                 run.path !== ".github/workflows/atlas-pr-repair.yml") {
               throw new Error("repair_plan_run_id is not a successful trusted-main repair-plan run.");
             }
-            const markerName = attemptArtifactName(pullNumber, expected);
-            const artifacts = await github.paginate(github.rest.actions.listArtifactsForRepo, { ...context.repo, per_page: 100 });
-            assertAttemptAvailable(artifacts, markerName);
+            const tagName = attemptTagName(pullNumber, expected);
+            try {
+              await github.rest.git.getRef({ ...context.repo, ref: `tags/${tagName}` });
+              throw new Error("This attemptKey has already been reserved or executed.");
+            } catch (error) {
+              if (error.status !== 404) throw error;
+            }
+            await github.rest.git.createRef({
+              ...context.repo,
+              ref: `refs/tags/${tagName}`,
+              sha: expected,
+            });
             core.setOutput("head-branch", validated.headBranch);
             core.setOutput("head-sha", validated.headSha);
             core.setOutput("plan-artifact", `atlas-repair-plan-pr-${pullNumber}-${expected.slice(0, 12)}`);
-            core.setOutput("attempt-artifact", markerName);
+            core.setOutput("attempt-tag", tagName);
 
       - name: Download bound repair plan artifact
         uses: actions/download-artifact@v4
@@ -136,19 +145,6 @@ jobs:
           writeFileSync(".git/atlas-repair-prompt.txt", plan.prompt, { mode: 0o600 });
           writeFileSync(`${process.env.RUNNER_TEMP}/atlas-validated-plan.json`, JSON.stringify(plan));
           NODE
-
-      - name: Reserve the attempt key
-        env:
-          ATTEMPT_KEY: ${{ inputs.pr_number }}:${{ inputs.expected_head_sha }}
-        run: printf '%s\n' "$ATTEMPT_KEY" > "$RUNNER_TEMP/atlas-repair-attempt-key"
-
-      - name: Publish durable attempt reservation
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ steps.pull.outputs.attempt-artifact }}
-          path: ${{ runner.temp }}/atlas-repair-attempt-key
-          if-no-files-found: error
-          retention-days: 7
 
       - name: Preserve trusted enforcement code outside the PR workspace
         run: |

@@ -26,7 +26,10 @@ function requirePolicyValue(condition, message) {
 export function validateExecutionPolicy(source) {
   const policy = parseRepairConfig(source);
   requirePolicyValue(policy.enabled === true, "Repair execution is disabled by policy.");
-  requirePolicyValue(policy.execution_mode === "manual", "Repair execution_mode must be manual.");
+  requirePolicyValue((policy.execution_mode ?? policy.mode) === "manual", "Repair execution mode must be manual.");
+  if (policy.execution_mode && policy.mode) {
+    requirePolicyValue(policy.execution_mode === policy.mode, "Repair mode and execution_mode must agree.");
+  }
   requirePolicyValue(policy.maximum_attempts_per_commit === 1, "Exactly one repair attempt per commit is required.");
   requirePolicyValue(policy.require_plan_artifact === true, "A repair plan artifact is required.");
   requirePolicyValue(policy.require_expected_head_sha === true, "Expected-head SHA binding is required.");
@@ -82,6 +85,10 @@ export function validatePlanArtifact(files, plan, { prNumber, expectedHeadSha })
 
 export function attemptArtifactName(prNumber, expectedHeadSha) {
   return `${ATTEMPT_ARTIFACT_PREFIX}${prNumber}-${expectedHeadSha}`;
+}
+
+export function attemptTagName(prNumber, expectedHeadSha) {
+  return `atlas-repair-attempt/${prNumber}-${expectedHeadSha}`;
 }
 
 export function assertAttemptAvailable(artifacts, artifactName) {

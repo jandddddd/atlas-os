@@ -24,6 +24,7 @@ auto_merge: false
 
 repair:
   enabled: false
+  mode: manual
   execution_mode: manual
   maximum_attempts_per_commit: 1
   require_plan_artifact: true

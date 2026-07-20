@@ -5,6 +5,7 @@ import test from "node:test";
 import {
   assertAttemptAvailable,
   attemptArtifactName,
+  attemptTagName,
   createExecutionReport,
   renderExecutionReport,
   requireOpenAiApiKey,
@@ -77,6 +78,13 @@ test("identical attemptKey cannot execute twice", () => {
   const name = attemptArtifactName(42, sha);
   assert.throws(() => assertAttemptAvailable([{ name, expired: false }], name), /already/);
   assert.doesNotThrow(() => assertAttemptAvailable([{ name, expired: true }], name));
+});
+
+test("attempt marker has a durable tag name independent of artifact retention", () => {
+  assert.equal(attemptTagName(42, sha), `atlas-repair-attempt/42-${sha}`);
+  assert.match(workflow, /git\.getRef\(/);
+  assert.match(workflow, /git\.createRef\(/);
+  assert.doesNotMatch(workflow, /retention-days: 7[\s\S]*attempt-artifact/);
 });
 
 for (const status of ["REPAIR_BLOCKED", "NO_REPAIR_NEEDED"]) {
