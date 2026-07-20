@@ -7,6 +7,10 @@ const SUCCESS_CONCLUSIONS = new Set(["success"]);
 const WAITING_STATUSES = new Set(["queued", "in_progress", "pending", "requested", "waiting"]);
 const NON_BLOCKING_CONCLUSIONS = new Set(["neutral", "skipped"]);
 
+export function isOwnedSupervisorComment(comment, marker) {
+  return comment.user?.login === "github-actions[bot]" && comment.body?.includes(marker) === true;
+}
+
 function parseScalar(value) {
   const trimmed = value.trim();
   if (trimmed === "true") return true;
@@ -70,6 +74,7 @@ export function evaluatePullRequest(input, config) {
   if (config.enabled !== true) blocked.push("Atlas PR Autopilot ist deaktiviert.");
   if (config.mode !== "dry-run") blocked.push("Für Sprint 1 ist ausschließlich der Modus dry-run erlaubt.");
   if (input.state !== "open") blocked.push("Der Pull Request ist nicht offen.");
+  if (input.draft === true) waiting.push("Der Pull Request ist noch ein Entwurf.");
   if (!(config.allowed_base_branches ?? []).includes(input.baseBranch)) {
     blocked.push(`Base-Branch „${input.baseBranch}“ ist nicht erlaubt.`);
   }
@@ -111,7 +116,11 @@ export function evaluatePullRequest(input, config) {
   if (changedLines > config.maximum_changed_lines) {
     blocked.push(`Zeilenlimit überschritten: ${changedLines} von maximal ${config.maximum_changed_lines}.`);
   }
-  const forbiddenFiles = (input.files ?? []).filter((path) => pathIsForbidden(path, config.forbidden_paths ?? []));
+  const changedPaths = (input.files ?? []).flatMap((file) => {
+    if (typeof file === "string") return [file];
+    return [file.filename, file.previous_filename].filter((path) => typeof path === "string");
+  });
+  const forbiddenFiles = changedPaths.filter((path) => pathIsForbidden(path, config.forbidden_paths ?? []));
   if (forbiddenFiles.length > 0) blocked.push(`Verbotene Pfade geändert: ${forbiddenFiles.join(", ")}.`);
 
   const reasons = [...new Set(blocked.length > 0 ? blocked : waiting)];

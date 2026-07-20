@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 
-import { evaluatePullRequest } from "./atlas-pr-supervisor.mjs";
+import { evaluatePullRequest, isOwnedSupervisorComment } from "./atlas-pr-supervisor.mjs";
+
+const workflow = readFileSync(new URL("../.github/workflows/atlas-pr-supervisor.yml", import.meta.url), "utf8");
 
 const config = {
   enabled: true,
@@ -18,6 +21,7 @@ const config = {
 
 const greenPr = {
   state: "open",
+  draft: false,
   baseBranch: "main",
   labels: ["atlas-autopilot"],
   checks: [{ name: "CI / verify", status: "completed", conclusion: "success" }],
@@ -35,6 +39,14 @@ function evaluate(overrides = {}) {
 
 test("vollständig grüner PR ist MERGE_READY", () => {
   assert.deepEqual(evaluate(), { status: "MERGE_READY", reasons: [], safeToMerge: true });
+});
+
+test("Draft-PR ist WAITING und niemals merge-sicher", () => {
+  assert.deepEqual(evaluate({ draft: true }), {
+    status: "WAITING",
+    reasons: ["Der Pull Request ist noch ein Entwurf."],
+    safeToMerge: false,
+  });
 });
 
 test("laufende CI ist WAITING", () => {
@@ -71,10 +83,37 @@ test("verbotener Pfad blockiert", () => {
   assert.equal(evaluate({ files: [".github/workflows/rogue.yml"] }).status, "BLOCKED");
 });
 
+test("Umbenennung aus verbotenem Pfad blockiert", () => {
+  assert.equal(
+    evaluate({ files: [{ filename: "docs/001.sql", previous_filename: "migrations/001.sql" }] }).status,
+    "BLOCKED",
+  );
+});
+
+test("Umbenennung in verbotenen Pfad blockiert", () => {
+  assert.equal(
+    evaluate({ files: [{ filename: "prisma/schema.prisma", previous_filename: "docs/schema.prisma" }] }).status,
+    "BLOCKED",
+  );
+});
+
 test("Größenlimit blockiert", () => {
   assert.equal(evaluate({ additions: 1500, deletions: 1 }).status, "BLOCKED");
 });
 
 test("Merge-Konflikt blockiert", () => {
   assert.equal(evaluate({ mergeable: false }).status, "BLOCKED");
+});
+
+test("Supervisor-Kommentar gehört nur dem GitHub-Actions-Bot mit Marker", () => {
+  const marker = "<!-- atlas-pr-supervisor -->";
+  assert.equal(isOwnedSupervisorComment({ user: { login: "github-actions[bot]" }, body: marker }, marker), true);
+  assert.equal(isOwnedSupervisorComment({ user: { login: "octocat" }, body: marker }, marker), false);
+  assert.equal(isOwnedSupervisorComment({ user: { login: "github-actions[bot]" }, body: "Status" }, marker), false);
+});
+
+test("Workflow aktualisiert den Status bei Review-Aktivität", () => {
+  assert.match(workflow, /pull_request_review:\n\s+types: \[submitted, edited, dismissed\]/);
+  assert.match(workflow, /pull_request_review_comment:\n\s+types: \[created, edited, deleted\]/);
+  assert.match(workflow, /"pull_request_review",\n\s+"pull_request_review_comment",/);
 });
