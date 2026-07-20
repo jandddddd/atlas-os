@@ -38,10 +38,20 @@ function parseScalar(value) {
 export function parseConfig(source) {
   const config = {};
   let currentList;
+  let nestedSection = false;
 
   for (const rawLine of source.split(/\r?\n/)) {
     const line = rawLine.trim();
     if (!line || line.startsWith("#")) continue;
+    const indent = rawLine.match(/^\s*/)[0].length;
+    if (indent === 0) nestedSection = false;
+    if (nestedSection) continue;
+    if (indent > 0 && !line.startsWith("- ")) {
+      if (currentList) delete config[currentList];
+      currentList = undefined;
+      nestedSection = true;
+      continue;
+    }
     if (line.startsWith("- ")) {
       if (!currentList) throw new Error(`List item without a key: ${line}`);
       config[currentList].push(parseScalar(line.slice(2)));

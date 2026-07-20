@@ -21,3 +21,27 @@ never_merge_labels:
   - "security"
   - "product-decision"
 auto_merge: false
+
+repair:
+  enabled: false
+  mode: manual
+  maximum_attempts_per_commit: 1
+  allowed_block_reasons:
+    - required_check_failed
+    - blocking_review_found
+  forbidden_paths:
+    - ".github/workflows/"
+    - ".github/atlas-autopilot.yml"
+    - ".env"
+    - ".env.*"
+    - "migrations/"
+    - "prisma/"
+  maximum_changed_files: 10
+  maximum_changed_lines: 500
+  require_same_repository: true
+  require_non_fork: true
+  require_label: "atlas-repair"
+  never_run_labels:
+    - "do-not-merge"
+    - "security"
+    - "product-decision"

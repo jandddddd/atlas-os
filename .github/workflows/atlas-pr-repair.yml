@@ -1,0 +1,260 @@
+name: Atlas PR Repair Plan
+
+on:
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: Pull-Request-Nummer
+        required: true
+        type: number
+      expected_head_sha:
+        description: Erwarteter vollständiger Head-SHA
+        required: true
+        type: string
+      confirm:
+        description: Zur Bestätigung exakt REPAIR eingeben
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  pull-requests: read
+  checks: read
+  actions: read
+
+concurrency:
+  group: atlas-pr-repair-plan-${{ inputs.pr_number }}
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate manual confirmation
+        env:
+          CONFIRM: ${{ inputs.confirm }}
+        run: test "$CONFIRM" = "REPAIR"
+
+      - name: Checkout trusted main branch
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+
+      - name: Load current pull request and verify head SHA
+        id: pull
+        uses: actions/github-script@v7
+        env:
+          PR_NUMBER: ${{ inputs.pr_number }}
+          EXPECTED_HEAD_SHA: ${{ inputs.expected_head_sha }}
+        with:
+          script: |
+            const pullNumber = Number(process.env.PR_NUMBER);
+            if (!Number.isInteger(pullNumber) || pullNumber < 1) {
+              core.setFailed("A valid pr_number is required.");
+              return;
+            }
+            const expected = process.env.EXPECTED_HEAD_SHA;
+            if (!/^[0-9a-f]{40}$/i.test(expected)) {
+              core.setFailed("expected_head_sha must be a full 40-character SHA.");
+              return;
+            }
+            const { data: pull } = await github.rest.pulls.get({ ...context.repo, pull_number: pullNumber });
+            if (pull.head.sha !== expected) {
+              core.setFailed("expected_head_sha is stale; the pull request head has changed.");
+              return;
+            }
+            core.setOutput("number", pull.number);
+            core.setOutput("head-sha", pull.head.sha);
+
+      - name: Collect bounded pull request diagnostics
+        uses: actions/github-script@v7
+        env:
+          PR_NUMBER: ${{ steps.pull.outputs.number }}
+          EXPECTED_HEAD_SHA: ${{ steps.pull.outputs.head-sha }}
+        with:
+          script: |
+            const fs = require("node:fs");
+            const { pathToFileURL } = require("node:url");
+            const { deduplicateCheckRuns, findReviewPriority } = await import(
+              pathToFileURL(`${process.env.GITHUB_WORKSPACE}/scripts/atlas-pr-supervisor.mjs`).href
+            );
+            const pullNumber = Number(process.env.PR_NUMBER);
+            const { data: pull } = await github.rest.pulls.get({ ...context.repo, pull_number: pullNumber });
+            if (pull.head.sha !== process.env.EXPECTED_HEAD_SHA) {
+              core.setFailed("expected_head_sha is stale; the pull request head has changed during collection.");
+              return;
+            }
+            const repository = `${context.repo.owner}/${context.repo.repo}`;
+            const files = await github.paginate(github.rest.pulls.listFiles, {
+              ...context.repo,
+              pull_number: pullNumber,
+              per_page: 100,
+            });
+            const rawChecks = deduplicateCheckRuns(await github.paginate(github.rest.checks.listForRef, {
+              ...context.repo,
+              ref: pull.head.sha,
+              per_page: 100,
+            }));
+            const checks = rawChecks.map((check) => ({
+              name: check.name,
+              status: check.status,
+              conclusion: check.conclusion,
+            }));
+            const failedChecks = [];
+            for (const check of rawChecks
+              .filter((item) => item.status === "completed" && !["success", "neutral", "skipped"].includes(item.conclusion))
+              .sort((left, right) => left.name.localeCompare(right.name, "en"))) {
+              let annotations = [];
+              try {
+                annotations = (await github.rest.checks.listAnnotations({
+                  ...context.repo,
+                  check_run_id: check.id,
+                  per_page: 20,
+                })).data;
+              } catch (error) {
+                core.warning(`Could not load bounded annotations for ${check.name}: ${error.message}`);
+              }
+              const excerpt = [
+                check.output?.title,
+                check.output?.summary,
+                check.output?.text,
+                ...annotations.map((annotation) =>
+                  `${annotation.path ?? "unknown"}:${annotation.start_line ?? 0}: ${annotation.message ?? ""}`
+                ),
+              ].filter(Boolean).join("\n").slice(0, 8_000);
+              failedChecks.push({ name: check.name, logExcerpt: excerpt });
+            }
+
+            const reviewThreads = [];
+            let cursor = null;
+            do {
+              const data = await github.graphql(
+                `query($owner: String!, $repo: String!, $number: Int!, $cursor: String) {
+                  repository(owner: $owner, name: $repo) {
+                    pullRequest(number: $number) {
+                      reviewThreads(first: 100, after: $cursor) {
+                        pageInfo { hasNextPage endCursor }
+                        nodes {
+                          isResolved
+                          path
+                          line
+                          comments(first: 100) { nodes { body } }
+                        }
+                      }
+                    }
+                  }
+                }`,
+                { owner: context.repo.owner, repo: context.repo.repo, number: pullNumber, cursor },
+              );
+              const page = data.repository.pullRequest.reviewThreads;
+              for (const thread of page.nodes) {
+                const bodies = thread.comments.nodes.map((comment) => comment.body);
+                reviewThreads.push({
+                  resolved: thread.isResolved,
+                  priority: findReviewPriority(bodies),
+                  path: thread.path,
+                  line: thread.line,
+                  body: bodies.join("\n").slice(0, 4_000),
+                });
+              }
+              cursor = page.pageInfo.hasNextPage ? page.pageInfo.endCursor : null;
+            } while (cursor);
+
+            const snapshot = {
+              prNumber: pull.number,
+              state: pull.state,
+              draft: pull.draft,
+              baseBranch: pull.base.ref,
+              headBranch: pull.head.ref,
+              headSha: pull.head.sha,
+              baseRepository: pull.base.repo?.full_name ?? repository,
+              headRepository: pull.head.repo?.full_name ?? "",
+              isFork: pull.head.repo?.fork === true || pull.head.repo?.full_name !== pull.base.repo?.full_name,
+              labels: pull.labels.map((label) => label.name),
+              files: files.map((file) => ({
+                filename: file.filename,
+                previous_filename: file.previous_filename ?? null,
+              })),
+              changedFiles: pull.changed_files,
+              additions: pull.additions,
+              deletions: pull.deletions,
+              checks,
+              failedChecks,
+              mergeable: pull.mergeable,
+              reviewThreads,
+              validationCommands: ["npm run test:unit", "npm run lint", "npm run build", "git diff --check"],
+            };
+            fs.writeFileSync(`${process.env.RUNNER_TEMP}/atlas-pr-repair-input.json`, JSON.stringify(snapshot));
+
+      - name: Evaluate supervisor facts from trusted code
+        run: >-
+          node scripts/atlas-pr-supervisor.mjs
+          --config .github/atlas-autopilot.yml
+          < "$RUNNER_TEMP/atlas-pr-repair-input.json"
+          > "$RUNNER_TEMP/atlas-pr-supervisor-result.json"
+
+      - name: Bind supervisor result and repairable block reasons
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require("node:fs");
+            const { pathToFileURL } = require("node:url");
+            const { parseConfig } = await import(
+              pathToFileURL(`${process.env.GITHUB_WORKSPACE}/scripts/atlas-pr-supervisor.mjs`).href
+            );
+            const inputPath = `${process.env.RUNNER_TEMP}/atlas-pr-repair-input.json`;
+            const input = JSON.parse(fs.readFileSync(inputPath, "utf8"));
+            const supervisor = JSON.parse(fs.readFileSync(`${process.env.RUNNER_TEMP}/atlas-pr-supervisor-result.json`, "utf8"));
+            const config = parseConfig(fs.readFileSync(".github/atlas-autopilot.yml", "utf8").split(/^repair:/m)[0]);
+            const requiredFailed = input.checks.some((check) =>
+              config.required_check_names.includes(check.name) && check.status === "completed" && check.conclusion !== "success"
+            );
+            const blockingReview = input.reviewThreads.some((thread) =>
+              !thread.resolved && config.blocking_review_priorities.includes(thread.priority)
+            );
+            const explained = supervisor.reasons.every((reason) =>
+              (requiredFailed && (reason.startsWith("Check ") || reason.startsWith("Erforderlicher Check "))) ||
+              (blockingReview && /offene P[12]-Review-Kommentar/.test(reason))
+            );
+            input.supervisor = supervisor;
+            input.blockReasons = [
+              ...(requiredFailed ? ["required_check_failed"] : []),
+              ...(blockingReview ? ["blocking_review_found"] : []),
+              ...(supervisor.status === "BLOCKED" && !explained ? ["other_supervisor_block"] : []),
+            ];
+            fs.writeFileSync(inputPath, JSON.stringify(input));
+
+      - name: Create deterministic repair plan
+        run: >-
+          node scripts/atlas-pr-repair-plan.mjs
+          --config .github/atlas-autopilot.yml
+          < "$RUNNER_TEMP/atlas-pr-repair-input.json"
+          > "$RUNNER_TEMP/atlas-pr-repair-plan.json"
+
+      - name: Write repair plan summary
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require("node:fs");
+            const plan = JSON.parse(fs.readFileSync(`${process.env.RUNNER_TEMP}/atlas-pr-repair-plan.json`, "utf8"));
+            await core.summary
+              .addHeading("Atlas PR Repair Plan")
+              .addTable([
+                [{ data: "Status", header: true }, plan.status],
+                [{ data: "Attempt key", header: true }, plan.attemptKey],
+                [{ data: "Safe to start", header: true }, String(plan.safeToStart)],
+              ])
+              .addHeading("Reasons", 2)
+              .addList(plan.reasons.length ? plan.reasons : ["None"])
+              .addHeading("Proposed prompt", 2)
+              .addCodeBlock(plan.prompt || "No repair prompt was created.", "text")
+              .write();
+
+      - name: Upload repair plan audit artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: atlas-pr-repair-plan-${{ steps.pull.outputs.number }}-${{ steps.pull.outputs.head-sha }}
+          path: ${{ runner.temp }}/atlas-pr-repair-plan.json
+          if-no-files-found: error
+          retention-days: 30
