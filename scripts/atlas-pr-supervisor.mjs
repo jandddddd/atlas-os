@@ -11,6 +11,13 @@ export function isOwnedSupervisorComment(comment, marker) {
   return comment.user?.login === "github-actions[bot]" && comment.body?.includes(marker) === true;
 }
 
+export function findReviewPriority(commentBodies) {
+  const priorities = commentBodies
+    .map((body) => body.match(/(?:^|\W)(P[1-3])(?:\W|$)/i)?.[1]?.toUpperCase())
+    .filter(Boolean);
+  return ["P1", "P2", "P3"].find((priority) => priorities.includes(priority)) ?? null;
+}
+
 function parseScalar(value) {
   const trimmed = value.trim();
   if (trimmed === "true") return true;

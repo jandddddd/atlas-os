@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
-import { evaluatePullRequest, isOwnedSupervisorComment } from "./atlas-pr-supervisor.mjs";
+import { evaluatePullRequest, findReviewPriority, isOwnedSupervisorComment } from "./atlas-pr-supervisor.mjs";
 
 const workflow = readFileSync(new URL("../.github/workflows/atlas-pr-supervisor.yml", import.meta.url), "utf8");
 
@@ -116,4 +116,11 @@ test("Workflow aktualisiert den Status bei Review-Aktivität", () => {
   assert.match(workflow, /pull_request_review:\n\s+types: \[submitted, edited, dismissed\]/);
   assert.match(workflow, /pull_request_review_comment:\n\s+types: \[created, edited, deleted\]/);
   assert.match(workflow, /"pull_request_review",\n\s+"pull_request_review_comment",/);
+});
+
+test("P2-Marker bleibt in Review-Threads mit mehr als 100 Kommentaren sichtbar", () => {
+  const commentBodies = ["P2: ursprünglicher Review-Kommentar", ...Array.from({ length: 100 }, () => "Antwort")];
+  assert.equal(findReviewPriority(commentBodies), "P2");
+  assert.match(workflow, /comments\(first: 100, after: \$cursor\)/);
+  assert.match(workflow, /while \(commentCursor\)/);
 });
