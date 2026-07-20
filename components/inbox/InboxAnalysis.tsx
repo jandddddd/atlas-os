@@ -3,6 +3,8 @@
 import { useEffect, useRef, useState } from "react";
 import { ScanSearch, Sparkles, TriangleAlert } from "lucide-react";
 
+import { persistInboxTodayDecision } from "@/app/inbox/actions";
+
 import { AnalysisResultView } from "./AnalysisResultView";
 import { OfferDraftView } from "./OfferDraftView";
 import type { AnalysisResult, OfferDraft, OfferStatus } from "./types";
@@ -78,6 +80,12 @@ export function InboxAnalysis() {
       if (!response.ok) {
         throw new Error(
           data.error ?? "Die Anfrage konnte nicht analysiert werden.",
+        );
+      }
+
+      if (!(await persistInboxTodayDecision(data.analysis))) {
+        throw new Error(
+          "Die vorbereitete Entscheidung konnte nicht gespeichert werden.",
         );
       }
 

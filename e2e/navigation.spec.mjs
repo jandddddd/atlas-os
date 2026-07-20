@@ -118,6 +118,22 @@ test("Today-Seite ist erreichbar", async ({ page }) => {
   await expect(page.getByRole("heading", { name: offerOverviewTitle })).toHaveCount(1);
 });
 
+test("Inbox-Analyse wird als vorbereitete Entscheidung auf Today geladen", async ({ page }) => {
+  await page.goto("/inbox");
+  await page.getByRole("button", { name: "Anfrage analysieren" }).click();
+
+  await expect(
+    page.getByText("Angebotsentwurf Familie Schneider vorbereiten"),
+  ).toBeVisible();
+
+  await page.goto("/today");
+
+  await expect(page.getByText("Atlas hat heute 6 Entscheidungen vorbereitet.")).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Angebotsentwurf Familie Schneider vorbereiten" }),
+  ).toBeVisible();
+});
+
 test("Dependencies halten wartende Entscheidungen zurück und schalten Folgeentscheidungen frei", async ({ page }) => {
   await page.goto("/today");
 
