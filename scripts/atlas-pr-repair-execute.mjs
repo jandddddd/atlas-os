@@ -116,6 +116,23 @@ export function validateChangedFiles({ files, additions, deletions }, plan, poli
   return uniqueFiles;
 }
 
+export function validateTreeSnapshot({ trackedFiles, untrackedFiles, numstat, untrackedContents }, plan, policy) {
+  let additions = 0;
+  let deletions = 0;
+  for (const [added, deleted] of numstat) {
+    if (added === "-" || deleted === "-") throw new Error("Binary repair changes are not allowed.");
+    additions += Number(added);
+    deletions += Number(deleted);
+  }
+  for (const [, contents] of untrackedContents) {
+    if (contents.includes(0)) throw new Error("Binary repair changes are not allowed.");
+    additions += contents.toString().split("\n").length;
+  }
+  return validateChangedFiles({
+    files: [...trackedFiles, ...untrackedFiles], additions, deletions,
+  }, plan, policy);
+}
+
 export function createExecutionReport(values) {
   return {
     prNumber: values.prNumber,

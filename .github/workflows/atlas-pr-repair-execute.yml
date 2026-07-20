@@ -151,6 +151,7 @@ jobs:
           mkdir -p "$RUNNER_TEMP/atlas-repair-trusted"
           cp scripts/atlas-pr-repair-plan.mjs "$RUNNER_TEMP/atlas-repair-trusted/atlas-pr-repair-plan.mjs"
           cp scripts/atlas-pr-repair-execute.mjs "$RUNNER_TEMP/atlas-repair-trusted/atlas-pr-repair-execute.mjs"
+          cp scripts/atlas-pr-repair-tree-check.mjs "$RUNNER_TEMP/atlas-repair-trusted/atlas-pr-repair-tree-check.mjs"
           cp .github/atlas-autopilot.yml "$RUNNER_TEMP/atlas-repair-trusted/atlas-autopilot.yml"
 
       - name: Checkout the exact PR head for repair
@@ -197,35 +198,9 @@ jobs:
         run: rm -f .git/atlas-repair-prompt.txt
 
       - name: Validate repair scope and size
-        run: |
-          git diff HEAD --binary > "$RUNNER_TEMP/atlas-repair.diff"
-          git ls-files --others --exclude-standard -z > "$RUNNER_TEMP/atlas-repair-untracked.zlist"
-          node --input-type=module <<'NODE'
-          import { execFileSync } from "node:child_process";
-          import { readFileSync, writeFileSync } from "node:fs";
-          import { pathToFileURL } from "node:url";
-          const trusted = `${process.env.RUNNER_TEMP}/atlas-repair-trusted`;
-          const { parseRepairConfig } = await import(pathToFileURL(`${trusted}/atlas-pr-repair-plan.mjs`).href);
-          const { validateChangedFiles } = await import(pathToFileURL(`${trusted}/atlas-pr-repair-execute.mjs`).href);
-          const plan = JSON.parse(readFileSync(`${process.env.RUNNER_TEMP}/atlas-validated-plan.json`, "utf8"));
-          const policy = parseRepairConfig(readFileSync(`${trusted}/atlas-autopilot.yml`, "utf8"));
-          const tracked = execFileSync("git", ["diff", "HEAD", "--name-only", "-z"]).toString().split("\0").filter(Boolean);
-          const untracked = readFileSync(`${process.env.RUNNER_TEMP}/atlas-repair-untracked.zlist`).toString().split("\0").filter(Boolean);
-          const shortstat = execFileSync("git", ["diff", "HEAD", "--numstat"]).toString().trim().split("\n").filter(Boolean);
-          let additions = 0, deletions = 0;
-          for (const line of shortstat) {
-            const [added, deleted] = line.split("\t");
-            if (added === "-" || deleted === "-") throw new Error("Binary repair changes are not allowed.");
-            additions += Number(added); deletions += Number(deleted);
-          }
-          for (const file of untracked) {
-            const contents = readFileSync(file);
-            if (contents.includes(0)) throw new Error("Binary repair changes are not allowed.");
-            additions += contents.toString().split("\n").length;
-          }
-          const files = validateChangedFiles({ files: [...tracked, ...untracked], additions, deletions }, plan, policy);
-          writeFileSync(`${process.env.RUNNER_TEMP}/atlas-repair-changed-files.json`, JSON.stringify(files));
-          NODE
+        env:
+          ATLAS_REPAIR_CHANGED_FILES: ${{ runner.temp }}/atlas-repair-changed-files.json
+        run: node scripts/atlas-pr-repair-tree-check.mjs
 
       - name: Unit tests
         run: npm run test:unit
@@ -238,6 +213,15 @@ jobs:
 
       - name: Check patch whitespace
         run: git diff HEAD --check
+
+      - name: Revalidate complete repair tree after tests
+        env:
+          ATLAS_REPAIR_TRUSTED: ${{ runner.temp }}/atlas-repair-trusted
+          ATLAS_REPAIR_MODULE_ROOT: ${{ runner.temp }}/atlas-repair-trusted
+          ATLAS_REPAIR_POLICY: ${{ runner.temp }}/atlas-repair-trusted/atlas-autopilot.yml
+          ATLAS_REPAIR_PLAN: ${{ runner.temp }}/atlas-validated-plan.json
+          ATLAS_REPAIR_CHANGED_FILES: ${{ runner.temp }}/atlas-repair-changed-files.json
+        run: node "$RUNNER_TEMP/atlas-repair-trusted/atlas-pr-repair-tree-check.mjs"
 
       - name: Revalidate remote head before commit
         env:

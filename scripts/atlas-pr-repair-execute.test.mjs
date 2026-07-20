@@ -15,6 +15,7 @@ import {
   validatePlanArtifact,
   validatePullRequest,
   isTrustedRepairPlanWorkflowPath,
+  validateTreeSnapshot,
 } from "./atlas-pr-repair-execute.mjs";
 import { parseRepairConfig } from "./atlas-pr-repair-plan.mjs";
 
@@ -115,6 +116,15 @@ test("forbidden and outside-plan path changes prevent push", () => {
   assert.throws(() => validateChangedFiles({ files: ["app/page.tsx"], additions: 1, deletions: 0 }, plan, policy), /outside/);
 });
 
+test("post-validation generated forbidden file prevents commit", () => {
+  assert.throws(() => validateTreeSnapshot({
+    trackedFiles: [], untrackedFiles: [".github/workflows/generated.yml"],
+    numstat: [], untrackedContents: [[".github/workflows/generated.yml", Buffer.from("name: bad\n")]],
+  }, { ...plan, allowedAreas: [".github/workflows/generated.yml"] }, policy), /forbidden/);
+  assert.match(workflow, /Revalidate complete repair tree after tests/);
+  assert.ok(workflow.indexOf("Revalidate complete repair tree after tests") < workflow.indexOf("name: Commit approved repair"));
+});
+
 test("size limits prevent push", () => {
   assert.throws(() => validateChangedFiles({ files: ["scripts/example.mjs"], additions: 501, deletions: 0 }, plan, policy), /line limit/);
   const files = Array.from({ length: 11 }, (_, index) => `scripts/${index}.mjs`);
@@ -131,8 +141,7 @@ test("workflow performs exactly one gated commit and normal push", () => {
   assert.match(workflow, /fix\(autopilot\): apply approved repair plan/);
   assert.doesNotMatch(workflow, /push[^\n]*(?:--force|-f\b)|gh pr create|pulls\.create|pulls\.merge/i);
   assert.match(workflow, /isTrustedRepairPlanWorkflowPath\(run\.path\)/);
-  assert.match(workflow, /execFileSync\("git", \["diff", "HEAD", "--name-only", "-z"\]/);
-  assert.match(workflow, /execFileSync\("git", \["diff", "HEAD", "--numstat"\]/);
+  assert.match(workflow, /atlas-pr-repair-tree-check\.mjs/);
 });
 
 test("tests and safety gates precede commit and push", () => {
