@@ -1,14 +1,27 @@
 "use server";
 
 import type { AnalysisResult } from "@/components/inbox/types";
-import { inboxTodayDecisionId } from "@/lib/today/inbox-today-decision";
 import {
   clearInboxTodayDecision,
   isAnalysisResult,
+  readInboxTodayDecision,
   writeInboxTodayDecision,
 } from "@/lib/today/inbox-today-decision-store";
-import { clearTodayDecisionStateForDecision } from "@/lib/today/today-decision-state";
+import {
+  replaceInboxTodayDecision,
+  resetInboxTodayDecisionState,
+} from "@/lib/today/inbox-today-decision-replacement";
 import { todayDecisionStateStore } from "@/lib/today/today-decision-state-store";
+
+const inboxTodayDecisionDependencies = {
+  readInboxDecision: readInboxTodayDecision,
+  writeInboxDecision: writeInboxTodayDecision,
+  clearInboxDecision: clearInboxTodayDecision,
+  readTodayState: () => todayDecisionStateStore.read(),
+  writeTodayState: (
+    state: Awaited<ReturnType<typeof todayDecisionStateStore.read>>,
+  ) => todayDecisionStateStore.write(state),
+};
 
 export async function persistInboxTodayDecision(
   analysis: AnalysisResult,
@@ -17,25 +30,9 @@ export async function persistInboxTodayDecision(
     return false;
   }
 
-  const state = await todayDecisionStateStore.read();
-
-  const [wasStored] = await Promise.all([
-    writeInboxTodayDecision(analysis),
-    todayDecisionStateStore.write(
-      clearTodayDecisionStateForDecision(state, inboxTodayDecisionId),
-    ),
-  ]);
-
-  return wasStored;
+  return replaceInboxTodayDecision(analysis, inboxTodayDecisionDependencies);
 }
 
 export async function resetInboxTodayDecision(): Promise<void> {
-  const state = await todayDecisionStateStore.read();
-
-  await Promise.all([
-    clearInboxTodayDecision(),
-    todayDecisionStateStore.write(
-      clearTodayDecisionStateForDecision(state, inboxTodayDecisionId),
-    ),
-  ]);
+  await resetInboxTodayDecisionState(inboxTodayDecisionDependencies);
 }

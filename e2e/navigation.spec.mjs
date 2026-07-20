@@ -156,6 +156,41 @@ test("Inbox-Reset entfernt die vorbereitete Entscheidung aus Today", async ({ pa
   ).toHaveCount(0);
 });
 
+test("Inbox-Reset leert den lokalen Vorgang auch bei fehlgeschlagenem Server-Cleanup", async ({ page }) => {
+  await page.goto("/inbox");
+  await page.getByRole("button", { name: "Anfrage analysieren" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Analyse abgeschlossen" }),
+  ).toBeVisible();
+
+  await page.route("**/inbox", async (route) => {
+    if (route.request().method() === "POST") {
+      await route.fulfill({ status: 500, body: "Server-Cleanup fehlgeschlagen" });
+      return;
+    }
+
+    await route.continue();
+  });
+
+  await page
+    .getByRole("button", { name: "Gespeicherten Vorgang zurücksetzen" })
+    .click();
+
+  await expect(
+    page.getByRole("button", { name: "Anfrage analysieren" }),
+  ).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Analyse abgeschlossen" })).toHaveCount(0);
+  await expect(page.getByRole("status")).toContainText(
+    "Der Vorgang wurde lokal zurückgesetzt.",
+  );
+  await expect
+    .poll(() => page.evaluate(() => window.localStorage.getItem("atlas-inquiry-analysis")))
+    .toBeNull();
+  await expect
+    .poll(() => page.evaluate(() => window.localStorage.getItem("atlas-editable-offer")))
+    .toBeNull();
+});
+
 test("Eine erneute Inbox-Analyse entfernt eine alte manuelle Priorisierung", async ({ page }) => {
   const inboxDecisionTitle = "Angebotsentwurf Familie Schneider vorbereiten";
 
