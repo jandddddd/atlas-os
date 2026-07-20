@@ -1,0 +1,203 @@
+name: Atlas PR Supervisor
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, labeled, unlabeled, ready_for_review]
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: Pull-Request-Nummer
+        required: true
+        type: number
+
+permissions:
+  contents: read
+  pull-requests: write
+  checks: read
+  actions: read
+
+concurrency:
+  group: atlas-pr-supervisor-${{ github.event.pull_request.number || github.event.workflow_run.pull_requests[0].number || inputs.pr_number }}
+  cancel-in-progress: true
+
+jobs:
+  supervise:
+    if: >-
+      github.event_name != 'workflow_run' ||
+      (github.event.workflow_run.event == 'pull_request' && github.event.workflow_run.pull_requests[0] != null)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve trusted base revision
+        id: trusted
+        uses: actions/github-script@v7
+        with:
+          script: |
+            let pullRequest;
+            if (context.eventName === "pull_request_target") {
+              pullRequest = context.payload.pull_request;
+            } else if (context.eventName === "workflow_run") {
+              const associated = context.payload.workflow_run.pull_requests[0];
+              if (!associated) throw new Error("No pull request is associated with this workflow run.");
+              ({ data: pullRequest } = await github.rest.pulls.get({
+                ...context.repo,
+                pull_number: associated.number,
+              }));
+            } else {
+              const pullNumber = Number(context.payload.inputs?.pr_number);
+              if (!Number.isInteger(pullNumber) || pullNumber < 1) throw new Error("A valid pr_number is required.");
+              ({ data: pullRequest } = await github.rest.pulls.get({
+                ...context.repo,
+                pull_number: pullNumber,
+              }));
+            }
+
+            const repository = `${context.repo.owner}/${context.repo.repo}`;
+            if (pullRequest.head.repo?.full_name !== repository || pullRequest.base.repo?.full_name !== repository) {
+              core.setFailed("Atlas PR Supervisor only evaluates branches from this repository.");
+              return;
+            }
+            core.setOutput("pr-number", pullRequest.number);
+            core.setOutput("base-sha", pullRequest.base.sha);
+
+      - name: Checkout trusted base branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.trusted.outputs.base-sha }}
+          persist-credentials: false
+
+      - name: Collect pull request facts
+        uses: actions/github-script@v7
+        env:
+          PR_NUMBER: ${{ steps.trusted.outputs.pr-number }}
+        with:
+          script: |
+            const fs = require("node:fs");
+            const pullNumber = Number(process.env.PR_NUMBER);
+            const { data: pull } = await github.rest.pulls.get({ ...context.repo, pull_number: pullNumber });
+            const files = await github.paginate(github.rest.pulls.listFiles, {
+              ...context.repo,
+              pull_number: pullNumber,
+              per_page: 100,
+            });
+            const rawChecks = await github.paginate(github.rest.checks.listForRef, {
+              ...context.repo,
+              ref: pull.head.sha,
+              per_page: 100,
+            });
+            const workflowNames = new Map();
+            for (const check of rawChecks) {
+              const match = check.details_url?.match(/\/actions\/runs\/(\d+)/);
+              if (!match || workflowNames.has(match[1])) continue;
+              try {
+                const { data: run } = await github.rest.actions.getWorkflowRun({
+                  ...context.repo,
+                  run_id: Number(match[1]),
+                });
+                workflowNames.set(match[1], run.name);
+              } catch (error) {
+                core.warning(`Could not resolve workflow name for check ${check.name}: ${error.message}`);
+              }
+            }
+            const checks = rawChecks.flatMap((check) => {
+              const runId = check.details_url?.match(/\/actions\/runs\/(\d+)/)?.[1];
+              if (runId === String(context.runId)) return [];
+              const qualifiedName = runId && workflowNames.get(runId)
+                ? `${workflowNames.get(runId)} / ${check.name}`
+                : check.name;
+              const value = { name: qualifiedName, status: check.status, conclusion: check.conclusion };
+              return [value];
+            });
+
+            const reviewThreads = [];
+            let reviewCursor = null;
+            do {
+              const threadData = await github.graphql(
+                `query($owner: String!, $repo: String!, $number: Int!, $cursor: String) {
+                repository(owner: $owner, name: $repo) {
+                  pullRequest(number: $number) {
+                    reviewThreads(first: 100, after: $cursor) {
+                      pageInfo { hasNextPage endCursor }
+                      nodes { isResolved comments(last: 100) { nodes { body } } }
+                    }
+                  }
+                }
+              }`,
+                { owner: context.repo.owner, repo: context.repo.repo, number: pullNumber, cursor: reviewCursor },
+              );
+              const page = threadData.repository.pullRequest.reviewThreads;
+              for (const thread of page.nodes) {
+                const priorities = thread.comments.nodes
+                  .map((comment) => comment.body.match(/(?:^|\W)(P[1-3])(?:\W|$)/i)?.[1]?.toUpperCase())
+                  .filter(Boolean);
+                const priority = ["P1", "P2", "P3"].find((candidate) => priorities.includes(candidate)) ?? null;
+                reviewThreads.push({ resolved: thread.isResolved, priority });
+              }
+              reviewCursor = page.pageInfo.hasNextPage ? page.pageInfo.endCursor : null;
+            } while (reviewCursor);
+            const input = {
+              state: pull.state,
+              baseBranch: pull.base.ref,
+              labels: pull.labels.map((label) => label.name),
+              checks,
+              mergeable: pull.mergeable,
+              reviewThreads,
+              changedFiles: pull.changed_files,
+              additions: pull.additions,
+              deletions: pull.deletions,
+              files: files.map((file) => file.filename),
+              headSha: pull.head.sha,
+            };
+            fs.writeFileSync(`${process.env.RUNNER_TEMP}/atlas-pr-input.json`, JSON.stringify(input));
+
+      - name: Evaluate pull request
+        run: >-
+          node scripts/atlas-pr-supervisor.mjs
+          --config .github/atlas-autopilot.yml
+          < "$RUNNER_TEMP/atlas-pr-input.json"
+          > "$RUNNER_TEMP/atlas-pr-result.json"
+
+      - name: Create or update supervisor comment
+        uses: actions/github-script@v7
+        env:
+          PR_NUMBER: ${{ steps.trusted.outputs.pr-number }}
+        with:
+          script: |
+            const fs = require("node:fs");
+            const marker = "<!-- atlas-pr-supervisor -->";
+            const input = JSON.parse(fs.readFileSync(`${process.env.RUNNER_TEMP}/atlas-pr-input.json`, "utf8"));
+            const result = JSON.parse(fs.readFileSync(`${process.env.RUNNER_TEMP}/atlas-pr-result.json`, "utf8"));
+            const icon = result.status === "MERGE_READY" ? "✅" : result.status === "WAITING" ? "⏳" : "⛔";
+            const title = result.status === "MERGE_READY" ? "MERGE READY" : result.status;
+            const blockingCount = input.reviewThreads.filter(
+              (thread) => !thread.resolved && ["P1", "P2"].includes(thread.priority),
+            ).length;
+            const checkLines = input.checks.length
+              ? input.checks.map((check) => `- \`${check.name}\`: ${check.conclusion ?? check.status}`).join("\n")
+              : "- Keine Checks gefunden";
+            const reasonLines = result.reasons.length
+              ? result.reasons.map((reason) => `- ${reason}`).join("\n")
+              : "- Alle Supervisor-Regeln sind erfüllt.";
+            const body = `${marker}\n## ${icon} ${title}\n\n${reasonLines}\n\n` +
+              `**Neuester Commit:** \`${input.headSha}\`\n\n` +
+              `**Check-Status**\n${checkLines}\n\n` +
+              `**Offene P1/P2-Kommentare:** ${blockingCount}\n\n` +
+              `> Dry-run: kein automatischer Merge`;
+            const pullNumber = Number(process.env.PR_NUMBER);
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              ...context.repo,
+              issue_number: pullNumber,
+              per_page: 100,
+            });
+            const supervisorComments = comments.filter((comment) => comment.body?.includes(marker));
+            const [primary, ...duplicates] = supervisorComments;
+            if (!primary) {
+              await github.rest.issues.createComment({ ...context.repo, issue_number: pullNumber, body });
+            } else if (primary.body !== body) {
+              await github.rest.issues.updateComment({ ...context.repo, comment_id: primary.id, body });
+            }
+            for (const duplicate of duplicates) {
+              await github.rest.issues.deleteComment({ ...context.repo, comment_id: duplicate.id });
+            }

@@ -1,0 +1,23 @@
+enabled: true
+mode: dry-run
+allowed_base_branches:
+  - main
+required_check_names:
+  - "CI / verify"
+blocking_review_priorities:
+  - P1
+  - P2
+maximum_changed_files: 25
+maximum_changed_lines: 1500
+forbidden_paths:
+  - ".github/workflows/"
+  - ".env"
+  - ".env.*"
+  - "migrations/"
+  - "prisma/"
+required_label: "atlas-autopilot"
+never_merge_labels:
+  - "do-not-merge"
+  - "security"
+  - "product-decision"
+auto_merge: false
