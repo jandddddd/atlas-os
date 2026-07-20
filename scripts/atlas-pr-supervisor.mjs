@@ -18,6 +18,15 @@ export function findReviewPriority(commentBodies) {
   return ["P1", "P2", "P3"].find((priority) => priorities.includes(priority)) ?? null;
 }
 
+export function deduplicateCheckRuns(checkRuns) {
+  const uniqueChecks = new Map();
+  for (const check of checkRuns) {
+    const key = check.id ?? `${check.name}\0${check.details_url ?? ""}\0${check.head_sha ?? ""}`;
+    if (!uniqueChecks.has(key)) uniqueChecks.set(key, check);
+  }
+  return [...uniqueChecks.values()];
+}
+
 function parseScalar(value) {
   const trimmed = value.trim();
   if (trimmed === "true") return true;

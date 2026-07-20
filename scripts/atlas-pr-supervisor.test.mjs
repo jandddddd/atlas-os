@@ -2,7 +2,12 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
-import { evaluatePullRequest, findReviewPriority, isOwnedSupervisorComment } from "./atlas-pr-supervisor.mjs";
+import {
+  deduplicateCheckRuns,
+  evaluatePullRequest,
+  findReviewPriority,
+  isOwnedSupervisorComment,
+} from "./atlas-pr-supervisor.mjs";
 
 const workflow = readFileSync(new URL("../.github/workflows/atlas-pr-supervisor.yml", import.meta.url), "utf8");
 
@@ -123,4 +128,16 @@ test("P2-Marker bleibt in Review-Threads mit mehr als 100 Kommentaren sichtbar",
   assert.equal(findReviewPriority(commentBodies), "P2");
   assert.match(workflow, /comments\(first: 100, after: \$cursor\)/);
   assert.match(workflow, /while \(commentCursor\)/);
+});
+
+test("CI-Check vom PR-Merge-SHA wird erkannt und nicht doppelt gezählt", () => {
+  const verify = { id: 42, name: "CI / verify", status: "completed", conclusion: "success" };
+  const checks = deduplicateCheckRuns([
+    { id: 7, name: "other", status: "completed", conclusion: "success" },
+    verify,
+    verify,
+  ]);
+  assert.equal(checks.length, 2);
+  assert.equal(evaluate({ checks }).status, "MERGE_READY");
+  assert.match(workflow, /ref: `pull\/\$\{pullNumber\}\/merge`/);
 });

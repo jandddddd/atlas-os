@@ -85,7 +85,7 @@ jobs:
           script: |
             const fs = require("node:fs");
             const { pathToFileURL } = require("node:url");
-            const { findReviewPriority } = await import(
+            const { deduplicateCheckRuns, findReviewPriority } = await import(
               pathToFileURL(`${process.env.GITHUB_WORKSPACE}/scripts/atlas-pr-supervisor.mjs`).href
             );
             const pullNumber = Number(process.env.PR_NUMBER);
@@ -95,11 +95,25 @@ jobs:
               pull_number: pullNumber,
               per_page: 100,
             });
-            const rawChecks = await github.paginate(github.rest.checks.listForRef, {
-              ...context.repo,
-              ref: pull.head.sha,
-              per_page: 100,
-            });
+            const checkRefs = new Set([pull.head.sha]);
+            if (pull.merge_commit_sha) checkRefs.add(pull.merge_commit_sha);
+            try {
+              const { data: mergeRef } = await github.rest.git.getRef({
+                ...context.repo,
+                ref: `pull/${pullNumber}/merge`,
+              });
+              checkRefs.add(mergeRef.object.sha);
+            } catch (error) {
+              if (error.status !== 404) throw error;
+              core.info("No PR merge ref is available; checks will be collected from the head SHA.");
+            }
+            const rawChecks = deduplicateCheckRuns((await Promise.all(
+              [...checkRefs].map((ref) => github.paginate(github.rest.checks.listForRef, {
+                ...context.repo,
+                ref,
+                per_page: 100,
+              })),
+            )).flat());
             const workflowNames = new Map();
             for (const check of rawChecks) {
               const match = check.details_url?.match(/\/actions\/runs\/(\d+)/);
