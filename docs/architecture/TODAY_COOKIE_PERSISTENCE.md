@@ -60,3 +60,9 @@ After every successful action, the server derives the resulting queue from fixtu
 The cookie is `httpOnly`, `sameSite=lax`, scoped to `/`, and marked `secure` for HTTPS requests. It is not encrypted because it contains no secret data. Cookie manipulation must therefore never be treated as proof of authorization or an audit trail.
 
 This is not production-grade persistence: browser cookies have limited size, are user-controlled, are not shared between devices, and have no durable audit or concurrency guarantees. A database-backed `TodayDecisionRepository` can replace the cookie module later while keeping the typed action state and queue-application helper; it should store validated decision outcomes per authenticated user or workspace and return the same state to the application layer.
+
+## Inbox decision source (temporary)
+
+When an Inbox analysis completes, the validated analysis is also stored in the browser-scoped, `httpOnly` cookie `atlas-inbox-today-decision`. The Today fixture repository reads this source and transforms its `recommendedTask` into one additional approval decision. This makes the currently persisted Inbox workflow visible to server-rendered Today and to its server actions.
+
+The cookie is replaced for each completed analysis and is limited to the analysis data already persisted locally by the Inbox; it must never contain prompts, API keys, offer positions, or other secrets. Until a durable repository exists, it remains browser-scoped and is not an audit trail.

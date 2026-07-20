@@ -118,6 +118,103 @@ test("Today-Seite ist erreichbar", async ({ page }) => {
   await expect(page.getByRole("heading", { name: offerOverviewTitle })).toHaveCount(1);
 });
 
+test("Inbox-Analyse wird als vorbereitete Entscheidung auf Today geladen", async ({ page }) => {
+  await page.goto("/inbox");
+  await page.getByRole("button", { name: "Anfrage analysieren" }).click();
+
+  await expect(
+    page.getByRole("heading", { name: "Analyse abgeschlossen" }),
+  ).toBeVisible();
+
+  await page.goto("/today");
+
+  await expect(page.getByText("Atlas hat heute 6 Entscheidungen vorbereitet.")).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Angebotsentwurf Familie Schneider vorbereiten" }),
+  ).toBeVisible();
+});
+
+test("Inbox-Reset entfernt die vorbereitete Entscheidung aus Today", async ({ page }) => {
+  await page.goto("/inbox");
+  await page.getByRole("button", { name: "Anfrage analysieren" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Analyse abgeschlossen" }),
+  ).toBeVisible();
+
+  await page
+    .getByRole("button", { name: "Gespeicherten Vorgang zurücksetzen" })
+    .click();
+  await expect(
+    page.getByRole("button", { name: "Anfrage analysieren" }),
+  ).toBeVisible();
+
+  await page.goto("/today");
+
+  await expect(page.getByText("Atlas hat heute 5 Entscheidungen vorbereitet.")).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Angebotsentwurf Familie Schneider vorbereiten" }),
+  ).toHaveCount(0);
+});
+
+test("Inbox-Reset leert den lokalen Vorgang auch bei fehlgeschlagenem Server-Cleanup", async ({ page }) => {
+  await page.goto("/inbox");
+  await page.getByRole("button", { name: "Anfrage analysieren" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Analyse abgeschlossen" }),
+  ).toBeVisible();
+
+  await page.route("**/inbox", async (route) => {
+    if (route.request().method() === "POST") {
+      await route.fulfill({ status: 500, body: "Server-Cleanup fehlgeschlagen" });
+      return;
+    }
+
+    await route.continue();
+  });
+
+  await page
+    .getByRole("button", { name: "Gespeicherten Vorgang zurücksetzen" })
+    .click();
+
+  await expect(
+    page.getByRole("button", { name: "Anfrage analysieren" }),
+  ).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Analyse abgeschlossen" })).toHaveCount(0);
+  await expect(page.getByRole("status")).toContainText(
+    "Der Vorgang wurde lokal zurückgesetzt.",
+  );
+  await expect
+    .poll(() => page.evaluate(() => window.localStorage.getItem("atlas-inquiry-analysis")))
+    .toBeNull();
+  await expect
+    .poll(() => page.evaluate(() => window.localStorage.getItem("atlas-editable-offer")))
+    .toBeNull();
+});
+
+test("Eine erneute Inbox-Analyse entfernt eine alte manuelle Priorisierung", async ({ page }) => {
+  const inboxDecisionTitle = "Angebotsentwurf Familie Schneider vorbereiten";
+
+  await page.goto("/inbox");
+  await page.getByRole("button", { name: "Anfrage analysieren" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Analyse abgeschlossen" }),
+  ).toBeVisible();
+
+  await page.goto("/today");
+  await page.getByRole("button", { name: inboxDecisionTitle }).click();
+  await expect(manualPriorityExplanation(page)).toBeVisible();
+
+  await page.goto("/inbox");
+  await page.getByRole("button", { name: "Analyse erneut starten" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Analyse abgeschlossen" }),
+  ).toBeVisible();
+
+  await page.goto("/today");
+  await expect(manualPriorityExplanation(page)).toHaveCount(0);
+  await expect(page.getByRole("button", { name: inboxDecisionTitle })).toBeVisible();
+});
+
 test("Dependencies halten wartende Entscheidungen zurück und schalten Folgeentscheidungen frei", async ({ page }) => {
   await page.goto("/today");
 

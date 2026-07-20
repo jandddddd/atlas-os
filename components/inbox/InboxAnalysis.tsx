@@ -3,6 +3,11 @@
 import { useEffect, useRef, useState } from "react";
 import { ScanSearch, Sparkles, TriangleAlert } from "lucide-react";
 
+import {
+  persistInboxTodayDecision,
+  resetInboxTodayDecision,
+} from "@/app/inbox/actions";
+
 import { AnalysisResultView } from "./AnalysisResultView";
 import { OfferDraftView } from "./OfferDraftView";
 import type { AnalysisResult, OfferDraft, OfferStatus } from "./types";
@@ -34,6 +39,7 @@ export function InboxAnalysis() {
   const [offerError, setOfferError] = useState("");
   const [editableOffer, setEditableOffer] = useState<OfferDraft | null>(null);
   const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
+  const [resetError, setResetError] = useState("");
 
   useEffect(() => {
     let cancelled = false;
@@ -65,6 +71,7 @@ export function InboxAnalysis() {
     try {
       setStatus("analyzing");
       setAnalysisError("");
+      setResetError("");
       setOffer(null);
       setOfferStatus("idle");
 
@@ -78,6 +85,12 @@ export function InboxAnalysis() {
       if (!response.ok) {
         throw new Error(
           data.error ?? "Die Anfrage konnte nicht analysiert werden.",
+        );
+      }
+
+      if (!(await persistInboxTodayDecision(data.analysis))) {
+        throw new Error(
+          "Die vorbereitete Entscheidung konnte nicht gespeichert werden.",
         );
       }
 
@@ -151,18 +164,28 @@ export function InboxAnalysis() {
     setIsEditingOffer(false);
   }
 
-  function resetInboxWorkflow() {
+  async function resetInboxWorkflow() {
     workflowVersion.current += 1;
-    clearInboxWorkflow();
-    setIsEditingOffer(false);
-    setStatus("idle");
-    setAnalysis(null);
-    setAnalysisError("");
-    setOfferStatus("idle");
-    setOffer(null);
-    setOfferError("");
-    setEditableOffer(null);
-    setLastSavedAt(null);
+
+    try {
+      await resetInboxTodayDecision();
+      setResetError("");
+    } catch {
+      setResetError(
+        "Der Vorgang wurde lokal zurückgesetzt. Die vorbereitete Today-Entscheidung konnte nicht vollständig entfernt werden.",
+      );
+    } finally {
+      clearInboxWorkflow();
+      setIsEditingOffer(false);
+      setStatus("idle");
+      setAnalysis(null);
+      setAnalysisError("");
+      setOfferStatus("idle");
+      setOffer(null);
+      setOfferError("");
+      setEditableOffer(null);
+      setLastSavedAt(null);
+    }
   }
 
   function discardOfferChanges() {
@@ -177,7 +200,15 @@ export function InboxAnalysis() {
 
   if (status === "idle") {
     return (
-      <div className="mt-8">
+      <div className="mt-8 space-y-4">
+        {resetError ? (
+          <p
+            role="status"
+            className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900"
+          >
+            {resetError}
+          </p>
+        ) : null}
         <button
           type="button"
           onClick={startAnalysis}
