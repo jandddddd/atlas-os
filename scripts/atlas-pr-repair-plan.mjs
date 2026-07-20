@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
-import { readFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
 const REPAIR_STATUSES = new Set(["MERGE_READY", "WAITING", "BLOCKED"]);
@@ -79,6 +80,30 @@ function sortedUnique(values) {
   return [...new Set(values)].sort((left, right) => left.localeCompare(right, "en"));
 }
 
+function relevantCheckFailures(input) {
+  return [...(input.failedChecks ?? [])]
+    .map((check) => ({
+      name: redactDiagnostic(check.name, 200),
+      diagnostic: redactDiagnostic(check.logExcerpt || "No diagnostic excerpt available."),
+    }))
+    .sort((left, right) => left.name.localeCompare(right.name, "en"));
+}
+
+function relevantFindings(input) {
+  return [...(input.reviewThreads ?? [])]
+    .filter((thread) => !thread.resolved && ["P1", "P2"].includes(thread.priority))
+    .map((thread) => ({
+      priority: thread.priority,
+      path: redactDiagnostic(thread.path ?? "", 500),
+      line: Number.isInteger(thread.line) ? thread.line : null,
+      body: redactDiagnostic(thread.body, 1_000),
+    }))
+    .sort((left, right) => `${left.priority}:${left.path}:${left.line ?? 0}:${left.body}`.localeCompare(
+      `${right.priority}:${right.path}:${right.line ?? 0}:${right.body}`,
+      "en",
+    ));
+}
+
 function promptFor(input, policy, rootCauses, changedPaths) {
   const failedChecks = [...(input.failedChecks ?? [])].sort((left, right) =>
     String(left.name).localeCompare(String(right.name), "en"),
@@ -135,16 +160,26 @@ export function createRepairPlan(input, policy) {
   if (!REPAIR_STATUSES.has(input.supervisor?.status)) throw new Error("A valid supervisor result is required.");
 
   const attemptKey = `${input.prNumber}:${input.headSha}`;
+  const changedPaths = sortedUnique(filePaths(input.files ?? [])).map((path) => redactDiagnostic(path, 500));
+  const audit = {
+    prNumber: input.prNumber,
+    headSha: input.headSha,
+    attemptKey,
+    allowedAreas: changedPaths,
+    forbiddenAreas: sortedUnique(policy.forbidden_paths ?? []).map((path) => redactDiagnostic(path, 500)),
+    relevantCheckFailures: relevantCheckFailures(input),
+    relevantFindings: relevantFindings(input),
+    repairExecuted: false,
+  };
   if (input.supervisor.status === "MERGE_READY") {
-    return { status: "NO_REPAIR_NEEDED", reasons: ["Pull request is merge-ready."], prompt: "", attemptKey, safeToStart: false };
+    return { ...audit, status: "NO_REPAIR_NEEDED", reasons: ["Pull request is merge-ready."], prompt: "", safeToStart: false };
   }
   if (input.supervisor.status === "WAITING") {
-    return { status: "REPAIR_BLOCKED", reasons: ["Supervisor is waiting for incomplete checks or state."], prompt: "", attemptKey, safeToStart: false };
+    return { ...audit, status: "REPAIR_BLOCKED", reasons: ["Supervisor is waiting for incomplete checks or state."], prompt: "", safeToStart: false };
   }
 
   const blockingReasons = [];
   const labels = new Set(input.labels ?? []);
-  const changedPaths = sortedUnique(filePaths(input.files ?? []));
   const changedLines = (input.additions ?? 0) + (input.deletions ?? 0);
   const repositoryMatches = input.headRepository === input.baseRepository;
   if (policy.require_same_repository && !repositoryMatches) blockingReasons.push("Head and base repositories differ.");
@@ -167,7 +202,13 @@ export function createRepairPlan(input, policy) {
   if (disallowed.length) blockingReasons.push(`Disallowed block reasons: ${disallowed.join(", ")}.`);
 
   if (blockingReasons.length) {
-    return { status: "REPAIR_BLOCKED", reasons: blockingReasons, prompt: "", attemptKey, safeToStart: false };
+    return {
+      ...audit,
+      status: "REPAIR_BLOCKED",
+      reasons: blockingReasons.map((reason) => redactDiagnostic(reason, 1_000)),
+      prompt: "",
+      safeToStart: false,
+    };
   }
 
   const supervisorReasons = sortedUnique(input.supervisor.reasons ?? []).map((reason) => `Supervisor: ${reason}`);
@@ -179,12 +220,74 @@ export function createRepairPlan(input, policy) {
   const prompt = promptFor(input, policy, rootCauses, changedPaths);
   const enabled = policy.enabled === true && policy.mode === "manual";
   return {
+    ...audit,
     status: "REPAIR_ELIGIBLE",
-    reasons: enabled ? rootCauses : [...rootCauses, "Repair execution is disabled by policy."],
+    reasons: (enabled ? rootCauses : [...rootCauses, "Repair execution is disabled by policy."])
+      .map((reason) => redactDiagnostic(reason, 1_000)),
     prompt,
-    attemptKey,
     safeToStart: enabled,
   };
+}
+
+function markdownList(values, emptyMessage = "None.") {
+  return values.length ? values.map((value) => `- ${value}`).join("\n") : `- ${emptyMessage}`;
+}
+
+export function renderRepairPlanMarkdown(plan, artifactName) {
+  const checks = plan.relevantCheckFailures.map((check) =>
+    `- **${redactDiagnostic(check.name, 200)}**\n\n  \`\`\`text\n  ${redactDiagnostic(check.diagnostic).replace(/\n/g, "\n  ")}\n  \`\`\``,
+  );
+  const findings = plan.relevantFindings.map((finding) =>
+    `- ${finding.priority}${finding.path ? ` ${redactDiagnostic(finding.path, 500)}${finding.line ? `:${finding.line}` : ""}` : ""}: ${redactDiagnostic(finding.body, 1_000)}`,
+  );
+  return [
+    "# Atlas PR Repair Plan",
+    "",
+    `- **Repair status:** ${plan.status}`,
+    `- **PR number:** ${plan.prNumber}`,
+    `- **Head SHA:** \`${plan.headSha}\``,
+    `- **attemptKey:** \`${plan.attemptKey}\``,
+    ...(artifactName ? [`- **Download artifact:** \`${redactDiagnostic(artifactName, 300)}\``] : []),
+    "",
+    "## Reasons",
+    "",
+    markdownList(plan.reasons.map((reason) => redactDiagnostic(reason, 1_000))),
+    "",
+    "## Allowed areas",
+    "",
+    markdownList(plan.allowedAreas.map((path) => `\`${redactDiagnostic(path, 500)}\``)),
+    "",
+    "## Forbidden areas",
+    "",
+    markdownList(plan.forbiddenAreas.map((path) => `\`${redactDiagnostic(path, 500)}\``)),
+    "",
+    "## Relevant check failures",
+    "",
+    markdownList(checks),
+    "",
+    "## Relevant P1/P2 findings",
+    "",
+    markdownList(findings),
+    "",
+    "## Generated repair prompt",
+    "",
+    "```text",
+    redactDiagnostic(plan.prompt || "No repair prompt was generated.", 20_000),
+    "```",
+    "",
+    "## Execution notice",
+    "",
+    "**In diesem Workflow wurde kein Code verändert und kein Repair ausgeführt.**",
+    "",
+  ].join("\n");
+}
+
+export async function writeRepairPlanArtifacts(outputDirectory, plan, artifactName) {
+  await mkdir(outputDirectory, { recursive: true });
+  await Promise.all([
+    writeFile(join(outputDirectory, "repair-plan.json"), `${JSON.stringify(plan, null, 2)}\n`, "utf8"),
+    writeFile(join(outputDirectory, "repair-plan.md"), renderRepairPlanMarkdown(plan, artifactName), "utf8"),
+  ]);
 }
 
 async function readStdin() {
@@ -198,6 +301,12 @@ async function main() {
   if (configIndex < 0 || !process.argv[configIndex + 1]) throw new Error("Usage: atlas-pr-repair-plan.mjs --config <path>");
   const [configSource, inputSource] = await Promise.all([readFile(process.argv[configIndex + 1], "utf8"), readStdin()]);
   const plan = createRepairPlan(JSON.parse(inputSource), parseRepairConfig(configSource));
+  const outputIndex = process.argv.indexOf("--output-dir");
+  if (outputIndex >= 0) {
+    if (!process.argv[outputIndex + 1]) throw new Error("--output-dir requires a path.");
+    const artifactIndex = process.argv.indexOf("--artifact-name");
+    await writeRepairPlanArtifacts(process.argv[outputIndex + 1], plan, process.argv[artifactIndex + 1] ?? "");
+  }
   process.stdout.write(`${JSON.stringify(plan)}\n`);
 }
 
