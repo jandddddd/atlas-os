@@ -34,6 +34,18 @@ jobs:
       (github.event.workflow_run.event == 'pull_request' && github.event.workflow_run.pull_requests[0] != null)
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout trusted base branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.sha || github.event.workflow_run.pull_requests[0].base.sha || github.event.repository.default_branch }}
+          persist-credentials: false
+
+      - name: Verify supervisor module path
+        run: |
+          pwd
+          ls -la
+          ls -la scripts
+
       - name: Resolve trusted base revision
         id: trusted
         uses: actions/github-script@v7
@@ -70,12 +82,6 @@ jobs:
             }
             core.setOutput("pr-number", pullRequest.number);
             core.setOutput("base-sha", pullRequest.base.sha);
-
-      - name: Checkout trusted base branch
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ steps.trusted.outputs.base-sha }}
-          persist-credentials: false
 
       - name: Collect pull request facts
         uses: actions/github-script@v7

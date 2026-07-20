@@ -141,3 +141,11 @@ test("CI-Check vom PR-Merge-SHA wird erkannt und nicht doppelt gezählt", () => 
   assert.equal(evaluate({ checks }).status, "MERGE_READY");
   assert.match(workflow, /ref: `pull\/\$\{pullNumber\}\/merge`/);
 });
+
+test("Workflow checkt den Base-SHA vor dem absoluten Supervisor-Import aus", () => {
+  const checkoutIndex = workflow.indexOf("uses: actions/checkout@v4");
+  const debugIndex = workflow.indexOf("ls -la scripts");
+  const importIndex = workflow.indexOf("pathToFileURL(`${process.env.GITHUB_WORKSPACE}/scripts/atlas-pr-supervisor.mjs`).href");
+  assert.ok(checkoutIndex >= 0 && checkoutIndex < debugIndex && debugIndex < importIndex);
+  assert.match(workflow, /ref: \$\{\{ github\.event\.pull_request\.base\.sha/);
+});
