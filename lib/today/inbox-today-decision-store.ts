@@ -1,10 +1,11 @@
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 import type { AnalysisResult } from "@/components/inbox/types";
 import {
   canStoreInboxTodayDecision,
+  createInboxTodayDecisionCookieOptions,
   inboxTodayDecisionCookieName,
-  inboxTodayDecisionCookieOptions,
 } from "@/lib/today/inbox-today-decision-cookie";
+import { shouldUseSecureTodayCookie } from "@/lib/today/today-decision-cookie-options";
 
 export { inboxTodayDecisionCookieName };
 
@@ -61,14 +62,23 @@ export async function readInboxTodayDecision(): Promise<AnalysisResult | null> {
 export async function writeInboxTodayDecision(
   analysis: AnalysisResult,
 ): Promise<boolean> {
-  if (!canStoreInboxTodayDecision(analysis)) {
+  const [cookieStore, requestHeaders] = await Promise.all([
+    cookies(),
+    headers(),
+  ]);
+  const secure = shouldUseSecureTodayCookie(
+    requestHeaders.get("x-forwarded-proto"),
+    requestHeaders.get("origin"),
+  );
+
+  if (!canStoreInboxTodayDecision(analysis, secure)) {
     return false;
   }
 
-  (await cookies()).set(
+  cookieStore.set(
     inboxTodayDecisionCookieName,
     JSON.stringify(analysis),
-    inboxTodayDecisionCookieOptions,
+    createInboxTodayDecisionCookieOptions(secure),
   );
 
   return true;

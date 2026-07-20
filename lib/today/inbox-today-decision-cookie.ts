@@ -6,26 +6,33 @@ export const inboxTodayDecisionCookieName = "atlas-inbox-today-decision";
 
 const maximumInboxTodayDecisionCookieBytes = 3_800;
 
-export const inboxTodayDecisionCookieOptions = {
-  httpOnly: true,
-  sameSite: "lax" as const,
-  secure: process.env.NODE_ENV === "production",
-  path: "/",
-};
+export function createInboxTodayDecisionCookieOptions(secure: boolean) {
+  return {
+    httpOnly: true,
+    sameSite: "lax" as const,
+    secure,
+    path: "/",
+  };
+}
 
 export function serializeInboxTodayDecisionCookie(
   analysis: AnalysisResult,
+  secure = false,
 ): string {
   return stringifyCookie({
     name: inboxTodayDecisionCookieName,
     value: JSON.stringify(analysis),
-    ...inboxTodayDecisionCookieOptions,
+    ...createInboxTodayDecisionCookieOptions(secure),
   });
 }
 
-export function canStoreInboxTodayDecision(analysis: AnalysisResult): boolean {
+export function canStoreInboxTodayDecision(
+  analysis: AnalysisResult,
+  secure: boolean,
+): boolean {
   return (
-    new TextEncoder().encode(serializeInboxTodayDecisionCookie(analysis))
-      .byteLength <= maximumInboxTodayDecisionCookieBytes
+    new TextEncoder().encode(
+      serializeInboxTodayDecisionCookie(analysis, secure),
+    ).byteLength <= maximumInboxTodayDecisionCookieBytes
   );
 }

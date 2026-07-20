@@ -161,6 +161,20 @@ export function restrictTodayDecisionStateToKnownDecisions(
   };
 }
 
+export function clearTodayDecisionStateForDecision(
+  state: TodayDecisionState,
+  decisionId: string,
+): TodayDecisionState {
+  return {
+    version: currentStateVersion,
+    decisions: state.decisions.filter((decision) => decision.decisionId !== decisionId),
+    manualPriorityDecisionId:
+      state.manualPriorityDecisionId === decisionId
+        ? null
+        : state.manualPriorityDecisionId,
+  };
+}
+
 export function recordTodayDecisionAction(
   state: TodayDecisionState,
   decision: PersistedTodayDecision,

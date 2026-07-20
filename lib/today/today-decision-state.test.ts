@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  clearTodayDecisionStateForDecision,
   emptyTodayDecisionState,
   parseTodayDecisionState,
   recordTodayDecisionAction,
@@ -86,5 +87,25 @@ test("clears the manual override when its decision is completed or deferred", ()
       action: "later",
     }).manualPriorityDecisionId,
     null,
+  );
+});
+
+test("clears a replaced decision's manual priority and outcome", () => {
+  const state = {
+    version: 3 as const,
+    decisions: [
+      { decisionId: "inbox-recommended-task", action: "later" as const },
+      { decisionId: "visit-weber", action: "approve" as const },
+    ],
+    manualPriorityDecisionId: "inbox-recommended-task",
+  };
+
+  assert.deepEqual(
+    clearTodayDecisionStateForDecision(state, "inbox-recommended-task"),
+    {
+      version: 3,
+      decisions: [{ decisionId: "visit-weber", action: "approve" }],
+      manualPriorityDecisionId: null,
+    },
   );
 });

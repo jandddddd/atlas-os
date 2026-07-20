@@ -156,6 +156,30 @@ test("Inbox-Reset entfernt die vorbereitete Entscheidung aus Today", async ({ pa
   ).toHaveCount(0);
 });
 
+test("Eine erneute Inbox-Analyse entfernt eine alte manuelle Priorisierung", async ({ page }) => {
+  const inboxDecisionTitle = "Angebotsentwurf Familie Schneider vorbereiten";
+
+  await page.goto("/inbox");
+  await page.getByRole("button", { name: "Anfrage analysieren" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Analyse abgeschlossen" }),
+  ).toBeVisible();
+
+  await page.goto("/today");
+  await page.getByRole("button", { name: inboxDecisionTitle }).click();
+  await expect(manualPriorityExplanation(page)).toBeVisible();
+
+  await page.goto("/inbox");
+  await page.getByRole("button", { name: "Analyse erneut starten" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Analyse abgeschlossen" }),
+  ).toBeVisible();
+
+  await page.goto("/today");
+  await expect(manualPriorityExplanation(page)).toHaveCount(0);
+  await expect(page.getByRole("button", { name: inboxDecisionTitle })).toBeVisible();
+});
+
 test("Dependencies halten wartende Entscheidungen zurück und schalten Folgeentscheidungen frei", async ({ page }) => {
   await page.goto("/today");
 

@@ -7,6 +7,7 @@ import {
   isAnalysisResult,
   writeInboxTodayDecision,
 } from "@/lib/today/inbox-today-decision-store";
+import { clearTodayDecisionStateForDecision } from "@/lib/today/today-decision-state";
 import { todayDecisionStateStore } from "@/lib/today/today-decision-state-store";
 
 export async function persistInboxTodayDecision(
@@ -20,12 +21,9 @@ export async function persistInboxTodayDecision(
 
   const [wasStored] = await Promise.all([
     writeInboxTodayDecision(analysis),
-    todayDecisionStateStore.write({
-      ...state,
-      decisions: state.decisions.filter(
-        (decision) => decision.decisionId !== inboxTodayDecisionId,
-      ),
-    }),
+    todayDecisionStateStore.write(
+      clearTodayDecisionStateForDecision(state, inboxTodayDecisionId),
+    ),
   ]);
 
   return wasStored;
@@ -36,11 +34,8 @@ export async function resetInboxTodayDecision(): Promise<void> {
 
   await Promise.all([
     clearInboxTodayDecision(),
-    todayDecisionStateStore.write({
-      ...state,
-      decisions: state.decisions.filter(
-        (decision) => decision.decisionId !== inboxTodayDecisionId,
-      ),
-    }),
+    todayDecisionStateStore.write(
+      clearTodayDecisionStateForDecision(state, inboxTodayDecisionId),
+    ),
   ]);
 }
