@@ -218,7 +218,8 @@ export function createRepairPlan(input, policy) {
       reason === "required_check_failed" ? "A required check failed." : "An unresolved P1/P2 review finding blocks the pull request.",
     );
   const prompt = promptFor(input, policy, rootCauses, changedPaths);
-  const enabled = policy.enabled === true && policy.mode === "manual";
+  const executionMode = policy.execution_mode ?? policy.mode;
+  const enabled = policy.enabled === true && executionMode === "manual";
   return {
     ...audit,
     status: "REPAIR_ELIGIBLE",

@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test:unit": "node --test --experimental-strip-types lib/today/decision-priority.test.ts lib/today/today-decision-state.test.ts lib/today/today-decision-cookie-options.test.ts lib/today/inbox-today-decision.test.ts lib/today/inbox-today-decision-cookie.test.ts lib/today/inbox-today-decision-replacement.test.ts scripts/atlas-pr-supervisor.test.mjs scripts/atlas-pr-repair-plan.test.mjs",
+    "test:unit": "node --test --experimental-strip-types lib/today/decision-priority.test.ts lib/today/today-decision-state.test.ts lib/today/today-decision-cookie-options.test.ts lib/today/inbox-today-decision.test.ts lib/today/inbox-today-decision-cookie.test.ts lib/today/inbox-today-decision-replacement.test.ts scripts/atlas-pr-supervisor.test.mjs scripts/atlas-pr-repair-plan.test.mjs scripts/atlas-pr-repair-execute.test.mjs",
     "test:e2e": "npm run build && playwright test"
   },
   "dependencies": {
