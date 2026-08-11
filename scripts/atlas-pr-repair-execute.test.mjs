@@ -230,6 +230,36 @@ test("pilot gates are revalidated immediately before attempt reservation", () =>
   assert.match(reserve, /git\.createRef/);
 });
 
+test("complete current pilot gates are reloaded immediately before commit and push", () => {
+  const remote = workflow.indexOf("name: Revalidate remote head before commit");
+  const precommit = workflow.indexOf("name: Revalidate current pilot gates before commit");
+  const commit = workflow.indexOf("name: Commit approved repair");
+  const prepush = workflow.indexOf("name: Revalidate current pilot gates before push");
+  const push = workflow.indexOf("name: Push once to the existing PR branch");
+  assert.ok(remote > 0 && precommit > remote && commit > precommit && prepush > commit && push > prepush);
+  for (const source of [workflow.slice(precommit, commit), workflow.slice(prepush, push)]) {
+    assert.match(source, /github\.rest\.repos\.getContent/);
+    assert.match(source, /path: "\.github\/atlas-autopilot\.yml", ref: "main"/);
+    assert.match(source, /validateExecutionPolicy/);
+    assert.match(source, /github\.rest\.pulls\.get/);
+    assert.match(source, /validatePullRequest/);
+    assert.match(source, /actor: process\.env\.ATLAS_ACTOR/);
+    assert.match(source, /triggeringActor: process\.env\.ATLAS_TRIGGERING_ACTOR/);
+  }
+  assert.equal((workflow.match(/push "https:\/\/github\.com\/\$\{GITHUB_REPOSITORY\}\.git"/g) ?? []).length, 1);
+});
+
+test("pre-write gate failures are FAILED with fixed audit reason codes", () => {
+  assert.deepEqual(deriveExecutionOutcome({ reserve: "success", codex: "success", precommit: "failure", commit: "skipped", push: "skipped" }), {
+    status: "FAILED", phase: "pre-commit-gate-revalidation", reasonCode: "PRE_COMMIT_GATES_REJECTED",
+    attemptReserved: true, codexStarted: true, pushPerformed: false,
+  });
+  assert.deepEqual(deriveExecutionOutcome({ reserve: "success", codex: "success", commit: "success", prepush: "failure", push: "skipped" }), {
+    status: "FAILED", phase: "pre-push-gate-revalidation", reasonCode: "PRE_PUSH_GATES_REJECTED",
+    attemptReserved: true, codexStarted: true, pushPerformed: false,
+  });
+});
+
 test("Codex step receives neither GitHub token nor repository credentials", () => {
   const codex = workflow.slice(workflow.indexOf("name: Run one bounded Codex repair attempt"), workflow.indexOf("name: Remove transient prompt"));
   assert.doesNotMatch(codex, /GITHUB_TOKEN|github\.token|github-token|persist-credentials/);

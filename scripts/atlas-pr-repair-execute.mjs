@@ -33,7 +33,9 @@ const EXECUTION_REASON_CODES = new Set([
   "TREE_REVALIDATION_FAILED",
   "GIT_CONFIG_SETUP_FAILED",
   "REMOTE_HEAD_CHANGED",
+  "PRE_COMMIT_GATES_REJECTED",
   "COMMIT_FAILED",
+  "PRE_PUSH_GATES_REJECTED",
   "PUSH_FAILED",
   "NONE",
 ]);
@@ -186,7 +188,9 @@ export function deriveExecutionOutcome(steps) {
     ["tree", "tree-revalidation", "TREE_REVALIDATION_FAILED"],
     ["fetch_config", "git-config-setup", "GIT_CONFIG_SETUP_FAILED"],
     ["remote", "remote-head-validation", "REMOTE_HEAD_CHANGED"],
+    ["precommit", "pre-commit-gate-revalidation", "PRE_COMMIT_GATES_REJECTED"],
     ["commit", "commit", "COMMIT_FAILED"],
+    ["prepush", "pre-push-gate-revalidation", "PRE_PUSH_GATES_REJECTED"],
     ["push", "push", "PUSH_FAILED"],
   ];
   const failed = orderedFailures.find(([step]) => steps[step] === "failure");

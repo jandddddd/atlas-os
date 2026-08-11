@@ -68,6 +68,39 @@ test("syntactically hostile branch content remains an inert data value", () => {
   assert.equal(globalThis.atlasRepairInjected, undefined);
 });
 
+function currentPilotPull(overrides = {}) {
+  const pull = {
+    number: context.prNumber, state: "open", draft: false, user: { login: context.author },
+    base: { ref: "main", repo: { full_name: context.repository } },
+    head: { ref: context.headBranch, sha: context.headSha, repo: { full_name: context.repository, fork: false } },
+    labels: context.labels.map((name) => ({ name })),
+  };
+  return { ...pull, ...overrides };
+}
+
+for (const [scenario, mutate, expected] of [
+  ["pilot label removed after reservation", (pull) => ({ ...pull, labels: [{ name: "atlas-repair" }] }), /PILOT_LABEL_PRESENT/],
+  ["never-run label added after reservation", (pull) => ({ ...pull, labels: [...pull.labels, { name: "do-not-merge" }] }), /Never-run/],
+  ["pull request closed after reservation", (pull) => ({ ...pull, state: "closed" }), /not open/],
+  ["head SHA changed during execution", (pull) => ({ ...pull, head: { ...pull.head, sha: "b".repeat(40) } }), /stale/],
+]) {
+  test(`${scenario} blocks the pre-write validation`, () => {
+    assert.throws(() => validatePullRequest(
+      mutate(currentPilotPull()), active, context.repository, context.expectedHeadSha,
+      { actor: context.actor, triggeringActor: context.triggeringActor },
+    ), expected);
+  });
+}
+
+test("unchanged valid PR passes pre-write validation for the intended branch", () => {
+  const validated = validatePullRequest(
+    currentPilotPull(), active, context.repository, context.expectedHeadSha,
+    { actor: context.actor, triggeringActor: context.triggeringActor },
+  );
+  assert.equal(validated.headBranch, context.headBranch);
+  assert.equal(validated.headSha, context.headSha);
+});
+
 test("planning and execution use the identical pilot-gate contract", () => {
   const planning = createRepairPlan({
     ...context,
