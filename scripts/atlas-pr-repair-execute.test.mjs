@@ -398,6 +398,47 @@ test("Markdown escapes identifier presentation without changing audit data", () 
   assert.doesNotMatch(markdown, /dependabot\[bot\]|\(quoted\)="value"/);
 });
 
+for (const [name, path, visibleBreak] of [
+  ["LF", "docs/line\nfeed", "\\\\n"],
+  ["CRLF", "docs/carriage\r\nreturn", "\\\\r\\\\n"],
+  ["heading-like suffix", "docs/report\n# forged heading", "\\\\n\\# forged heading"],
+  ["list-like suffix", "docs/report\n- forged item", "\\\\n\\- forged item"],
+]) {
+  test(`Markdown visibly encodes ${name} in changed file names without changing audit data`, () => {
+    const report = createExecutionReport(executionAuditValues({ changedFiles: [path] }));
+    const markdown = renderExecutionReport(report);
+    assert.equal(report.changedFiles[0], path);
+    assert.ok(markdown.includes(visibleBreak));
+    assert.doesNotMatch(markdown, /\n# forged heading|\n- forged item/);
+  });
+}
+
+test("normal changed file name remains unchanged as an audit and Markdown data value", () => {
+  const path = "docs/normal";
+  const report = createExecutionReport(executionAuditValues({ changedFiles: [path] }));
+  assert.equal(report.changedFiles[0], path);
+  assert.match(renderExecutionReport(report), /- docs\/normal/);
+});
+
+test("Markdown rendering encodes structural controls across all audited text fields", () => {
+  const report = createExecutionReport(executionAuditValues({
+    headBranch: "pilot/atlas-repair-normal",
+    actor: "normal-actor",
+    triggeringActor: "normal-actor",
+    prAuthor: "normal-author",
+    repository: "atlas/atlas-os",
+  }));
+  report.headBranch = "pilot/branch\n# heading";
+  report.actor = "actor\r\n- item";
+  report.triggeringActor = "trigger\u2028next";
+  report.prAuthor = "author\tname";
+  report.repository = "atlas/repo\u0085next";
+  report.reasonCode = "REASON\n# forged";
+  const markdown = renderExecutionReport(report);
+  assert.doesNotMatch(markdown, /\n# (?:heading|forged)|\n- item/);
+  for (const visible of ["\\\\n", "\\\\r\\\\n", "\\\\u2028", "\\\\t", "\\\\u0085"]) assert.ok(markdown.includes(visible));
+});
+
 test("execution report rejects free-form statuses and reason codes", () => {
   const values = {
     prNumber: 42, expectedHeadSha: sha, planRunId: 7, status: "FAILED", phase: "codex",

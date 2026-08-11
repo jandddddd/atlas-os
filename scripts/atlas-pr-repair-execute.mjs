@@ -261,7 +261,7 @@ export function createExecutionReport(values) {
       : null,
     codexStarted: values.codexStarted === true,
     pushPerformed: values.pushPerformed === true,
-    changedFiles: (values.changedFiles ?? []).map((path) => redactDiagnostic(path, 500)),
+    changedFiles: (values.changedFiles ?? []).map((path) => redactDiagnostic(path, 500, { preserveWhitespace: true })),
     tests: Object.fromEntries(Object.entries(values.tests ?? {}).map(([name, result]) => [
       redactDiagnostic(name, 100), redactDiagnostic(result, 100),
     ])),
@@ -280,6 +280,13 @@ function identifier(value, maximumLength) {
 
 function escapeMarkdownInline(value) {
   return String(value)
+    .replace(/\r\n/g, "\\r\\n")
+    .replace(/\r/g, "\\r")
+    .replace(/\n/g, "\\n")
+    .replace(/\t/g, "\\t")
+    .replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/g, (character) =>
+      `\\u${character.codePointAt(0).toString(16).padStart(4, "0")}`,
+    )
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")

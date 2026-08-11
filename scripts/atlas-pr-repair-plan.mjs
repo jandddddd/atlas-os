@@ -28,10 +28,10 @@ function pathIsForbidden(path, patterns) {
   });
 }
 
-export function redactDiagnostic(value, maximumLength = 2_000) {
+export function redactDiagnostic(value, maximumLength = 2_000, { preserveWhitespace = false } = {}) {
   let result = String(value ?? "").replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, " ");
   for (const pattern of SECRET_PATTERNS) result = result.replace(pattern, "[REDACTED]");
-  result = result.replace(/\r\n/g, "\n").trim();
+  if (!preserveWhitespace) result = result.replace(/\r\n/g, "\n").trim();
   return result.length > maximumLength ? `${result.slice(0, maximumLength)}\n[TRUNCATED]` : result;
 }
 
