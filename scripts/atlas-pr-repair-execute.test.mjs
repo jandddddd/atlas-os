@@ -3,10 +3,9 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import {
-  assertAttemptAvailable,
-  attemptArtifactName,
   attemptTagName,
   createExecutionReport,
+  deriveExecutionOutcome,
   renderExecutionReport,
   requireOpenAiApiKey,
   validateChangedFiles,
@@ -107,12 +106,6 @@ test("invalid attemptKey blocks", () => {
   assert.throws(() => validatePlanArtifact(["repair-plan.json", "repair-plan.md"], { ...plan, attemptKey: `41:${sha}` }, {
     prNumber: 42, expectedHeadSha: sha,
   }), /attemptKey/);
-});
-
-test("identical attemptKey cannot execute twice", () => {
-  const name = attemptArtifactName(42, sha);
-  assert.throws(() => assertAttemptAvailable([{ name, expired: false }], name), /already/);
-  assert.doesNotThrow(() => assertAttemptAvailable([{ name, expired: true }], name));
 });
 
 test("attempt marker has a durable tag name independent of artifact retention", () => {
@@ -228,7 +221,15 @@ test("tests and safety gates precede commit and push", () => {
 
 test("secret is scoped to key check and Codex step, and prompt comes from plan", () => {
   const occurrences = [...workflow.matchAll(/secrets\.OPENAI_API_KEY/g)];
-  assert.equal(occurrences.length, 1);
+  assert.equal(occurrences.length, 2);
+  const secretCheck = workflow.slice(
+    workflow.indexOf("name: Validate OpenAI credential availability"),
+    workflow.indexOf("name: Reserve the single repair attempt"),
+  );
+  assert.match(secretCheck, /requireOpenAiApiKey/);
+  assert.match(secretCheck, /runner\.temp|RUNNER_TEMP/);
+  assert.match(secretCheck, /atlas-repair-trusted\/atlas-pr-repair-execute\.mjs/);
+  assert.doesNotMatch(secretCheck, /from "\.\/scripts\/atlas-pr-repair-execute\.mjs"/);
   assert.match(workflow, /prompt-file: \.git\/atlas-repair-prompt\.txt/);
   assert.match(workflow, /writeFileSync\("\.git\/atlas-repair-prompt\.txt", plan\.prompt/);
   assert.doesNotMatch(workflow, /echo.*OPENAI_API_KEY|print.*OPENAI_API_KEY/);
@@ -237,7 +238,9 @@ test("secret is scoped to key check and Codex step, and prompt comes from plan",
 test("execution report redacts secrets and records no merge", () => {
   const report = createExecutionReport({
     prNumber: 42, expectedHeadSha: sha, attemptKey: `42:${sha}`, planRunId: 7,
-    status: "failed token=supersecretvalue", startedAt: "2026-01-01T00:00:00Z", finishedAt: "2026-01-01T00:01:00Z",
+    status: "FAILED", phase: "codex token=supersecretvalue", reasonCode: "CODEX_FAILED",
+    attemptReserved: true, attemptTag: `atlas-repair-attempt/42-${sha}`, codexStarted: true, pushPerformed: false,
+    startedAt: "2026-01-01T00:00:00Z", finishedAt: "2026-01-01T00:01:00Z",
     changedFiles: ["scripts/example.mjs"], tests: { unit: "failed api_key=anothersecretvalue" },
   });
   const serialized = `${JSON.stringify(report)}\n${renderExecutionReport(report)}`;
@@ -245,11 +248,86 @@ test("execution report redacts secrets and records no merge", () => {
   assert.doesNotMatch(serialized, /supersecretvalue|anothersecretvalue/);
   assert.match(serialized, /No merge was performed/);
   assert.equal(report.mergePerformed, false);
+  assert.equal(report.attemptReserved, true);
+  assert.equal(report.codexStarted, true);
+  assert.equal(report.pushPerformed, false);
+});
+
+test("execution report rejects free-form statuses and reason codes", () => {
+  const values = {
+    prNumber: 42, expectedHeadSha: sha, planRunId: 7, status: "FAILED", phase: "codex",
+    reasonCode: "CODEX_FAILED", attemptReserved: true, attemptTag: `atlas-repair-attempt/42-${sha}`,
+    codexStarted: true, pushPerformed: false, startedAt: "start", finishedAt: "finish",
+  };
+  assert.throws(() => createExecutionReport({ ...values, status: "failed token=secret" }), /status/);
+  assert.throws(() => createExecutionReport({ ...values, reasonCode: "token=secret" }), /reason code/);
+});
+
+test("blocked dispatch audit does not publish invalid raw identifiers", () => {
+  const report = createExecutionReport({
+    prNumber: Number("not-a-number"), expectedHeadSha: "token=supersecretvalue", planRunId: 0,
+    status: "BLOCKED", phase: "dispatch-validation", reasonCode: "INVALID_DISPATCH",
+    attemptReserved: false, codexStarted: false, pushPerformed: false,
+    startedAt: "2026-01-01T00:00:00Z", finishedAt: "2026-01-01T00:00:01Z",
+  });
+  const serialized = `${JSON.stringify(report)}\n${renderExecutionReport(report)}`;
+  assert.equal(report.prNumber, null);
+  assert.equal(report.expectedHeadSha, null);
+  assert.equal(report.planRunId, null);
+  assert.doesNotMatch(serialized, /supersecretvalue|not-a-number/);
 });
 
 test("audit artifact contains only two reports and is retained seven days", () => {
   const upload = workflow.slice(workflow.indexOf("name: Upload read-only execution audit"));
+  assert.match(workflow, /name: Create final audit report[\s\S]*if: always\(\) && steps\.audit-init\.outcome == 'success'/);
+  assert.match(upload, /if: always\(\) && steps\.audit\.outcome == 'success'/);
   assert.match(upload, /repair-execution-report\.json/);
   assert.match(upload, /repair-execution-report\.md/);
+  assert.match(upload, /name: atlas-repair-execution-report-run-\$\{\{ github\.run_id \}\}/);
   assert.match(upload, /retention-days: 7/);
+});
+
+test("blocked and failed outcomes use fixed reason codes without masking workflow failures", () => {
+  assert.deepEqual(deriveExecutionOutcome({ policy: "failure", reserve: "skipped", codex: "skipped", push: "skipped" }), {
+    status: "BLOCKED",
+    phase: "policy-validation",
+    reasonCode: "POLICY_REJECTED",
+    attemptReserved: false,
+    codexStarted: false,
+    pushPerformed: false,
+  });
+  assert.deepEqual(deriveExecutionOutcome({ reserve: "success", codex: "failure", push: "skipped" }), {
+    status: "FAILED",
+    phase: "codex",
+    reasonCode: "CODEX_FAILED",
+    attemptReserved: true,
+    codexStarted: true,
+    pushPerformed: false,
+  });
+  assert.equal(workflow.includes("continue-on-error"), false);
+});
+
+test("successful push produces a complete PUSHED audit outcome", () => {
+  assert.deepEqual(deriveExecutionOutcome({ reserve: "success", codex: "success", push: "success" }), {
+    status: "PUSHED",
+    phase: "completed",
+    reasonCode: "NONE",
+    attemptReserved: true,
+    codexStarted: true,
+    pushPerformed: true,
+  });
+});
+
+test("attempt is reserved only after plan, checkout, head and secret validation", () => {
+  const planValidation = workflow.indexOf("name: Validate repair plan artifact");
+  const checkout = workflow.indexOf("name: Checkout the exact PR head for repair");
+  const head = workflow.indexOf("name: Revalidate PR head immediately before repair");
+  const secret = workflow.indexOf("name: Validate OpenAI credential availability");
+  const reserve = workflow.indexOf("name: Reserve the single repair attempt");
+  const codex = workflow.indexOf("name: Run one bounded Codex repair attempt");
+  assert.ok(planValidation > 0 && checkout > planValidation && head > checkout && secret > head && reserve > secret && codex > reserve);
+  assert.doesNotMatch(workflow.slice(0, reserve), /git\.createRef\(/);
+  assert.match(workflow.slice(reserve, codex), /pull\.head\.sha !== expected/);
+  assert.match(workflow.slice(reserve, codex), /git\.getRef\(/);
+  assert.match(workflow.slice(reserve, codex), /git\.createRef\(/);
 });

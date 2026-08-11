@@ -156,8 +156,8 @@ export function evaluatePullRequest(input, config) {
   if (forbiddenFiles.length > 0) blocked.push(`Verbotene Pfade geändert: ${forbiddenFiles.join(", ")}.`);
 
   const reasons = [...new Set(blocked.length > 0 ? blocked : waiting)];
-  const status = blocked.length > 0 ? "BLOCKED" : waiting.length > 0 ? "WAITING" : "MERGE_READY";
-  return { status, reasons, safeToMerge: status === "MERGE_READY" };
+  const status = blocked.length > 0 ? "BLOCKED" : waiting.length > 0 ? "WAITING" : "POLICY_READY";
+  return { status, reasons, supervisorPolicySatisfied: status === "POLICY_READY" };
 }
 
 async function main() {

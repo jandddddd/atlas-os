@@ -12,6 +12,7 @@ import {
 } from "./atlas-pr-supervisor.mjs";
 
 const workflow = readFileSync(new URL("../.github/workflows/atlas-pr-supervisor.yml", import.meta.url), "utf8");
+const ciWorkflow = readFileSync(new URL("../.github/workflows/ci.yml", import.meta.url), "utf8");
 
 const config = {
   enabled: true,
@@ -44,8 +45,8 @@ function evaluate(overrides = {}) {
   return evaluatePullRequest({ ...greenPr, ...overrides }, config);
 }
 
-test("vollständig grüner PR ist MERGE_READY", () => {
-  assert.deepEqual(evaluate(), { status: "MERGE_READY", reasons: [], safeToMerge: true });
+test("vollständig grüner PR erfüllt ausschließlich die Supervisor-Policy", () => {
+  assert.deepEqual(evaluate(), { status: "POLICY_READY", reasons: [], supervisorPolicySatisfied: true });
 });
 
 test("normalizes workflow and job names", () => {
@@ -64,7 +65,7 @@ test("Draft-PR ist WAITING und niemals merge-sicher", () => {
   assert.deepEqual(evaluate({ draft: true }), {
     status: "WAITING",
     reasons: ["Der Pull Request ist noch ein Entwurf."],
-    safeToMerge: false,
+    supervisorPolicySatisfied: false,
   });
 });
 
@@ -87,7 +88,7 @@ for (const priority of ["P1", "P2"]) {
 }
 
 test("nur P3 blockiert nicht", () => {
-  assert.equal(evaluate({ reviewThreads: [{ priority: "P3", resolved: false }] }).status, "MERGE_READY");
+  assert.equal(evaluate({ reviewThreads: [{ priority: "P3", resolved: false }] }).status, "POLICY_READY");
 });
 
 test("fehlendes atlas-autopilot-Label blockiert", () => {
@@ -152,8 +153,26 @@ test("CI-Check vom PR-Merge-SHA wird erkannt und nicht doppelt gezählt", () => 
     verify,
   ]);
   assert.equal(checks.length, 2);
-  assert.equal(evaluate({ checks }).status, "MERGE_READY");
+  assert.equal(evaluate({ checks }).status, "POLICY_READY");
   assert.match(workflow, /ref: `pull\/\$\{pullNumber\}\/merge`/);
+});
+
+test("normaler CI-Job behält seinen Namen und führt Unit-Tests vor Lint und E2E aus", () => {
+  const verify = ciWorkflow.indexOf("  verify:");
+  const install = ciWorkflow.indexOf("name: Install dependencies");
+  const unit = ciWorkflow.indexOf("name: Unit tests");
+  const lint = ciWorkflow.indexOf("name: Lint");
+  const e2e = ciWorkflow.indexOf("name: Build and end-to-end tests");
+  assert.ok(verify > 0 && install > verify && unit > install && lint > unit && e2e > lint);
+  assert.match(ciWorkflow.slice(unit, lint), /run: npm run test:unit/);
+  assert.doesNotMatch(ciWorkflow, /continue-on-error/);
+});
+
+test("Supervisor-Kommentar grenzt Policy-Bereitschaft von formaler Mergefreigabe ab", () => {
+  assert.match(workflow, /SUPERVISOR POLICY READY/);
+  assert.match(workflow, /Formale Reviews, Required Checks und Branch Protection/);
+  assert.match(workflow, /Die Supervisor-Bewertung ersetzt keine formalen Reviews/);
+  assert.match(workflow, /Kein automatischer Merge/);
 });
 
 test("Workflow checkt den Base-SHA vor dem absoluten Supervisor-Import aus", () => {

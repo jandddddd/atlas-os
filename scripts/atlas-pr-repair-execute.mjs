@@ -6,7 +6,30 @@ import { join } from "node:path";
 import { parseRepairConfig, redactDiagnostic } from "./atlas-pr-repair-plan.mjs";
 
 const SHA = /^[0-9a-f]{40}$/i;
-const ATTEMPT_ARTIFACT_PREFIX = "atlas-repair-attempt-";
+const EXECUTION_STATUSES = new Set(["BLOCKED", "FAILED", "PUSHED"]);
+const EXECUTION_REASON_CODES = new Set([
+  "INVALID_DISPATCH",
+  "POLICY_REJECTED",
+  "PR_OR_PLAN_RUN_INVALID",
+  "PLAN_ARTIFACT_MISSING",
+  "PLAN_ARTIFACT_INVALID",
+  "CHECKOUT_FAILED",
+  "HEAD_SHA_STALE",
+  "OPENAI_KEY_MISSING",
+  "ATTEMPT_UNAVAILABLE",
+  "CODEX_FAILED",
+  "SCOPE_VALIDATION_FAILED",
+  "DEPENDENCY_INSTALL_FAILED",
+  "TESTS_FAILED",
+  "LINT_FAILED",
+  "BUILD_FAILED",
+  "DIFF_CHECK_FAILED",
+  "TREE_REVALIDATION_FAILED",
+  "REMOTE_HEAD_CHANGED",
+  "COMMIT_FAILED",
+  "PUSH_FAILED",
+  "NONE",
+]);
 
 export function pathMatches(path, patterns) {
   return patterns.some((pattern) => {
@@ -104,18 +127,8 @@ export function validatePlanArtifact(files, plan, { prNumber, expectedHeadSha })
   return { attemptKey, prompt: plan.prompt, allowedAreas: plan.allowedAreas };
 }
 
-export function attemptArtifactName(prNumber, expectedHeadSha) {
-  return `${ATTEMPT_ARTIFACT_PREFIX}${prNumber}-${expectedHeadSha}`;
-}
-
 export function attemptTagName(prNumber, expectedHeadSha) {
   return `atlas-repair-attempt/${prNumber}-${expectedHeadSha}`;
-}
-
-export function assertAttemptAvailable(artifacts, artifactName) {
-  if (artifacts.some((artifact) => !artifact.expired && artifact.name === artifactName)) {
-    throw new Error("This attemptKey has already been reserved or executed.");
-  }
 }
 
 export function validateChangedFiles({ files, additions, deletions }, plan, policy) {
@@ -148,15 +161,78 @@ export function validateTreeSnapshot({ trackedFiles, untrackedFiles, numstat, un
   }, plan, policy);
 }
 
-export function createExecutionReport(values) {
+export function deriveExecutionOutcome(steps) {
+  const orderedFailures = [
+    ["dispatch", "dispatch-validation", "INVALID_DISPATCH"],
+    ["policy", "policy-validation", "POLICY_REJECTED"],
+    ["pull", "pr-and-plan-run-validation", "PR_OR_PLAN_RUN_INVALID"],
+    ["download", "plan-artifact-download", "PLAN_ARTIFACT_MISSING"],
+    ["plan", "plan-artifact-validation", "PLAN_ARTIFACT_INVALID"],
+    ["checkout", "pr-head-checkout", "CHECKOUT_FAILED"],
+    ["head", "pre-reservation-head-validation", "HEAD_SHA_STALE"],
+    ["secret", "secret-validation", "OPENAI_KEY_MISSING"],
+    ["reserve", "attempt-reservation", "ATTEMPT_UNAVAILABLE"],
+    ["codex", "codex", "CODEX_FAILED"],
+    ["scope", "scope-validation", "SCOPE_VALIDATION_FAILED"],
+    ["install", "dependency-install", "DEPENDENCY_INSTALL_FAILED"],
+    ["unit", "unit-tests", "TESTS_FAILED"],
+    ["lint", "lint", "LINT_FAILED"],
+    ["build", "build", "BUILD_FAILED"],
+    ["diff", "diff-check", "DIFF_CHECK_FAILED"],
+    ["tree", "tree-revalidation", "TREE_REVALIDATION_FAILED"],
+    ["remote", "remote-head-validation", "REMOTE_HEAD_CHANGED"],
+    ["commit", "commit", "COMMIT_FAILED"],
+    ["push", "push", "PUSH_FAILED"],
+  ];
+  const failed = orderedFailures.find(([step]) => steps[step] === "failure");
+  const attemptReserved = steps.reserve === "success";
+  const codexStarted = attemptReserved && steps.codex !== "skipped";
+  const pushPerformed = steps.push === "success";
+
+  if (pushPerformed) {
+    return {
+      status: "PUSHED",
+      phase: "completed",
+      reasonCode: "NONE",
+      attemptReserved,
+      codexStarted,
+      pushPerformed,
+    };
+  }
+
   return {
-    prNumber: values.prNumber,
-    expectedHeadSha: values.expectedHeadSha,
-    attemptKey: values.attemptKey,
-    planRunId: values.planRunId,
-    status: redactDiagnostic(values.status, 100),
-    startedAt: values.startedAt,
-    finishedAt: values.finishedAt,
+    status: attemptReserved ? "FAILED" : "BLOCKED",
+    phase: failed?.[1] ?? "workflow-incomplete",
+    reasonCode: failed?.[2] ?? "POLICY_REJECTED",
+    attemptReserved,
+    codexStarted,
+    pushPerformed,
+  };
+}
+
+export function createExecutionReport(values) {
+  if (!EXECUTION_STATUSES.has(values.status)) throw new Error("Invalid execution report status.");
+  if (!EXECUTION_REASON_CODES.has(values.reasonCode)) throw new Error("Invalid execution report reason code.");
+  const prNumber = Number.isInteger(values.prNumber) && values.prNumber > 0 ? values.prNumber : null;
+  const expectedHeadSha = SHA.test(values.expectedHeadSha ?? "") ? values.expectedHeadSha : null;
+  const planRunId = Number.isInteger(values.planRunId) && values.planRunId > 0 ? values.planRunId : null;
+  const attemptKey = prNumber !== null && expectedHeadSha !== null ? `${prNumber}:${expectedHeadSha}` : null;
+  return {
+    prNumber,
+    expectedHeadSha,
+    attemptKey,
+    planRunId,
+    status: values.status,
+    phase: redactDiagnostic(values.phase, 100),
+    reasonCode: values.reasonCode,
+    startedAt: redactDiagnostic(values.startedAt, 100),
+    finishedAt: redactDiagnostic(values.finishedAt, 100),
+    attemptReserved: values.attemptReserved === true,
+    attemptTag: values.attemptReserved === true
+      ? redactDiagnostic(values.attemptTag, 500)
+      : null,
+    codexStarted: values.codexStarted === true,
+    pushPerformed: values.pushPerformed === true,
     changedFiles: (values.changedFiles ?? []).map((path) => redactDiagnostic(path, 500)),
     tests: Object.fromEntries(Object.entries(values.tests ?? {}).map(([name, result]) => [
       redactDiagnostic(name, 100), redactDiagnostic(result, 100),
@@ -172,7 +248,7 @@ export function renderExecutionReport(report) {
   const tests = Object.keys(report.tests).length
     ? Object.entries(report.tests).map(([name, result]) => `- ${name}: ${result}`).join("\n")
     : "- None recorded";
-  return `# Atlas repair execution report\n\n- PR: ${report.prNumber}\n- Expected head SHA: \`${report.expectedHeadSha}\`\n- Attempt key: \`${report.attemptKey}\`\n- Plan run ID: ${report.planRunId}\n- Status: **${report.status}**\n- Started: ${report.startedAt}\n- Finished: ${report.finishedAt}\n- Commit SHA: ${report.commitSha ? `\`${report.commitSha}\`` : "none"}\n\n## Changed files\n\n${files}\n\n## Validation\n\n${tests}\n\n**No merge was performed.**\n`;
+  return `# Atlas repair execution report\n\n- PR: ${report.prNumber ?? "invalid"}\n- Expected head SHA: ${report.expectedHeadSha ? `\`${report.expectedHeadSha}\`` : "invalid"}\n- Attempt key: ${report.attemptKey ? `\`${report.attemptKey}\`` : "invalid"}\n- Plan run ID: ${report.planRunId ?? "invalid"}\n- Status: **${report.status}**\n- Phase: ${report.phase}\n- Reason code: \`${report.reasonCode}\`\n- Attempt reserved: ${report.attemptReserved}\n- Attempt tag: ${report.attemptTag ? `\`${report.attemptTag}\`` : "none"}\n- Codex started: ${report.codexStarted}\n- Push performed: ${report.pushPerformed}\n- Started: ${report.startedAt}\n- Finished: ${report.finishedAt}\n- Commit SHA: ${report.commitSha ? `\`${report.commitSha}\`` : "none"}\n\n## Changed files\n\n${files}\n\n## Validation\n\n${tests}\n\n**No merge was performed.**\n`;
 }
 
 export async function writeExecutionReport(outputDirectory, report) {
