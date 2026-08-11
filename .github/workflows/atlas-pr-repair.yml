@@ -73,6 +73,8 @@ jobs:
         env:
           PR_NUMBER: ${{ steps.pull.outputs.number }}
           EXPECTED_HEAD_SHA: ${{ steps.pull.outputs.head-sha }}
+          ATLAS_ACTOR: ${{ github.actor }}
+          ATLAS_TRIGGERING_ACTOR: ${{ github.triggering_actor }}
         with:
           script: |
             const fs = require("node:fs");
@@ -184,8 +186,8 @@ jobs:
 
             const snapshot = {
               repository,
-              actor: context.actor,
-              triggeringActor: context.triggering_actor,
+              actor: process.env.ATLAS_ACTOR,
+              triggeringActor: process.env.ATLAS_TRIGGERING_ACTOR,
               author: pull.user.login,
               prNumber: pull.number,
               state: pull.state,

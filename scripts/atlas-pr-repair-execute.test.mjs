@@ -20,6 +20,7 @@ import { parseRepairConfig } from "./atlas-pr-repair-plan.mjs";
 
 const policySource = readFileSync(new URL("../.github/atlas-autopilot.yml", import.meta.url), "utf8");
 const workflow = readFileSync(new URL("../.github/workflows/atlas-pr-repair-execute.yml", import.meta.url), "utf8");
+const planningWorkflow = readFileSync(new URL("../.github/workflows/atlas-pr-repair.yml", import.meta.url), "utf8");
 const policy = parseRepairConfig(policySource);
 const sha = "a".repeat(40);
 const repository = "atlas/atlas-os";
@@ -213,8 +214,8 @@ test("workflow performs exactly one gated commit and normal push", () => {
   assert.match(workflow, /fix\(autopilot\): apply approved repair plan/);
   assert.doesNotMatch(workflow, /push[^\n]*(?:--force|-f\b)|gh pr create|pulls\.create|pulls\.merge/i);
   assert.match(workflow, /environment: atlas-repair-pilot/);
-  assert.match(workflow, /context\.actor/);
-  assert.match(workflow, /context\.triggering_actor/);
+  assert.match(workflow, /ATLAS_ACTOR: \$\{\{ github\.actor \}\}/);
+  assert.match(workflow, /ATLAS_TRIGGERING_ACTOR: \$\{\{ github\.triggering_actor \}\}/);
   assert.match(workflow, /isTrustedRepairPlanWorkflowPath\(run\.path\)/);
   assert.match(workflow, /atlas-pr-repair-tree-check\.mjs/);
 });
@@ -222,8 +223,8 @@ test("workflow performs exactly one gated commit and normal push", () => {
 test("pilot gates are revalidated immediately before attempt reservation", () => {
   const reserve = workflow.slice(workflow.indexOf("name: Reserve the single repair attempt"), workflow.indexOf("name: Run one bounded Codex repair attempt"));
   assert.match(reserve, /validatePullRequest\(pull, policy/);
-  assert.match(reserve, /context\.actor/);
-  assert.match(reserve, /context\.triggering_actor/);
+  assert.match(reserve, /actor: process\.env\.ATLAS_ACTOR/);
+  assert.match(reserve, /triggeringActor: process\.env\.ATLAS_TRIGGERING_ACTOR/);
   assert.match(reserve, /validated\.headBranch !== process\.env\.HEAD_BRANCH/);
   assert.match(reserve, /git\.getRef/);
   assert.match(reserve, /git\.createRef/);
@@ -233,6 +234,37 @@ test("Codex step receives neither GitHub token nor repository credentials", () =
   const codex = workflow.slice(workflow.indexOf("name: Run one bounded Codex repair attempt"), workflow.indexOf("name: Remove transient prompt"));
   assert.doesNotMatch(codex, /GITHUB_TOKEN|github\.token|github-token|persist-credentials/);
   assert.match(codex, /openai-api-key/);
+});
+
+function githubScriptSources(source) {
+  const lines = source.split("\n");
+  const scripts = [];
+  for (let index = 0; index < lines.length; index += 1) {
+    if (!lines[index].includes("uses: actions/github-script@")) continue;
+    const scriptIndex = lines.findIndex((line, candidate) => candidate > index && /^\s+script: \|$/.test(line));
+    assert.ok(scriptIndex > index, "github-script step must have a script block");
+    const indentation = lines[scriptIndex].match(/^\s*/)[0].length;
+    const body = [];
+    for (let candidate = scriptIndex + 1; candidate < lines.length; candidate += 1) {
+      const line = lines[candidate];
+      if (line.trim() && line.match(/^\s*/)[0].length <= indentation) break;
+      body.push(line);
+    }
+    scripts.push(body.join("\n"));
+    index = scriptIndex;
+  }
+  return scripts;
+}
+
+test("PR-controlled GitHub expressions never enter github-script source", () => {
+  for (const [name, source] of [["planning", planningWorkflow], ["execution", workflow]]) {
+    const scripts = githubScriptSources(source);
+    assert.ok(scripts.length > 0, `${name} workflow must expose github-script blocks`);
+    for (const script of scripts) assert.doesNotMatch(script, /\$\{\{/);
+    assert.doesNotMatch(source, /context\.triggering_actor/);
+  }
+  assert.match(planningWorkflow, /ATLAS_TRIGGERING_ACTOR: \$\{\{ github\.triggering_actor \}\}[\s\S]*triggeringActor: process\.env\.ATLAS_TRIGGERING_ACTOR/);
+  assert.match(workflow, /PILOT_HEAD_BRANCH: \$\{\{ steps\.pilot\.outputs\.head-branch \}\}[\s\S]*core\.setOutput\("head-branch", process\.env\.PILOT_HEAD_BRANCH\)/);
 });
 
 test("tests and safety gates precede commit and push", () => {

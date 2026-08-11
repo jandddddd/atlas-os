@@ -98,6 +98,8 @@ jobs:
         env:
           PR_NUMBER: ${{ inputs.pr_number }}
           EXPECTED_HEAD_SHA: ${{ inputs.expected_head_sha }}
+          ATLAS_ACTOR: ${{ github.actor }}
+          ATLAS_TRIGGERING_ACTOR: ${{ github.triggering_actor }}
         with:
           script: |
             const fs = require("node:fs");
@@ -115,8 +117,8 @@ jobs:
             const pilotContext = pullRequestPilotContext(pull, {
               repository: `${context.repo.owner}/${context.repo.repo}`,
               expectedHeadSha: expected,
-              actor: context.actor,
-              triggeringActor: context.triggering_actor,
+              actor: process.env.ATLAS_ACTOR,
+              triggeringActor: process.env.ATLAS_TRIGGERING_ACTOR,
             });
             const pilot = evaluatePilotGates(policy, pilotContext);
             core.setOutput("pr-author", pull.user.login);
@@ -125,8 +127,8 @@ jobs:
             core.setOutput("head-repository", pull.head.repo.full_name);
             core.setOutput("pilot-gates", JSON.stringify(pilot.gates));
             const validated = validatePullRequest(pull, policy, `${context.repo.owner}/${context.repo.repo}`, expected, {
-              actor: context.actor,
-              triggeringActor: context.triggering_actor,
+              actor: process.env.ATLAS_ACTOR,
+              triggeringActor: process.env.ATLAS_TRIGGERING_ACTOR,
             });
             core.setOutput("head-branch", validated.headBranch);
             core.setOutput("head-sha", validated.headSha);
@@ -138,6 +140,8 @@ jobs:
           PR_NUMBER: ${{ inputs.pr_number }}
           EXPECTED_HEAD_SHA: ${{ inputs.expected_head_sha }}
           PLAN_RUN_ID: ${{ inputs.repair_plan_run_id }}
+          PILOT_HEAD_BRANCH: ${{ steps.pilot.outputs.head-branch }}
+          PILOT_HEAD_SHA: ${{ steps.pilot.outputs.head-sha }}
         with:
           script: |
             const { pathToFileURL } = require("node:url");
@@ -159,8 +163,8 @@ jobs:
             } catch (error) {
               if (error.status !== 404) throw error;
             }
-            core.setOutput("head-branch", "${{ steps.pilot.outputs.head-branch }}");
-            core.setOutput("head-sha", "${{ steps.pilot.outputs.head-sha }}");
+            core.setOutput("head-branch", process.env.PILOT_HEAD_BRANCH);
+            core.setOutput("head-sha", process.env.PILOT_HEAD_SHA);
             core.setOutput("plan-artifact", `atlas-repair-plan-pr-${pullNumber}-${expected.slice(0, 12)}`);
             core.setOutput("attempt-tag", tagName);
 
@@ -231,6 +235,8 @@ jobs:
           PR_NUMBER: ${{ inputs.pr_number }}
           EXPECTED_HEAD_SHA: ${{ inputs.expected_head_sha }}
           HEAD_BRANCH: ${{ steps.pull.outputs.head-branch }}
+          ATLAS_ACTOR: ${{ github.actor }}
+          ATLAS_TRIGGERING_ACTOR: ${{ github.triggering_actor }}
         with:
           script: |
             const { data: pull } = await github.rest.pulls.get({ ...context.repo, pull_number: Number(process.env.PR_NUMBER) });
@@ -240,7 +246,7 @@ jobs:
             const { validatePullRequest } = await import(pathToFileURL(`${process.env.RUNNER_TEMP}/atlas-repair-trusted/atlas-pr-repair-execute.mjs`).href);
             const policy = parseRepairConfig(fs.readFileSync(`${process.env.RUNNER_TEMP}/atlas-repair-trusted/atlas-autopilot.yml`, "utf8"));
             validatePullRequest(pull, policy, `${context.repo.owner}/${context.repo.repo}`, process.env.EXPECTED_HEAD_SHA, {
-              actor: context.actor, triggeringActor: context.triggering_actor,
+              actor: process.env.ATLAS_ACTOR, triggeringActor: process.env.ATLAS_TRIGGERING_ACTOR,
             });
             if (pull.head.ref !== process.env.HEAD_BRANCH) throw new Error("Repair branch changed immediately before repair.");
 
@@ -265,6 +271,8 @@ jobs:
           EXPECTED_HEAD_SHA: ${{ inputs.expected_head_sha }}
           HEAD_BRANCH: ${{ steps.pull.outputs.head-branch }}
           ATTEMPT_TAG: ${{ steps.pull.outputs.attempt-tag }}
+          ATLAS_ACTOR: ${{ github.actor }}
+          ATLAS_TRIGGERING_ACTOR: ${{ github.triggering_actor }}
         with:
           script: |
             const fs = require("node:fs");
@@ -276,7 +284,7 @@ jobs:
             const { validatePullRequest } = await import(pathToFileURL(`${process.env.RUNNER_TEMP}/atlas-repair-trusted/atlas-pr-repair-execute.mjs`).href);
             const policy = parseRepairConfig(fs.readFileSync(`${process.env.RUNNER_TEMP}/atlas-repair-trusted/atlas-autopilot.yml`, "utf8"));
             const validated = validatePullRequest(pull, policy, `${context.repo.owner}/${context.repo.repo}`, expected, {
-              actor: context.actor, triggeringActor: context.triggering_actor,
+              actor: process.env.ATLAS_ACTOR, triggeringActor: process.env.ATLAS_TRIGGERING_ACTOR,
             });
             if (validated.headBranch !== process.env.HEAD_BRANCH) throw new Error("Repair branch changed immediately before attempt reservation.");
             try {

@@ -46,6 +46,28 @@ test("all exact pilot gates pass for one explicitly allowed PR", () => {
   assert.doesNotThrow(() => assertPilotGates(active, context));
 });
 
+test("allowlisted triggering actor passes while a different triggering actor fails", () => {
+  assert.equal(evaluatePilotGates(active, context).gates.find((gate) => gate.code === "TRIGGERING_ACTOR_ALLOWLISTED")?.passed, true);
+  assert.equal(evaluatePilotGates(active, { ...context, triggeringActor: "not-allowlisted" })
+    .gates.find((gate) => gate.code === "TRIGGERING_ACTOR_ALLOWLISTED")?.passed, false);
+});
+
+test("syntactically hostile branch content remains an inert data value", () => {
+  const maliciousBranch = 'pilot/atlas-repair-");globalThis.atlasRepairInjected=true;(value=";()=payload';
+  delete globalThis.atlasRepairInjected;
+  const result = evaluatePilotGates(active, { ...context, headBranch: maliciousBranch });
+  assert.equal(result.passed, true);
+  assert.equal(globalThis.atlasRepairInjected, undefined);
+  const execution = validatePullRequest({
+    number: context.prNumber, state: "open", draft: false, user: { login: context.author },
+    base: { ref: "main", repo: { full_name: context.repository } },
+    head: { ref: maliciousBranch, sha: context.headSha, repo: { full_name: context.repository, fork: false } },
+    labels: context.labels.map((name) => ({ name })),
+  }, active, context.repository, context.expectedHeadSha, { actor: context.actor, triggeringActor: context.triggeringActor });
+  assert.equal(execution.headBranch, maliciousBranch);
+  assert.equal(globalThis.atlasRepairInjected, undefined);
+});
+
 test("planning and execution use the identical pilot-gate contract", () => {
   const planning = createRepairPlan({
     ...context,
