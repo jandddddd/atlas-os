@@ -7,26 +7,20 @@ import { createRepairPlan } from "./atlas-pr-repair-plan.mjs";
 import { validatePullRequest } from "./atlas-pr-repair-execute.mjs";
 
 const source = readFileSync(new URL("../.github/atlas-autopilot.yml", import.meta.url), "utf8");
-const disabled = parseRepairConfig(source);
+const configuredPilot = parseRepairConfig(source);
 const active = {
-  ...disabled,
-  enabled: true,
-  pilot_enabled: true,
-  pilot_allowed_pr_numbers: [42],
-  pilot_allowed_actors: ["operator"],
-  pilot_allowed_triggering_actors: ["trigger-operator"],
-  pilot_allowed_authors: ["author"],
+  ...configuredPilot,
 };
 const context = {
   repository: "atlas/atlas-os",
-  prNumber: 42,
-  actor: "operator",
-  triggeringActor: "trigger-operator",
-  author: "author",
+  prNumber: 43,
+  actor: "jandddddd",
+  triggeringActor: "jandddddd",
+  author: "jandddddd",
   state: "open",
   draft: false,
   baseBranch: "main",
-  headBranch: "pilot/atlas-repair-42",
+  headBranch: "pilot/atlas-repair-fixture",
   baseRepository: "atlas/atlas-os",
   headRepository: "atlas/atlas-os",
   isFork: false,
@@ -35,17 +29,22 @@ const context = {
   headSha: "a".repeat(40),
 };
 
-test("repository policy keeps both repair switches disabled", () => {
-  assert.equal(disabled.enabled, false);
-  assert.equal(disabled.pilot_enabled, false);
-  assert.equal(disabled.auto_merge, false);
-  assert.deepEqual(disabled.pilot_allowed_pr_numbers, []);
-  assert.deepEqual(disabled.pilot_allowed_actors, ["jandddddd"]);
-  assert.deepEqual(disabled.pilot_allowed_triggering_actors, ["jandddddd"]);
-  assert.deepEqual(disabled.pilot_allowed_authors, ["jandddddd"]);
-  assert.deepEqual(disabled.pilot_allowed_head_prefixes, ["pilot/atlas-repair-"]);
-  assert.equal(disabled.pilot_required_label, "atlas-repair-pilot");
-  assert.doesNotThrow(() => validatePilotPolicy(disabled));
+test("repository policy activates only the exact repair pilot", () => {
+  assert.equal(configuredPilot.enabled, true);
+  assert.equal(configuredPilot.pilot_enabled, true);
+  assert.equal(configuredPilot.auto_merge, false);
+  assert.deepEqual(configuredPilot.pilot_allowed_pr_numbers, [43]);
+  assert.deepEqual(configuredPilot.pilot_allowed_actors, ["jandddddd"]);
+  assert.deepEqual(configuredPilot.pilot_allowed_triggering_actors, ["jandddddd"]);
+  assert.deepEqual(configuredPilot.pilot_allowed_authors, ["jandddddd"]);
+  assert.deepEqual(configuredPilot.pilot_allowed_head_prefixes, ["pilot/atlas-repair-"]);
+  assert.equal(configuredPilot.pilot_required_label, "atlas-repair-pilot");
+  assert.doesNotThrow(() => validatePilotPolicy(configuredPilot, { requireEnabled: true }));
+});
+
+test("activation PR 42 is not allowlisted", () => {
+  const gates = evaluatePilotGates(configuredPilot, { ...context, prNumber: 42 });
+  assert.equal(gates.gates.find((gate) => gate.code === "PR_ALLOWLISTED")?.passed, false);
 });
 
 test("all exact pilot gates pass for one explicitly allowed PR", () => {
@@ -131,7 +130,7 @@ test("planning and execution use the identical pilot-gate contract", () => {
 for (const [name, override, code] of [
   ["repair disabled", { policy: { enabled: false } }, "REPAIR_ENABLED"],
   ["pilot disabled", { policy: { pilot_enabled: false } }, "PILOT_ENABLED"],
-  ["PR not allowlisted", { context: { prNumber: 43 } }, "PR_ALLOWLISTED"],
+  ["PR not allowlisted", { context: { prNumber: 42 } }, "PR_ALLOWLISTED"],
   ["actor not allowlisted", { context: { actor: "other" } }, "ACTOR_ALLOWLISTED"],
   ["triggering actor not allowlisted", { context: { triggeringActor: "other" } }, "TRIGGERING_ACTOR_ALLOWLISTED"],
   ["author not allowlisted", { context: { author: "other" } }, "AUTHOR_ALLOWLISTED"],
