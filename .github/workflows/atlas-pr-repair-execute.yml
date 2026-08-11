@@ -35,26 +35,42 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
-      - name: Validate manual confirmation
-        env:
-          CONFIRM: ${{ inputs.confirm }}
-          PR_NUMBER: ${{ inputs.pr_number }}
-          EXPECTED_HEAD_SHA: ${{ inputs.expected_head_sha }}
-          PLAN_RUN_ID: ${{ inputs.repair_plan_run_id }}
-        run: |
-          test "$CONFIRM" = "EXECUTE_REPAIR"
-          test "$PR_NUMBER" -ge 1
-          test "$PLAN_RUN_ID" -ge 1
-          [[ "$EXPECTED_HEAD_SHA" =~ ^[0-9a-fA-F]{40}$ ]]
-
       - name: Checkout trusted main branch
+        id: trusted-checkout
         uses: actions/checkout@v4
         with:
           ref: main
           fetch-depth: 1
           persist-credentials: false
 
+      - name: Initialize trusted audit reporting
+        id: audit-init
+        run: |
+          mkdir -p "$RUNNER_TEMP/atlas-repair-trusted"
+          cp scripts/atlas-pr-repair-plan.mjs "$RUNNER_TEMP/atlas-repair-trusted/atlas-pr-repair-plan.mjs"
+          cp scripts/atlas-pr-repair-execute.mjs "$RUNNER_TEMP/atlas-repair-trusted/atlas-pr-repair-execute.mjs"
+          echo "started-at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+
+      - name: Validate manual confirmation
+        id: dispatch
+        env:
+          CONFIRM: ${{ inputs.confirm }}
+          PR_NUMBER: ${{ inputs.pr_number }}
+          EXPECTED_HEAD_SHA: ${{ inputs.expected_head_sha }}
+          PLAN_RUN_ID: ${{ inputs.repair_plan_run_id }}
+        run: |
+          node --input-type=module <<'NODE'
+          import { validateDispatch } from "./scripts/atlas-pr-repair-execute.mjs";
+          validateDispatch({
+            confirm: process.env.CONFIRM,
+            prNumber: Number(process.env.PR_NUMBER),
+            expectedHeadSha: process.env.EXPECTED_HEAD_SHA,
+            planRunId: Number(process.env.PLAN_RUN_ID),
+          });
+          NODE
+
       - name: Enforce trusted repair policy
+        id: policy
         env:
           CONFIRM: ${{ inputs.confirm }}
           PR_NUMBER: ${{ inputs.pr_number }}
@@ -108,17 +124,13 @@ jobs:
             } catch (error) {
               if (error.status !== 404) throw error;
             }
-            await github.rest.git.createRef({
-              ...context.repo,
-              ref: `refs/tags/${tagName}`,
-              sha: expected,
-            });
             core.setOutput("head-branch", validated.headBranch);
             core.setOutput("head-sha", validated.headSha);
             core.setOutput("plan-artifact", `atlas-repair-plan-pr-${pullNumber}-${expected.slice(0, 12)}`);
             core.setOutput("attempt-tag", tagName);
 
       - name: Download bound repair plan artifact
+        id: download
         uses: actions/download-artifact@v4
         with:
           name: ${{ steps.pull.outputs.plan-artifact }}
@@ -128,6 +140,7 @@ jobs:
           run-id: ${{ inputs.repair_plan_run_id }}
 
       - name: Validate repair plan artifact
+        id: plan
         env:
           PR_NUMBER: ${{ inputs.pr_number }}
           EXPECTED_HEAD_SHA: ${{ inputs.expected_head_sha }}
@@ -147,6 +160,7 @@ jobs:
           NODE
 
       - name: Preserve trusted enforcement code outside the PR workspace
+        id: enforcement
         run: |
           mkdir -p "$RUNNER_TEMP/atlas-repair-trusted"
           cp scripts/atlas-pr-repair-plan.mjs "$RUNNER_TEMP/atlas-repair-trusted/atlas-pr-repair-plan.mjs"
@@ -155,6 +169,7 @@ jobs:
           cp .github/atlas-autopilot.yml "$RUNNER_TEMP/atlas-repair-trusted/atlas-autopilot.yml"
 
       - name: Checkout the exact PR head for repair
+        id: checkout
         uses: actions/checkout@v4
         with:
           ref: ${{ steps.pull.outputs.head-sha }}
@@ -162,6 +177,7 @@ jobs:
           persist-credentials: false
 
       - name: Restore validated prompt inside Git metadata
+        id: prompt
         run: |
           node --input-type=module <<'NODE'
           import { readFileSync, writeFileSync } from "node:fs";
@@ -170,6 +186,7 @@ jobs:
           NODE
 
       - name: Revalidate PR head immediately before repair
+        id: head
         uses: actions/github-script@v7
         env:
           PR_NUMBER: ${{ inputs.pr_number }}
@@ -181,6 +198,48 @@ jobs:
             if (pull.head.sha !== process.env.EXPECTED_HEAD_SHA || pull.head.ref !== process.env.HEAD_BRANCH) {
               core.setFailed("expected_head_sha is stale immediately before repair.");
             }
+
+      - name: Validate OpenAI credential availability
+        id: secret
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          node --input-type=module <<'NODE'
+          import { pathToFileURL } from "node:url";
+          const { requireOpenAiApiKey } = await import(
+            pathToFileURL(`${process.env.RUNNER_TEMP}/atlas-repair-trusted/atlas-pr-repair-execute.mjs`).href
+          );
+          requireOpenAiApiKey(process.env.OPENAI_API_KEY);
+          NODE
+
+      - name: Reserve the single repair attempt
+        id: reserve
+        uses: actions/github-script@v7
+        env:
+          PR_NUMBER: ${{ inputs.pr_number }}
+          EXPECTED_HEAD_SHA: ${{ inputs.expected_head_sha }}
+          HEAD_BRANCH: ${{ steps.pull.outputs.head-branch }}
+          ATTEMPT_TAG: ${{ steps.pull.outputs.attempt-tag }}
+        with:
+          script: |
+            const pullNumber = Number(process.env.PR_NUMBER);
+            const expected = process.env.EXPECTED_HEAD_SHA;
+            const { data: pull } = await github.rest.pulls.get({ ...context.repo, pull_number: pullNumber });
+            if (pull.head.sha !== expected || pull.head.ref !== process.env.HEAD_BRANCH) {
+              throw new Error("expected_head_sha is stale immediately before attempt reservation.");
+            }
+            try {
+              await github.rest.git.getRef({ ...context.repo, ref: `tags/${process.env.ATTEMPT_TAG}` });
+              throw new Error("This attemptKey has already been reserved or executed.");
+            } catch (error) {
+              if (error.status !== 404) throw error;
+            }
+            await github.rest.git.createRef({
+              ...context.repo,
+              ref: `refs/tags/${process.env.ATTEMPT_TAG}`,
+              sha: expected,
+            });
+            core.setOutput("reserved", "true");
 
       - name: Run one bounded Codex repair attempt
         id: codex
@@ -194,10 +253,12 @@ jobs:
           codex-version: "0.144.5"
 
       - name: Remove transient prompt
+        id: cleanup
         if: always()
         run: rm -f .git/atlas-repair-prompt.txt
 
       - name: Validate repair scope and size
+        id: scope
         env:
           ATLAS_REPAIR_TRUSTED: ${{ runner.temp }}/atlas-repair-trusted
           ATLAS_REPAIR_MODULE_ROOT: ${{ runner.temp }}/atlas-repair-trusted
@@ -207,27 +268,34 @@ jobs:
         run: node "$RUNNER_TEMP/atlas-repair-trusted/atlas-pr-repair-tree-check.mjs"
 
       - name: Setup Node.js
+        id: setup
         uses: actions/setup-node@v4
         with:
           node-version: 24
           cache: npm
 
       - name: Install dependencies
+        id: install
         run: npm ci --include-workspace-root
 
       - name: Unit tests
+        id: unit
         run: npm run test:unit
 
       - name: Lint
+        id: lint
         run: npm run lint
 
       - name: Build
+        id: build
         run: npm run build
 
       - name: Check patch whitespace
+        id: diff
         run: git diff HEAD --check
 
       - name: Revalidate complete repair tree after tests
+        id: tree
         env:
           ATLAS_REPAIR_TRUSTED: ${{ runner.temp }}/atlas-repair-trusted
           ATLAS_REPAIR_MODULE_ROOT: ${{ runner.temp }}/atlas-repair-trusted
@@ -237,6 +305,7 @@ jobs:
         run: node "$RUNNER_TEMP/atlas-repair-trusted/atlas-pr-repair-tree-check.mjs"
 
       - name: Prepare trusted Git config for remote revalidation
+        id: fetch_config
         env:
           GIT_CONFIG_GLOBAL: /dev/null
           GIT_CONFIG_NOSYSTEM: "1"
@@ -251,6 +320,7 @@ jobs:
           install -m 600 "$trusted_config" .git/config
 
       - name: Revalidate remote head before commit
+        id: remote
         env:
           HEAD_BRANCH: ${{ steps.pull.outputs.head-branch }}
           EXPECTED_HEAD_SHA: ${{ inputs.expected_head_sha }}
@@ -276,6 +346,7 @@ jobs:
           echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       - name: Push once to the existing PR branch
+        id: push
         env:
           HEAD_BRANCH: ${{ steps.pull.outputs.head-branch }}
           GITHUB_TOKEN: ${{ github.token }}
@@ -294,37 +365,82 @@ jobs:
             -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GITHUB_TOKEN" | base64 -w0)" \
             push "https://github.com/${GITHUB_REPOSITORY}.git" "HEAD:refs/heads/$HEAD_BRANCH"
 
-      - name: Create successful audit report
+      - name: Create final audit report
+        id: audit
+        if: always() && steps.audit-init.outcome == 'success'
         env:
           PR_NUMBER: ${{ inputs.pr_number }}
           EXPECTED_HEAD_SHA: ${{ inputs.expected_head_sha }}
           PLAN_RUN_ID: ${{ inputs.repair_plan_run_id }}
           COMMIT_SHA: ${{ steps.commit.outputs.sha }}
-          STARTED_AT: ${{ github.event.repository.updated_at }}
+          ATTEMPT_TAG: ${{ steps.pull.outputs.attempt-tag }}
+          STARTED_AT: ${{ steps.audit-init.outputs.started-at }}
+          STEP_DISPATCH: ${{ steps.dispatch.outcome }}
+          STEP_POLICY: ${{ steps.policy.outcome }}
+          STEP_PULL: ${{ steps.pull.outcome }}
+          STEP_DOWNLOAD: ${{ steps.download.outcome }}
+          STEP_PLAN: ${{ steps.plan.outcome }}
+          STEP_ENFORCEMENT: ${{ steps.enforcement.outcome }}
+          STEP_CHECKOUT: ${{ steps.checkout.outcome }}
+          STEP_PROMPT: ${{ steps.prompt.outcome }}
+          STEP_HEAD: ${{ steps.head.outcome }}
+          STEP_SECRET: ${{ steps.secret.outcome }}
+          STEP_RESERVE: ${{ steps.reserve.outcome }}
+          STEP_CODEX: ${{ steps.codex.outcome }}
+          STEP_CLEANUP: ${{ steps.cleanup.outcome }}
+          STEP_SCOPE: ${{ steps.scope.outcome }}
+          STEP_SETUP: ${{ steps.setup.outcome }}
+          STEP_INSTALL: ${{ steps.install.outcome }}
+          STEP_UNIT: ${{ steps.unit.outcome }}
+          STEP_LINT: ${{ steps.lint.outcome }}
+          STEP_BUILD: ${{ steps.build.outcome }}
+          STEP_DIFF: ${{ steps.diff.outcome }}
+          STEP_TREE: ${{ steps.tree.outcome }}
+          STEP_FETCH_CONFIG: ${{ steps.fetch_config.outcome }}
+          STEP_REMOTE: ${{ steps.remote.outcome }}
+          STEP_COMMIT: ${{ steps.commit.outcome }}
+          STEP_PUSH: ${{ steps.push.outcome }}
         run: |
           node --input-type=module <<'NODE'
-          import { readFileSync } from "node:fs";
+          import { existsSync, readFileSync } from "node:fs";
           import { pathToFileURL } from "node:url";
           const trusted = `${process.env.RUNNER_TEMP}/atlas-repair-trusted`;
-          const { createExecutionReport, writeExecutionReport } = await import(
+          const { createExecutionReport, deriveExecutionOutcome, writeExecutionReport } = await import(
             pathToFileURL(`${trusted}/atlas-pr-repair-execute.mjs`).href
           );
+          const steps = Object.fromEntries(
+            ["dispatch", "policy", "pull", "download", "plan", "enforcement", "checkout", "prompt", "head",
+              "secret", "reserve", "codex", "cleanup", "scope", "setup", "install", "unit", "lint", "build",
+              "diff", "tree", "fetch_config", "remote", "commit", "push"]
+              .map((name) => [name, process.env[`STEP_${name.toUpperCase()}`] ?? "skipped"]),
+          );
+          const outcome = deriveExecutionOutcome(steps);
+          const changedFilesPath = `${process.env.RUNNER_TEMP}/atlas-repair-changed-files.json`;
+          const changedFiles = existsSync(changedFilesPath)
+            ? JSON.parse(readFileSync(changedFilesPath, "utf8"))
+            : [];
           const report = createExecutionReport({
             prNumber: Number(process.env.PR_NUMBER), expectedHeadSha: process.env.EXPECTED_HEAD_SHA,
-            attemptKey: `${process.env.PR_NUMBER}:${process.env.EXPECTED_HEAD_SHA}`,
-            planRunId: Number(process.env.PLAN_RUN_ID), status: "PUSHED",
+            planRunId: Number(process.env.PLAN_RUN_ID), ...outcome,
+            attemptTag: process.env.ATTEMPT_TAG,
             startedAt: process.env.STARTED_AT, finishedAt: new Date().toISOString(),
-            changedFiles: JSON.parse(readFileSync(`${process.env.RUNNER_TEMP}/atlas-repair-changed-files.json`, "utf8")),
-            tests: { "npm run test:unit": "passed", "npm run lint": "passed", "npm run build": "passed", "git diff --check": "passed" },
+            changedFiles,
+            tests: {
+              "npm run test:unit": steps.unit,
+              "npm run lint": steps.lint,
+              "npm run build": steps.build,
+              "git diff --check": steps.diff,
+            },
             commitSha: process.env.COMMIT_SHA,
           });
           await writeExecutionReport(`${process.env.RUNNER_TEMP}/atlas-repair-report`, report);
           NODE
 
       - name: Upload read-only execution audit
+        if: always() && steps.audit.outcome == 'success'
         uses: actions/upload-artifact@v4
         with:
-          name: atlas-repair-execution-report-${{ inputs.pr_number }}-${{ inputs.expected_head_sha }}
+          name: atlas-repair-execution-report-run-${{ github.run_id }}
           path: |
             ${{ runner.temp }}/atlas-repair-report/repair-execution-report.json
             ${{ runner.temp }}/atlas-repair-report/repair-execution-report.md

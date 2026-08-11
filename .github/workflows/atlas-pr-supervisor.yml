@@ -234,8 +234,8 @@ jobs:
             const marker = "<!-- atlas-pr-supervisor -->";
             const input = JSON.parse(fs.readFileSync(`${process.env.RUNNER_TEMP}/atlas-pr-input.json`, "utf8"));
             const result = JSON.parse(fs.readFileSync(`${process.env.RUNNER_TEMP}/atlas-pr-result.json`, "utf8"));
-            const icon = result.status === "MERGE_READY" ? "✅" : result.status === "WAITING" ? "⏳" : "⛔";
-            const title = result.status === "MERGE_READY" ? "MERGE READY" : result.status;
+            const icon = result.status === "POLICY_READY" ? "✅" : result.status === "WAITING" ? "⏳" : "⛔";
+            const title = result.status === "POLICY_READY" ? "SUPERVISOR POLICY READY" : result.status;
             const blockingCount = input.reviewThreads.filter(
               (thread) => !thread.resolved && ["P1", "P2"].includes(thread.priority),
             ).length;
@@ -245,11 +245,14 @@ jobs:
             const reasonLines = result.reasons.length
               ? result.reasons.map((reason) => `- ${reason}`).join("\n")
               : "- Alle Supervisor-Regeln sind erfüllt.";
+            const scopeNote = result.status === "POLICY_READY"
+              ? "Die Supervisor-Policy ist erfüllt. Formale Reviews, Required Checks und Branch Protection werden weiterhin von GitHub durchgesetzt."
+              : "Die Supervisor-Bewertung ersetzt keine formalen Reviews, Required Checks oder Branch Protection.";
             const body = `${marker}\n## ${icon} ${title}\n\n${reasonLines}\n\n` +
               `**Neuester Commit:** \`${input.headSha}\`\n\n` +
               `**Check-Status**\n${checkLines}\n\n` +
               `**Offene P1/P2-Kommentare:** ${blockingCount}\n\n` +
-              `> Dry-run: kein automatischer Merge`;
+              `> Dry-run: ${scopeNote} Kein automatischer Merge.`;
             const pullNumber = Number(process.env.PR_NUMBER);
             const comments = await github.paginate(github.rest.issues.listComments, {
               ...context.repo,

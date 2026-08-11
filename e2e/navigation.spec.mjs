@@ -396,6 +396,9 @@ test("Später entscheiden bleibt nach einem Reload in der offenen Queue", async 
   };
 
   await page.getByRole("button", { name: "Später entscheiden" }).click();
+  await expect(page.getByLabel("Aktueller Abschluss")).toContainText(
+    "Die Entscheidung wurde für später eingeordnet.",
+  );
   await page.reload();
 
   await expect(page.getByRole("button", { name: deferredDecision.overviewTitle })).toBeVisible();

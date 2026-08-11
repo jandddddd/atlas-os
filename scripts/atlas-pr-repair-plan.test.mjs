@@ -40,8 +40,8 @@ function plan(overrides = {}) {
   return createRepairPlan({ ...repairable, ...overrides }, policy);
 }
 
-test("MERGE_READY needs no repair", () => {
-  assert.equal(plan({ supervisor: { status: "MERGE_READY", reasons: [] }, blockReasons: [] }).status, "NO_REPAIR_NEEDED");
+test("POLICY_READY needs no repair", () => {
+  assert.equal(plan({ supervisor: { status: "POLICY_READY", reasons: [] }, blockReasons: [] }).status, "NO_REPAIR_NEEDED");
 });
 
 test("running CI blocks repair", () => {
@@ -141,7 +141,7 @@ test("writes complete JSON and a redacted Markdown audit artifact", async () => 
 for (const [status, overrides] of [
   ["REPAIR_ELIGIBLE", {}],
   ["REPAIR_BLOCKED", { labels: [] }],
-  ["NO_REPAIR_NEEDED", { supervisor: { status: "MERGE_READY", reasons: [] }, blockReasons: [] }],
+  ["NO_REPAIR_NEEDED", { supervisor: { status: "POLICY_READY", reasons: [] }, blockReasons: [] }],
 ]) {
   test(`Markdown represents ${status}`, () => {
     assert.match(renderRepairPlanMarkdown(plan(overrides), "artifact"), new RegExp(`Repair status:\\*\\* ${status}`));

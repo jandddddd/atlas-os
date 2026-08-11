@@ -4,7 +4,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
-const REPAIR_STATUSES = new Set(["MERGE_READY", "WAITING", "BLOCKED"]);
+const REPAIR_STATUSES = new Set(["POLICY_READY", "WAITING", "BLOCKED"]);
 const SECRET_PATTERNS = [
   /\bsk-[A-Za-z0-9_-]{12,}\b/g,
   /\b(?:gh[opsu]_[A-Za-z0-9]{12,}|github_pat_[A-Za-z0-9_]{12,})\b/g,
@@ -171,8 +171,8 @@ export function createRepairPlan(input, policy) {
     relevantFindings: relevantFindings(input),
     repairExecuted: false,
   };
-  if (input.supervisor.status === "MERGE_READY") {
-    return { ...audit, status: "NO_REPAIR_NEEDED", reasons: ["Pull request is merge-ready."], prompt: "", safeToStart: false };
+  if (input.supervisor.status === "POLICY_READY") {
+    return { ...audit, status: "NO_REPAIR_NEEDED", reasons: ["Pull request satisfies the supervisor policy."], prompt: "", safeToStart: false };
   }
   if (input.supervisor.status === "WAITING") {
     return { ...audit, status: "REPAIR_BLOCKED", reasons: ["Supervisor is waiting for incomplete checks or state."], prompt: "", safeToStart: false };
