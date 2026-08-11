@@ -307,6 +307,58 @@ test("blocked and failed outcomes use fixed reason codes without masking workflo
   assert.equal(workflow.includes("continue-on-error"), false);
 });
 
+test("every fallible phase around and after reservation has a stable audit mapping", () => {
+  const phases = [
+    ["enforcement", "trusted-enforcement-setup", "TRUSTED_ENFORCEMENT_SETUP_FAILED", false],
+    ["prompt", "prompt-restore", "PROMPT_RESTORE_FAILED", false],
+    ["cleanup", "prompt-cleanup", "PROMPT_CLEANUP_FAILED", true],
+    ["setup", "node-setup", "NODE_SETUP_FAILED", true],
+    ["fetch_config", "git-config-setup", "GIT_CONFIG_SETUP_FAILED", true],
+  ];
+
+  for (const [step, phase, reasonCode, attemptReserved] of phases) {
+    const outcome = deriveExecutionOutcome({
+      reserve: attemptReserved ? "success" : "skipped",
+      codex: attemptReserved ? "success" : "skipped",
+      [step]: "failure",
+      push: "skipped",
+    });
+    assert.equal(outcome.status, attemptReserved ? "FAILED" : "BLOCKED");
+    assert.equal(outcome.phase, phase);
+    assert.equal(outcome.reasonCode, reasonCode);
+    assert.equal(outcome.attemptReserved, attemptReserved);
+  }
+});
+
+test("all fallible post-reservation workflow steps expose outcomes to the audit finalizer", () => {
+  const steps = [
+    ["Run one bounded Codex repair attempt", "codex"],
+    ["Remove transient prompt", "cleanup"],
+    ["Validate repair scope and size", "scope"],
+    ["Setup Node.js", "setup"],
+    ["Install dependencies", "install"],
+    ["Unit tests", "unit"],
+    ["Lint", "lint"],
+    ["Build", "build"],
+    ["Check patch whitespace", "diff"],
+    ["Revalidate complete repair tree after tests", "tree"],
+    ["Prepare trusted Git config for remote revalidation", "fetch_config"],
+    ["Revalidate remote head before commit", "remote"],
+    ["Commit approved repair", "commit"],
+    ["Push once to the existing PR branch", "push"],
+  ];
+  const postReservation = workflow.slice(
+    workflow.indexOf("name: Reserve the single repair attempt"),
+    workflow.indexOf("name: Create final audit report"),
+  );
+  const audit = workflow.slice(workflow.indexOf("name: Create final audit report"));
+
+  for (const [name, id] of steps) {
+    assert.match(postReservation, new RegExp(`name: ${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\n\\s+id: ${id}`));
+    assert.match(audit, new RegExp(`STEP_${id.toUpperCase()}: \\$\\{\\{ steps\\.${id}\\.outcome \\}\\}`));
+  }
+});
+
 test("successful push produces a complete PUSHED audit outcome", () => {
   assert.deepEqual(deriveExecutionOutcome({ reserve: "success", codex: "success", push: "success" }), {
     status: "PUSHED",

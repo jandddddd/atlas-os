@@ -160,6 +160,7 @@ jobs:
           NODE
 
       - name: Preserve trusted enforcement code outside the PR workspace
+        id: enforcement
         run: |
           mkdir -p "$RUNNER_TEMP/atlas-repair-trusted"
           cp scripts/atlas-pr-repair-plan.mjs "$RUNNER_TEMP/atlas-repair-trusted/atlas-pr-repair-plan.mjs"
@@ -176,6 +177,7 @@ jobs:
           persist-credentials: false
 
       - name: Restore validated prompt inside Git metadata
+        id: prompt
         run: |
           node --input-type=module <<'NODE'
           import { readFileSync, writeFileSync } from "node:fs";
@@ -251,6 +253,7 @@ jobs:
           codex-version: "0.144.5"
 
       - name: Remove transient prompt
+        id: cleanup
         if: always()
         run: rm -f .git/atlas-repair-prompt.txt
 
@@ -265,6 +268,7 @@ jobs:
         run: node "$RUNNER_TEMP/atlas-repair-trusted/atlas-pr-repair-tree-check.mjs"
 
       - name: Setup Node.js
+        id: setup
         uses: actions/setup-node@v4
         with:
           node-version: 24
@@ -301,6 +305,7 @@ jobs:
         run: node "$RUNNER_TEMP/atlas-repair-trusted/atlas-pr-repair-tree-check.mjs"
 
       - name: Prepare trusted Git config for remote revalidation
+        id: fetch_config
         env:
           GIT_CONFIG_GLOBAL: /dev/null
           GIT_CONFIG_NOSYSTEM: "1"
@@ -375,18 +380,23 @@ jobs:
           STEP_PULL: ${{ steps.pull.outcome }}
           STEP_DOWNLOAD: ${{ steps.download.outcome }}
           STEP_PLAN: ${{ steps.plan.outcome }}
+          STEP_ENFORCEMENT: ${{ steps.enforcement.outcome }}
           STEP_CHECKOUT: ${{ steps.checkout.outcome }}
+          STEP_PROMPT: ${{ steps.prompt.outcome }}
           STEP_HEAD: ${{ steps.head.outcome }}
           STEP_SECRET: ${{ steps.secret.outcome }}
           STEP_RESERVE: ${{ steps.reserve.outcome }}
           STEP_CODEX: ${{ steps.codex.outcome }}
+          STEP_CLEANUP: ${{ steps.cleanup.outcome }}
           STEP_SCOPE: ${{ steps.scope.outcome }}
+          STEP_SETUP: ${{ steps.setup.outcome }}
           STEP_INSTALL: ${{ steps.install.outcome }}
           STEP_UNIT: ${{ steps.unit.outcome }}
           STEP_LINT: ${{ steps.lint.outcome }}
           STEP_BUILD: ${{ steps.build.outcome }}
           STEP_DIFF: ${{ steps.diff.outcome }}
           STEP_TREE: ${{ steps.tree.outcome }}
+          STEP_FETCH_CONFIG: ${{ steps.fetch_config.outcome }}
           STEP_REMOTE: ${{ steps.remote.outcome }}
           STEP_COMMIT: ${{ steps.commit.outcome }}
           STEP_PUSH: ${{ steps.push.outcome }}
@@ -399,8 +409,9 @@ jobs:
             pathToFileURL(`${trusted}/atlas-pr-repair-execute.mjs`).href
           );
           const steps = Object.fromEntries(
-            ["dispatch", "policy", "pull", "download", "plan", "checkout", "head", "secret", "reserve", "codex",
-              "scope", "install", "unit", "lint", "build", "diff", "tree", "remote", "commit", "push"]
+            ["dispatch", "policy", "pull", "download", "plan", "enforcement", "checkout", "prompt", "head",
+              "secret", "reserve", "codex", "cleanup", "scope", "setup", "install", "unit", "lint", "build",
+              "diff", "tree", "fetch_config", "remote", "commit", "push"]
               .map((name) => [name, process.env[`STEP_${name.toUpperCase()}`] ?? "skipped"]),
           );
           const outcome = deriveExecutionOutcome(steps);
