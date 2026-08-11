@@ -35,6 +35,21 @@ export function validateExecutionPolicy(source) {
   requirePolicyValue(policy.require_expected_head_sha === true, "Expected-head SHA binding is required.");
   requirePolicyValue(policy.require_same_repository === true, "Same-repository enforcement is required.");
   requirePolicyValue(policy.require_non_fork === true, "Fork rejection is required.");
+  requirePolicyValue(
+    Number.isFinite(policy.maximum_changed_files) && Number.isInteger(policy.maximum_changed_files)
+      && policy.maximum_changed_files > 0,
+    "maximum_changed_files must be a finite positive integer.",
+  );
+  requirePolicyValue(
+    Number.isFinite(policy.maximum_changed_lines) && Number.isInteger(policy.maximum_changed_lines)
+      && policy.maximum_changed_lines > 0,
+    "maximum_changed_lines must be a finite positive integer.",
+  );
+  requirePolicyValue(
+    Array.isArray(policy.forbidden_paths) && policy.forbidden_paths.length > 0
+      && policy.forbidden_paths.every((path) => typeof path === "string" && path.trim() !== ""),
+    "forbidden_paths must be a non-empty list of non-empty strings.",
+  );
   requirePolicyValue(policy.auto_merge === false, "auto_merge must remain false.");
   return policy;
 }

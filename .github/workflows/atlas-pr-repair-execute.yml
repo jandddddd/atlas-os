@@ -247,9 +247,20 @@ jobs:
         env:
           HEAD_BRANCH: ${{ steps.pull.outputs.head-branch }}
           GITHUB_TOKEN: ${{ github.token }}
+          GIT_CONFIG_GLOBAL: /dev/null
+          GIT_CONFIG_NOSYSTEM: "1"
         run: |
-          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GITHUB_TOKEN" | base64 -w0)" \
-            push origin "HEAD:refs/heads/$HEAD_BRANCH"
+          test -d .git
+          test ! -L .git
+          trusted_config="$(mktemp "$RUNNER_TEMP/atlas-repair-git-config.XXXXXX")"
+          git config --file "$trusted_config" core.repositoryFormatVersion 0
+          git config --file "$trusted_config" core.fileMode true
+          git config --file "$trusted_config" core.bare false
+          rm -f .git/config
+          install -m 600 "$trusted_config" .git/config
+          git -c core.hooksPath=/dev/null \
+            -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GITHUB_TOKEN" | base64 -w0)" \
+            push "https://github.com/${GITHUB_REPOSITORY}.git" "HEAD:refs/heads/$HEAD_BRANCH"
 
       - name: Create successful audit report
         env:

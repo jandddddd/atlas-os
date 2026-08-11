@@ -45,6 +45,33 @@ test("repair.enabled false blocks execution", () => {
   assert.equal(policy.enabled, false);
 });
 
+function enabledPolicySource() {
+  return policySource.replace("  enabled: false", "  enabled: true");
+}
+
+for (const [field, invalidValues] of [
+  ["maximum_changed_files", [undefined, "0", "-1", "1.5", "NaN", "Infinity", "null"]],
+  ["maximum_changed_lines", [undefined, "0", "-1", "1.5", "NaN", "Infinity", "null"]],
+]) {
+  for (const invalidValue of invalidValues) {
+    test(`enabled policy rejects ${field}=${invalidValue ?? "missing"}`, () => {
+      const line = `  ${field}: ${policy[field]}`;
+      const replacement = invalidValue === undefined ? "" : `  ${field}: ${invalidValue}`;
+      assert.throws(() => validateExecutionPolicy(enabledPolicySource().replace(line, replacement)), new RegExp(field));
+    });
+  }
+}
+
+for (const replacement of ["", "  forbidden_paths: null", "  forbidden_paths:", "  forbidden_paths:\n    - 123"]) {
+  test(`enabled policy rejects invalid forbidden_paths: ${replacement || "missing"}`, () => {
+    const invalidPolicy = enabledPolicySource().replace(
+      /  forbidden_paths:\n(?:    - .*\n){6}/,
+      replacement ? `${replacement}\n` : "",
+    );
+    assert.throws(() => validateExecutionPolicy(invalidPolicy), /forbidden_paths/);
+  });
+}
+
 test("wrong confirmation blocks", () => {
   assert.throws(() => validateDispatch({ confirm: "REPAIR", prNumber: 42, expectedHeadSha: sha, planRunId: 7 }), /EXECUTE_REPAIR/);
 });
@@ -139,7 +166,12 @@ test("workflow performs exactly one gated commit and normal push", () => {
   assert.equal((workflow.match(/commit -m /g) ?? []).length, 1);
   assert.match(workflow, /git -c core\.hooksPath=\/dev\/null commit /);
   assert.doesNotMatch(workflow, /git config core\.hooksPath/);
-  assert.equal((workflow.match(/\bpush origin\b/g) ?? []).length, 1);
+  assert.equal((workflow.match(/\bpush "https:\/\/github\.com\/\$\{GITHUB_REPOSITORY\}\.git"/g) ?? []).length, 1);
+  assert.match(workflow, /GIT_CONFIG_GLOBAL: \/dev\/null/);
+  assert.match(workflow, /GIT_CONFIG_NOSYSTEM: "1"/);
+  assert.match(workflow, /trusted_config="\$\(mktemp "\$RUNNER_TEMP\/atlas-repair-git-config\.XXXXXX"\)"/);
+  assert.match(workflow, /rm -f \.git\/config\n\s+install -m 600 "\$trusted_config" \.git\/config/);
+  assert.match(workflow, /git -c core\.hooksPath=\/dev\/null \\\n[\s\S]*push "https:\/\/github\.com\/\$\{GITHUB_REPOSITORY\}\.git"/);
   assert.match(workflow, /fix\(autopilot\): apply approved repair plan/);
   assert.doesNotMatch(workflow, /push[^\n]*(?:--force|-f\b)|gh pr create|pulls\.create|pulls\.merge/i);
   assert.match(workflow, /isTrustedRepairPlanWorkflowPath\(run\.path\)/);
