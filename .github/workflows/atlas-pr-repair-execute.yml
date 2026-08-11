@@ -32,6 +32,7 @@ concurrency:
 
 jobs:
   execute:
+    environment: atlas-repair-pilot
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -48,8 +49,10 @@ jobs:
         run: |
           mkdir -p "$RUNNER_TEMP/atlas-repair-trusted"
           cp scripts/atlas-pr-repair-plan.mjs "$RUNNER_TEMP/atlas-repair-trusted/atlas-pr-repair-plan.mjs"
+          cp scripts/atlas-pr-repair-policy.mjs "$RUNNER_TEMP/atlas-repair-trusted/atlas-pr-repair-policy.mjs"
           cp scripts/atlas-pr-repair-execute.mjs "$RUNNER_TEMP/atlas-repair-trusted/atlas-pr-repair-execute.mjs"
           echo "started-at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+          echo "trusted-sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       - name: Validate manual confirmation
         id: dispatch
@@ -89,7 +92,46 @@ jobs:
           validateExecutionPolicy(readFileSync(".github/atlas-autopilot.yml", "utf8"));
           NODE
 
-      - name: Validate PR and plan workflow run
+      - name: Validate PR and pilot gates
+        id: pilot
+        uses: actions/github-script@v7
+        env:
+          PR_NUMBER: ${{ inputs.pr_number }}
+          EXPECTED_HEAD_SHA: ${{ inputs.expected_head_sha }}
+        with:
+          script: |
+            const fs = require("node:fs");
+            const { pathToFileURL } = require("node:url");
+            const { evaluatePilotGates, parseRepairConfig } = await import(
+              pathToFileURL(`${process.env.GITHUB_WORKSPACE}/scripts/atlas-pr-repair-policy.mjs`).href
+            );
+            const { pullRequestPilotContext, validatePullRequest } = await import(
+              pathToFileURL(`${process.env.GITHUB_WORKSPACE}/scripts/atlas-pr-repair-execute.mjs`).href
+            );
+            const policy = parseRepairConfig(fs.readFileSync(".github/atlas-autopilot.yml", "utf8"));
+            const pullNumber = Number(process.env.PR_NUMBER);
+            const expected = process.env.EXPECTED_HEAD_SHA;
+            const { data: pull } = await github.rest.pulls.get({ ...context.repo, pull_number: pullNumber });
+            const pilotContext = pullRequestPilotContext(pull, {
+              repository: `${context.repo.owner}/${context.repo.repo}`,
+              expectedHeadSha: expected,
+              actor: context.actor,
+              triggeringActor: context.triggering_actor,
+            });
+            const pilot = evaluatePilotGates(policy, pilotContext);
+            core.setOutput("pr-author", pull.user.login);
+            core.setOutput("base-branch", pull.base.ref);
+            core.setOutput("base-repository", pull.base.repo.full_name);
+            core.setOutput("head-repository", pull.head.repo.full_name);
+            core.setOutput("pilot-gates", JSON.stringify(pilot.gates));
+            const validated = validatePullRequest(pull, policy, `${context.repo.owner}/${context.repo.repo}`, expected, {
+              actor: context.actor,
+              triggeringActor: context.triggering_actor,
+            });
+            core.setOutput("head-branch", validated.headBranch);
+            core.setOutput("head-sha", validated.headSha);
+
+      - name: Validate plan workflow run and attempt availability
         id: pull
         uses: actions/github-script@v7
         env:
@@ -98,20 +140,13 @@ jobs:
           PLAN_RUN_ID: ${{ inputs.repair_plan_run_id }}
         with:
           script: |
-            const fs = require("node:fs");
             const { pathToFileURL } = require("node:url");
-            const { parseRepairConfig } = await import(
-              pathToFileURL(`${process.env.GITHUB_WORKSPACE}/scripts/atlas-pr-repair-plan.mjs`).href
-            );
-            const { attemptTagName, isTrustedRepairPlanWorkflowPath, validatePullRequest } = await import(
+            const { attemptTagName, isTrustedRepairPlanWorkflowPath } = await import(
               pathToFileURL(`${process.env.GITHUB_WORKSPACE}/scripts/atlas-pr-repair-execute.mjs`).href
             );
-            const policy = parseRepairConfig(fs.readFileSync(".github/atlas-autopilot.yml", "utf8"));
             const pullNumber = Number(process.env.PR_NUMBER);
             const expected = process.env.EXPECTED_HEAD_SHA;
             const planRunId = Number(process.env.PLAN_RUN_ID);
-            const { data: pull } = await github.rest.pulls.get({ ...context.repo, pull_number: pullNumber });
-            const validated = validatePullRequest(pull, policy, `${context.repo.owner}/${context.repo.repo}`, expected);
             const { data: run } = await github.rest.actions.getWorkflowRun({ ...context.repo, run_id: planRunId });
             if (run.event !== "workflow_dispatch" || run.head_branch !== "main" || run.conclusion !== "success" ||
                 !isTrustedRepairPlanWorkflowPath(run.path)) {
@@ -124,8 +159,8 @@ jobs:
             } catch (error) {
               if (error.status !== 404) throw error;
             }
-            core.setOutput("head-branch", validated.headBranch);
-            core.setOutput("head-sha", validated.headSha);
+            core.setOutput("head-branch", "${{ steps.pilot.outputs.head-branch }}");
+            core.setOutput("head-sha", "${{ steps.pilot.outputs.head-sha }}");
             core.setOutput("plan-artifact", `atlas-repair-plan-pr-${pullNumber}-${expected.slice(0, 12)}`);
             core.setOutput("attempt-tag", tagName);
 
@@ -146,6 +181,7 @@ jobs:
           EXPECTED_HEAD_SHA: ${{ inputs.expected_head_sha }}
         run: |
           node --input-type=module <<'NODE'
+          import { createHash } from "node:crypto";
           import { readFileSync, readdirSync, writeFileSync } from "node:fs";
           import { validatePlanArtifact } from "./scripts/atlas-pr-repair-execute.mjs";
           const directory = `${process.env.RUNNER_TEMP}/atlas-repair-plan`;
@@ -157,6 +193,8 @@ jobs:
           });
           writeFileSync(".git/atlas-repair-prompt.txt", plan.prompt, { mode: 0o600 });
           writeFileSync(`${process.env.RUNNER_TEMP}/atlas-validated-plan.json`, JSON.stringify(plan));
+          const digest = createHash("sha256").update(readFileSync(`${directory}/repair-plan.json`)).digest("hex");
+          writeFileSync(`${process.env.RUNNER_TEMP}/atlas-repair-plan-digest`, digest);
           NODE
 
       - name: Preserve trusted enforcement code outside the PR workspace
@@ -164,6 +202,7 @@ jobs:
         run: |
           mkdir -p "$RUNNER_TEMP/atlas-repair-trusted"
           cp scripts/atlas-pr-repair-plan.mjs "$RUNNER_TEMP/atlas-repair-trusted/atlas-pr-repair-plan.mjs"
+          cp scripts/atlas-pr-repair-policy.mjs "$RUNNER_TEMP/atlas-repair-trusted/atlas-pr-repair-policy.mjs"
           cp scripts/atlas-pr-repair-execute.mjs "$RUNNER_TEMP/atlas-repair-trusted/atlas-pr-repair-execute.mjs"
           cp scripts/atlas-pr-repair-tree-check.mjs "$RUNNER_TEMP/atlas-repair-trusted/atlas-pr-repair-tree-check.mjs"
           cp .github/atlas-autopilot.yml "$RUNNER_TEMP/atlas-repair-trusted/atlas-autopilot.yml"
@@ -195,9 +234,15 @@ jobs:
         with:
           script: |
             const { data: pull } = await github.rest.pulls.get({ ...context.repo, pull_number: Number(process.env.PR_NUMBER) });
-            if (pull.head.sha !== process.env.EXPECTED_HEAD_SHA || pull.head.ref !== process.env.HEAD_BRANCH) {
-              core.setFailed("expected_head_sha is stale immediately before repair.");
-            }
+            const fs = require("node:fs");
+            const { pathToFileURL } = require("node:url");
+            const { parseRepairConfig } = await import(pathToFileURL(`${process.env.RUNNER_TEMP}/atlas-repair-trusted/atlas-pr-repair-policy.mjs`).href);
+            const { validatePullRequest } = await import(pathToFileURL(`${process.env.RUNNER_TEMP}/atlas-repair-trusted/atlas-pr-repair-execute.mjs`).href);
+            const policy = parseRepairConfig(fs.readFileSync(`${process.env.RUNNER_TEMP}/atlas-repair-trusted/atlas-autopilot.yml`, "utf8"));
+            validatePullRequest(pull, policy, `${context.repo.owner}/${context.repo.repo}`, process.env.EXPECTED_HEAD_SHA, {
+              actor: context.actor, triggeringActor: context.triggering_actor,
+            });
+            if (pull.head.ref !== process.env.HEAD_BRANCH) throw new Error("Repair branch changed immediately before repair.");
 
       - name: Validate OpenAI credential availability
         id: secret
@@ -222,12 +267,18 @@ jobs:
           ATTEMPT_TAG: ${{ steps.pull.outputs.attempt-tag }}
         with:
           script: |
+            const fs = require("node:fs");
+            const { pathToFileURL } = require("node:url");
             const pullNumber = Number(process.env.PR_NUMBER);
             const expected = process.env.EXPECTED_HEAD_SHA;
             const { data: pull } = await github.rest.pulls.get({ ...context.repo, pull_number: pullNumber });
-            if (pull.head.sha !== expected || pull.head.ref !== process.env.HEAD_BRANCH) {
-              throw new Error("expected_head_sha is stale immediately before attempt reservation.");
-            }
+            const { parseRepairConfig } = await import(pathToFileURL(`${process.env.RUNNER_TEMP}/atlas-repair-trusted/atlas-pr-repair-policy.mjs`).href);
+            const { validatePullRequest } = await import(pathToFileURL(`${process.env.RUNNER_TEMP}/atlas-repair-trusted/atlas-pr-repair-execute.mjs`).href);
+            const policy = parseRepairConfig(fs.readFileSync(`${process.env.RUNNER_TEMP}/atlas-repair-trusted/atlas-autopilot.yml`, "utf8"));
+            const validated = validatePullRequest(pull, policy, `${context.repo.owner}/${context.repo.repo}`, expected, {
+              actor: context.actor, triggeringActor: context.triggering_actor,
+            });
+            if (validated.headBranch !== process.env.HEAD_BRANCH) throw new Error("Repair branch changed immediately before attempt reservation.");
             try {
               await github.rest.git.getRef({ ...context.repo, ref: `tags/${process.env.ATTEMPT_TAG}` });
               throw new Error("This attemptKey has already been reserved or executed.");
@@ -377,6 +428,7 @@ jobs:
           STARTED_AT: ${{ steps.audit-init.outputs.started-at }}
           STEP_DISPATCH: ${{ steps.dispatch.outcome }}
           STEP_POLICY: ${{ steps.policy.outcome }}
+          STEP_PILOT: ${{ steps.pilot.outcome }}
           STEP_PULL: ${{ steps.pull.outcome }}
           STEP_DOWNLOAD: ${{ steps.download.outcome }}
           STEP_PLAN: ${{ steps.plan.outcome }}
@@ -400,6 +452,18 @@ jobs:
           STEP_REMOTE: ${{ steps.remote.outcome }}
           STEP_COMMIT: ${{ steps.commit.outcome }}
           STEP_PUSH: ${{ steps.push.outcome }}
+          REPOSITORY: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          ACTOR: ${{ github.actor }}
+          TRIGGERING_ACTOR: ${{ github.triggering_actor }}
+          PR_AUTHOR: ${{ steps.pilot.outputs.pr-author }}
+          BASE_BRANCH: ${{ steps.pilot.outputs.base-branch }}
+          HEAD_BRANCH: ${{ steps.pull.outputs.head-branch }}
+          BASE_REPOSITORY: ${{ steps.pilot.outputs.base-repository }}
+          HEAD_REPOSITORY: ${{ steps.pilot.outputs.head-repository }}
+          PILOT_GATES: ${{ steps.pilot.outputs.pilot-gates }}
+          TRUSTED_SHA: ${{ steps.audit-init.outputs.trusted-sha }}
         run: |
           node --input-type=module <<'NODE'
           import { existsSync, readFileSync } from "node:fs";
@@ -409,7 +473,7 @@ jobs:
             pathToFileURL(`${trusted}/atlas-pr-repair-execute.mjs`).href
           );
           const steps = Object.fromEntries(
-            ["dispatch", "policy", "pull", "download", "plan", "enforcement", "checkout", "prompt", "head",
+            ["dispatch", "policy", "pilot", "pull", "download", "plan", "enforcement", "checkout", "prompt", "head",
               "secret", "reserve", "codex", "cleanup", "scope", "setup", "install", "unit", "lint", "build",
               "diff", "tree", "fetch_config", "remote", "commit", "push"]
               .map((name) => [name, process.env[`STEP_${name.toUpperCase()}`] ?? "skipped"]),
@@ -420,8 +484,16 @@ jobs:
             ? JSON.parse(readFileSync(changedFilesPath, "utf8"))
             : [];
           const report = createExecutionReport({
+            repository: process.env.REPOSITORY, runId: Number(process.env.RUN_ID), runUrl: process.env.RUN_URL,
+            actor: process.env.ACTOR, triggeringActor: process.env.TRIGGERING_ACTOR, prAuthor: process.env.PR_AUTHOR,
+            baseBranch: process.env.BASE_BRANCH, headBranch: process.env.HEAD_BRANCH,
+            baseRepository: process.env.BASE_REPOSITORY, headRepository: process.env.HEAD_REPOSITORY,
+            trustedPolicySha: process.env.TRUSTED_SHA, trustedWorkflowSha: process.env.TRUSTED_SHA,
             prNumber: Number(process.env.PR_NUMBER), expectedHeadSha: process.env.EXPECTED_HEAD_SHA,
             planRunId: Number(process.env.PLAN_RUN_ID), ...outcome,
+            planDigest: existsSync(`${process.env.RUNNER_TEMP}/atlas-repair-plan-digest`)
+              ? readFileSync(`${process.env.RUNNER_TEMP}/atlas-repair-plan-digest`, "utf8") : null,
+            pilotGateResults: process.env.PILOT_GATES ? JSON.parse(process.env.PILOT_GATES) : [],
             attemptTag: process.env.ATTEMPT_TAG,
             startedAt: process.env.STARTED_AT, finishedAt: new Date().toISOString(),
             changedFiles,

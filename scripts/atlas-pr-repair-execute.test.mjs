@@ -24,10 +24,13 @@ const policy = parseRepairConfig(policySource);
 const sha = "a".repeat(40);
 const repository = "atlas/atlas-os";
 const pull = {
+  number: 42,
   state: "open",
+  draft: false,
+  user: { login: "author" },
   base: { ref: "main", repo: { full_name: repository } },
-  head: { ref: "feature/repair", sha, repo: { full_name: repository, fork: false } },
-  labels: [{ name: "atlas-repair" }],
+  head: { ref: "pilot/atlas-repair-42", sha, repo: { full_name: repository, fork: false } },
+  labels: [{ name: "atlas-repair" }, { name: "atlas-repair-pilot" }],
 };
 const plan = {
   prNumber: 42,
@@ -45,7 +48,12 @@ test("repair.enabled false blocks execution", () => {
 });
 
 function enabledPolicySource() {
-  return policySource.replace("  enabled: false", "  enabled: true");
+  return policySource
+    .replace("  enabled: false", "  enabled: true")
+    .replace("  pilot_enabled: false", "  pilot_enabled: true")
+    .replace("  pilot_allowed_pr_numbers:", "  pilot_allowed_pr_numbers:\n    - 42")
+    .replace("  pilot_allowed_actors:", "  pilot_allowed_actors:\n    - operator")
+    .replace("  pilot_allowed_authors:", "  pilot_allowed_authors:\n    - author");
 }
 
 for (const [field, invalidValues] of [
@@ -204,8 +212,27 @@ test("workflow performs exactly one gated commit and normal push", () => {
   assert.match(workflow, /git -c core\.hooksPath=\/dev\/null \\\n[\s\S]*push "https:\/\/github\.com\/\$\{GITHUB_REPOSITORY\}\.git"/);
   assert.match(workflow, /fix\(autopilot\): apply approved repair plan/);
   assert.doesNotMatch(workflow, /push[^\n]*(?:--force|-f\b)|gh pr create|pulls\.create|pulls\.merge/i);
+  assert.match(workflow, /environment: atlas-repair-pilot/);
+  assert.match(workflow, /context\.actor/);
+  assert.match(workflow, /context\.triggering_actor/);
   assert.match(workflow, /isTrustedRepairPlanWorkflowPath\(run\.path\)/);
   assert.match(workflow, /atlas-pr-repair-tree-check\.mjs/);
+});
+
+test("pilot gates are revalidated immediately before attempt reservation", () => {
+  const reserve = workflow.slice(workflow.indexOf("name: Reserve the single repair attempt"), workflow.indexOf("name: Run one bounded Codex repair attempt"));
+  assert.match(reserve, /validatePullRequest\(pull, policy/);
+  assert.match(reserve, /context\.actor/);
+  assert.match(reserve, /context\.triggering_actor/);
+  assert.match(reserve, /validated\.headBranch !== process\.env\.HEAD_BRANCH/);
+  assert.match(reserve, /git\.getRef/);
+  assert.match(reserve, /git\.createRef/);
+});
+
+test("Codex step receives neither GitHub token nor repository credentials", () => {
+  const codex = workflow.slice(workflow.indexOf("name: Run one bounded Codex repair attempt"), workflow.indexOf("name: Remove transient prompt"));
+  assert.doesNotMatch(codex, /GITHUB_TOKEN|github\.token|github-token|persist-credentials/);
+  assert.match(codex, /openai-api-key/);
 });
 
 test("tests and safety gates precede commit and push", () => {
@@ -237,6 +264,12 @@ test("secret is scoped to key check and Codex step, and prompt comes from plan",
 
 test("execution report redacts secrets and records no merge", () => {
   const report = createExecutionReport({
+    repository: "atlas/atlas-os", runId: 99, runUrl: "https://github.com/atlas/atlas-os/actions/runs/99",
+    actor: "operator", triggeringActor: "operator", prAuthor: "author",
+    baseBranch: "main", headBranch: "pilot/atlas-repair-42",
+    baseRepository: "atlas/atlas-os", headRepository: "atlas/atlas-os",
+    trustedPolicySha: sha, trustedWorkflowSha: sha, planDigest: "b".repeat(64),
+    pilotGateResults: [{ code: "PR_ALLOWLISTED", passed: true }],
     prNumber: 42, expectedHeadSha: sha, attemptKey: `42:${sha}`, planRunId: 7,
     status: "FAILED", phase: "codex token=supersecretvalue", reasonCode: "CODEX_FAILED",
     attemptReserved: true, attemptTag: `atlas-repair-attempt/42-${sha}`, codexStarted: true, pushPerformed: false,
@@ -251,6 +284,9 @@ test("execution report redacts secrets and records no merge", () => {
   assert.equal(report.attemptReserved, true);
   assert.equal(report.codexStarted, true);
   assert.equal(report.pushPerformed, false);
+  assert.equal(report.repository, "atlas/atlas-os");
+  assert.equal(report.planDigest, "b".repeat(64));
+  assert.deepEqual(report.pilotGateResults, [{ code: "PR_ALLOWLISTED", passed: true }]);
 });
 
 test("execution report rejects free-form statuses and reason codes", () => {
@@ -379,7 +415,7 @@ test("attempt is reserved only after plan, checkout, head and secret validation"
   const codex = workflow.indexOf("name: Run one bounded Codex repair attempt");
   assert.ok(planValidation > 0 && checkout > planValidation && head > checkout && secret > head && reserve > secret && codex > reserve);
   assert.doesNotMatch(workflow.slice(0, reserve), /git\.createRef\(/);
-  assert.match(workflow.slice(reserve, codex), /pull\.head\.sha !== expected/);
+  assert.match(workflow.slice(reserve, codex), /validatePullRequest\(pull, policy/);
   assert.match(workflow.slice(reserve, codex), /git\.getRef\(/);
   assert.match(workflow.slice(reserve, codex), /git\.createRef\(/);
 });

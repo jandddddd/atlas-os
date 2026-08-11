@@ -50,9 +50,17 @@ Sprint 2D integriert `npm run test:unit` in den bestehenden PR-CI-Job `CI / veri
 
 Die konkrete, manuell durch eine Repository-Administration einzurichtende Branch-Protection ist in `docs/operations/GITHUB_BRANCH_PROTECTION.md` beschrieben. Sprint 2D verändert keine Repositoryeinstellungen und aktiviert weder Repair Execution noch Auto-Merge.
 
-### Repository-Secret einrichten
+## Sprint 2E: Vorbereitung eines kontrollierten Repair-Piloten
 
-Vor einer späteren Aktivierung muss eine Repository-Administration unter **Settings → Secrets and variables → Actions → New repository secret** ein Secret namens `OPENAI_API_KEY` anlegen. Es soll ein dedizierter, eng begrenzter Schlüssel sein. Der Wert gehört niemals in Policy, Workflow-Datei, Prompt, Report, Log, Screenshot oder PR-Code. Ein fehlendes Secret beendet den Ausführungsworkflow ohne Codex-Aufruf und ohne Push.
+Sprint 2E ergänzt ausschließlich die deaktivierte technische Vorbereitung eines eng begrenzten Piloten. Neben `repair.enabled` muss `repair.pilot_enabled` ausdrücklich aktiviert werden. Eine spätere Ausführung erfordert außerdem eine exakte PR-, Actor- und Author-Allowlist, ein Pilot-Label, einen erlaubten Head-Branch-Präfix und das GitHub Environment `atlas-repair-pilot`. Wildcards und implizite Freigaben sind nicht zulässig. Im Sprint-2E-Implementierungs-PR bleiben `repair.enabled`, `repair.pilot_enabled` und `repair.auto_merge` auf `false`.
+
+Planning und Execution verwenden denselben deterministischen Pilot-Gate-Contract. Ein Plan bleibt als Auditnachweis erzeugbar, wenn der Pilot deaktiviert oder der PR nicht freigegeben ist; `safeToStart` wird aber nur bei vollständig erfüllter Repair- und Pilot-Policy `true`. Execution prüft die Gates erneut beim initialen PR-Laden und unmittelbar vor der Attempt-Reservierung. Der Remote-Head wird zusätzlich vor Commit und Push erneut validiert.
+
+Das Environment ist eine zusätzliche administrative Freigabe und wird nicht durch Repositorycode eingerichtet. Der Execute-Workflow bleibt rein manuell, führt genau einen Versuch pro PR-Head-SHA aus und pusht ausschließlich normal auf den erneut validierten bestehenden PR-Branch. Codex erhält keine GitHub-Credentials. Es existiert weiterhin kein Mergepfad.
+
+### Environment-Secret einrichten
+
+Vor einer späteren Aktivierung muss eine Repository-Administration im Environment `atlas-repair-pilot` ein Secret namens `OPENAI_API_KEY` anlegen. Es soll ein dedizierter, eng begrenzter Schlüssel sein. Der Wert gehört niemals in Policy, Workflow-Datei, Prompt, Report, Log, Screenshot oder PR-Code. Ein fehlendes Secret beendet den Ausführungsworkflow ohne Codex-Aufruf und ohne Push.
 
 ## Geplante Stufen
 

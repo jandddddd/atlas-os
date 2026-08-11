@@ -183,6 +183,10 @@ jobs:
             } while (cursor);
 
             const snapshot = {
+              repository,
+              actor: context.actor,
+              triggeringActor: context.triggering_actor,
+              author: pull.user.login,
               prNumber: pull.number,
               state: pull.state,
               draft: pull.draft,
