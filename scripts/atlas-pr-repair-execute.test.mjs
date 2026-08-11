@@ -20,14 +20,18 @@ import { parseRepairConfig } from "./atlas-pr-repair-plan.mjs";
 
 const policySource = readFileSync(new URL("../.github/atlas-autopilot.yml", import.meta.url), "utf8");
 const workflow = readFileSync(new URL("../.github/workflows/atlas-pr-repair-execute.yml", import.meta.url), "utf8");
+const planningWorkflow = readFileSync(new URL("../.github/workflows/atlas-pr-repair.yml", import.meta.url), "utf8");
 const policy = parseRepairConfig(policySource);
 const sha = "a".repeat(40);
 const repository = "atlas/atlas-os";
 const pull = {
+  number: 42,
   state: "open",
+  draft: false,
+  user: { login: "author" },
   base: { ref: "main", repo: { full_name: repository } },
-  head: { ref: "feature/repair", sha, repo: { full_name: repository, fork: false } },
-  labels: [{ name: "atlas-repair" }],
+  head: { ref: "pilot/atlas-repair-42", sha, repo: { full_name: repository, fork: false } },
+  labels: [{ name: "atlas-repair" }, { name: "atlas-repair-pilot" }],
 };
 const plan = {
   prNumber: 42,
@@ -45,7 +49,12 @@ test("repair.enabled false blocks execution", () => {
 });
 
 function enabledPolicySource() {
-  return policySource.replace("  enabled: false", "  enabled: true");
+  return policySource
+    .replace("  enabled: false", "  enabled: true")
+    .replace("  pilot_enabled: false", "  pilot_enabled: true")
+    .replace("  pilot_allowed_pr_numbers:", "  pilot_allowed_pr_numbers:\n    - 42")
+    .replace("  pilot_allowed_actors:", "  pilot_allowed_actors:\n    - operator")
+    .replace("  pilot_allowed_authors:", "  pilot_allowed_authors:\n    - author");
 }
 
 for (const [field, invalidValues] of [
@@ -204,8 +213,88 @@ test("workflow performs exactly one gated commit and normal push", () => {
   assert.match(workflow, /git -c core\.hooksPath=\/dev\/null \\\n[\s\S]*push "https:\/\/github\.com\/\$\{GITHUB_REPOSITORY\}\.git"/);
   assert.match(workflow, /fix\(autopilot\): apply approved repair plan/);
   assert.doesNotMatch(workflow, /push[^\n]*(?:--force|-f\b)|gh pr create|pulls\.create|pulls\.merge/i);
+  assert.match(workflow, /environment: atlas-repair-pilot/);
+  assert.match(workflow, /ATLAS_ACTOR: \$\{\{ github\.actor \}\}/);
+  assert.match(workflow, /ATLAS_TRIGGERING_ACTOR: \$\{\{ github\.triggering_actor \}\}/);
   assert.match(workflow, /isTrustedRepairPlanWorkflowPath\(run\.path\)/);
   assert.match(workflow, /atlas-pr-repair-tree-check\.mjs/);
+});
+
+test("pilot gates are revalidated immediately before attempt reservation", () => {
+  const reserve = workflow.slice(workflow.indexOf("name: Reserve the single repair attempt"), workflow.indexOf("name: Run one bounded Codex repair attempt"));
+  assert.match(reserve, /validatePullRequest\(pull, policy/);
+  assert.match(reserve, /actor: process\.env\.ATLAS_ACTOR/);
+  assert.match(reserve, /triggeringActor: process\.env\.ATLAS_TRIGGERING_ACTOR/);
+  assert.match(reserve, /validated\.headBranch !== process\.env\.HEAD_BRANCH/);
+  assert.match(reserve, /git\.getRef/);
+  assert.match(reserve, /git\.createRef/);
+});
+
+test("complete current pilot gates are reloaded immediately before commit and push", () => {
+  const remote = workflow.indexOf("name: Revalidate remote head before commit");
+  const precommit = workflow.indexOf("name: Revalidate current pilot gates before commit");
+  const commit = workflow.indexOf("name: Commit approved repair");
+  const prepush = workflow.indexOf("name: Revalidate current pilot gates before push");
+  const push = workflow.indexOf("name: Push once to the existing PR branch");
+  assert.ok(remote > 0 && precommit > remote && commit > precommit && prepush > commit && push > prepush);
+  for (const source of [workflow.slice(precommit, commit), workflow.slice(prepush, push)]) {
+    assert.match(source, /github\.rest\.repos\.getContent/);
+    assert.match(source, /path: "\.github\/atlas-autopilot\.yml", ref: "main"/);
+    assert.match(source, /validateExecutionPolicy/);
+    assert.match(source, /github\.rest\.pulls\.get/);
+    assert.match(source, /validatePullRequest/);
+    assert.match(source, /actor: process\.env\.ATLAS_ACTOR/);
+    assert.match(source, /triggeringActor: process\.env\.ATLAS_TRIGGERING_ACTOR/);
+  }
+  assert.equal((workflow.match(/push "https:\/\/github\.com\/\$\{GITHUB_REPOSITORY\}\.git"/g) ?? []).length, 1);
+});
+
+test("pre-write gate failures are FAILED with fixed audit reason codes", () => {
+  assert.deepEqual(deriveExecutionOutcome({ reserve: "success", codex: "success", precommit: "failure", commit: "skipped", push: "skipped" }), {
+    status: "FAILED", phase: "pre-commit-gate-revalidation", reasonCode: "PRE_COMMIT_GATES_REJECTED",
+    attemptReserved: true, codexStarted: true, pushPerformed: false,
+  });
+  assert.deepEqual(deriveExecutionOutcome({ reserve: "success", codex: "success", commit: "success", prepush: "failure", push: "skipped" }), {
+    status: "FAILED", phase: "pre-push-gate-revalidation", reasonCode: "PRE_PUSH_GATES_REJECTED",
+    attemptReserved: true, codexStarted: true, pushPerformed: false,
+  });
+});
+
+test("Codex step receives neither GitHub token nor repository credentials", () => {
+  const codex = workflow.slice(workflow.indexOf("name: Run one bounded Codex repair attempt"), workflow.indexOf("name: Remove transient prompt"));
+  assert.doesNotMatch(codex, /GITHUB_TOKEN|github\.token|github-token|persist-credentials/);
+  assert.match(codex, /openai-api-key/);
+});
+
+function githubScriptSources(source) {
+  const lines = source.split("\n");
+  const scripts = [];
+  for (let index = 0; index < lines.length; index += 1) {
+    if (!lines[index].includes("uses: actions/github-script@")) continue;
+    const scriptIndex = lines.findIndex((line, candidate) => candidate > index && /^\s+script: \|$/.test(line));
+    assert.ok(scriptIndex > index, "github-script step must have a script block");
+    const indentation = lines[scriptIndex].match(/^\s*/)[0].length;
+    const body = [];
+    for (let candidate = scriptIndex + 1; candidate < lines.length; candidate += 1) {
+      const line = lines[candidate];
+      if (line.trim() && line.match(/^\s*/)[0].length <= indentation) break;
+      body.push(line);
+    }
+    scripts.push(body.join("\n"));
+    index = scriptIndex;
+  }
+  return scripts;
+}
+
+test("PR-controlled GitHub expressions never enter github-script source", () => {
+  for (const [name, source] of [["planning", planningWorkflow], ["execution", workflow]]) {
+    const scripts = githubScriptSources(source);
+    assert.ok(scripts.length > 0, `${name} workflow must expose github-script blocks`);
+    for (const script of scripts) assert.doesNotMatch(script, /\$\{\{/);
+    assert.doesNotMatch(source, /context\.triggering_actor/);
+  }
+  assert.match(planningWorkflow, /ATLAS_TRIGGERING_ACTOR: \$\{\{ github\.triggering_actor \}\}[\s\S]*triggeringActor: process\.env\.ATLAS_TRIGGERING_ACTOR/);
+  assert.match(workflow, /PILOT_HEAD_BRANCH: \$\{\{ steps\.pilot\.outputs\.head-branch \}\}[\s\S]*core\.setOutput\("head-branch", process\.env\.PILOT_HEAD_BRANCH\)/);
 });
 
 test("tests and safety gates precede commit and push", () => {
@@ -237,6 +326,12 @@ test("secret is scoped to key check and Codex step, and prompt comes from plan",
 
 test("execution report redacts secrets and records no merge", () => {
   const report = createExecutionReport({
+    repository: "atlas/atlas-os", runId: 99, runUrl: "https://github.com/atlas/atlas-os/actions/runs/99",
+    actor: "operator", triggeringActor: "operator", prAuthor: "author",
+    baseBranch: "main", headBranch: "pilot/atlas-repair-42",
+    baseRepository: "atlas/atlas-os", headRepository: "atlas/atlas-os",
+    trustedPolicySha: sha, trustedWorkflowSha: sha, planDigest: "b".repeat(64),
+    pilotGateResults: [{ code: "PR_ALLOWLISTED", passed: true }],
     prNumber: 42, expectedHeadSha: sha, attemptKey: `42:${sha}`, planRunId: 7,
     status: "FAILED", phase: "codex token=supersecretvalue", reasonCode: "CODEX_FAILED",
     attemptReserved: true, attemptTag: `atlas-repair-attempt/42-${sha}`, codexStarted: true, pushPerformed: false,
@@ -251,6 +346,97 @@ test("execution report redacts secrets and records no merge", () => {
   assert.equal(report.attemptReserved, true);
   assert.equal(report.codexStarted, true);
   assert.equal(report.pushPerformed, false);
+  assert.equal(report.repository, "atlas/atlas-os");
+  assert.equal(report.planDigest, "b".repeat(64));
+  assert.deepEqual(report.pilotGateResults, [{ code: "PR_ALLOWLISTED", passed: true }]);
+});
+
+function executionAuditValues(overrides = {}) {
+  return {
+    repository: "atlas/atlas-os", runId: 99, runUrl: "https://github.com/atlas/atlas-os/actions/runs/99",
+    actor: "operator", triggeringActor: "operator", prAuthor: "normal-user",
+    baseBranch: "main", headBranch: "pilot/atlas-repair-normal",
+    baseRepository: "atlas/atlas-os", headRepository: "atlas/atlas-os",
+    prNumber: 42, expectedHeadSha: sha, planRunId: 7,
+    status: "FAILED", phase: "pre-push-gate-revalidation", reasonCode: "PRE_PUSH_GATES_REJECTED",
+    attemptReserved: true, attemptTag: `atlas-repair-attempt/42-${sha}`,
+    codexStarted: true, pushPerformed: false,
+    startedAt: "2026-01-01T00:00:00Z", finishedAt: "2026-01-01T00:01:00Z",
+    ...overrides,
+  };
+}
+
+for (const branch of [
+  "pilot/atlas-repair-(parentheses)",
+  'pilot/atlas-repair-quote"branch',
+  "pilot/atlas-repair-key=value",
+  "pilot/atlas-repair-normal",
+]) {
+  test(`audit preserves bounded GitHub branch identifier ${branch}`, () => {
+    assert.equal(createExecutionReport(executionAuditValues({ headBranch: branch })).headBranch, branch);
+  });
+}
+
+test("audit preserves bounded bot and normal author identifiers", () => {
+  assert.equal(createExecutionReport(executionAuditValues({ prAuthor: "dependabot[bot]" })).prAuthor, "dependabot[bot]");
+  assert.equal(createExecutionReport(executionAuditValues({ prAuthor: "normal-user" })).prAuthor, "normal-user");
+});
+
+test("audit rejects overlong or control-character identifiers", () => {
+  assert.equal(createExecutionReport(executionAuditValues({ headBranch: "x".repeat(256) })).headBranch, null);
+  assert.equal(createExecutionReport(executionAuditValues({ prAuthor: "bot\nforged" })).prAuthor, null);
+});
+
+test("Markdown escapes identifier presentation without changing audit data", () => {
+  const branch = 'pilot/atlas-repair-(quoted)="value"';
+  const report = createExecutionReport(executionAuditValues({ headBranch: branch, prAuthor: "dependabot[bot]" }));
+  const markdown = renderExecutionReport(report);
+  assert.equal(report.headBranch, branch);
+  assert.equal(report.prAuthor, "dependabot[bot]");
+  assert.match(markdown, /dependabot\\\[bot\\\]/);
+  assert.match(markdown, /pilot\/atlas\\-repair\\-\\\(quoted\\\)=&quot;value&quot;/);
+  assert.doesNotMatch(markdown, /dependabot\[bot\]|\(quoted\)="value"/);
+});
+
+for (const [name, path, visibleBreak] of [
+  ["LF", "docs/line\nfeed", "\\\\n"],
+  ["CRLF", "docs/carriage\r\nreturn", "\\\\r\\\\n"],
+  ["heading-like suffix", "docs/report\n# forged heading", "\\\\n\\# forged heading"],
+  ["list-like suffix", "docs/report\n- forged item", "\\\\n\\- forged item"],
+]) {
+  test(`Markdown visibly encodes ${name} in changed file names without changing audit data`, () => {
+    const report = createExecutionReport(executionAuditValues({ changedFiles: [path] }));
+    const markdown = renderExecutionReport(report);
+    assert.equal(report.changedFiles[0], path);
+    assert.ok(markdown.includes(visibleBreak));
+    assert.doesNotMatch(markdown, /\n# forged heading|\n- forged item/);
+  });
+}
+
+test("normal changed file name remains unchanged as an audit and Markdown data value", () => {
+  const path = "docs/normal";
+  const report = createExecutionReport(executionAuditValues({ changedFiles: [path] }));
+  assert.equal(report.changedFiles[0], path);
+  assert.match(renderExecutionReport(report), /- docs\/normal/);
+});
+
+test("Markdown rendering encodes structural controls across all audited text fields", () => {
+  const report = createExecutionReport(executionAuditValues({
+    headBranch: "pilot/atlas-repair-normal",
+    actor: "normal-actor",
+    triggeringActor: "normal-actor",
+    prAuthor: "normal-author",
+    repository: "atlas/atlas-os",
+  }));
+  report.headBranch = "pilot/branch\n# heading";
+  report.actor = "actor\r\n- item";
+  report.triggeringActor = "trigger\u2028next";
+  report.prAuthor = "author\tname";
+  report.repository = "atlas/repo\u0085next";
+  report.reasonCode = "REASON\n# forged";
+  const markdown = renderExecutionReport(report);
+  assert.doesNotMatch(markdown, /\n# (?:heading|forged)|\n- item/);
+  for (const visible of ["\\\\n", "\\\\r\\\\n", "\\\\u2028", "\\\\t", "\\\\u0085"]) assert.ok(markdown.includes(visible));
 });
 
 test("execution report rejects free-form statuses and reason codes", () => {
@@ -379,7 +565,7 @@ test("attempt is reserved only after plan, checkout, head and secret validation"
   const codex = workflow.indexOf("name: Run one bounded Codex repair attempt");
   assert.ok(planValidation > 0 && checkout > planValidation && head > checkout && secret > head && reserve > secret && codex > reserve);
   assert.doesNotMatch(workflow.slice(0, reserve), /git\.createRef\(/);
-  assert.match(workflow.slice(reserve, codex), /pull\.head\.sha !== expected/);
+  assert.match(workflow.slice(reserve, codex), /validatePullRequest\(pull, policy/);
   assert.match(workflow.slice(reserve, codex), /git\.getRef\(/);
   assert.match(workflow.slice(reserve, codex), /git\.createRef\(/);
 });

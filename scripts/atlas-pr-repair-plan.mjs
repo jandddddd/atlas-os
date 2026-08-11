@@ -4,6 +4,8 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
+import { evaluatePilotGates, parseRepairConfig, validateRepairPolicy } from "./atlas-pr-repair-policy.mjs";
+
 const REPAIR_STATUSES = new Set(["POLICY_READY", "WAITING", "BLOCKED"]);
 const SECRET_PATTERNS = [
   /\bsk-[A-Za-z0-9_-]{12,}\b/g,
@@ -13,43 +15,7 @@ const SECRET_PATTERNS = [
   /\b(?:api[_-]?key|token|password|secret)\s*[:=]\s*[^\s,;]+/gi,
 ];
 
-function parseScalar(value) {
-  const trimmed = value.trim();
-  if (trimmed === "true") return true;
-  if (trimmed === "false") return false;
-  if (/^\d+$/.test(trimmed)) return Number(trimmed);
-  return trimmed.replace(/^(?:"(.*)"|'(.*)')$/, (_, double, single) => double ?? single);
-}
-
-export function parseRepairConfig(source) {
-  const lines = source.split(/\r?\n/);
-  const start = lines.findIndex((line) => /^repair:\s*(?:#.*)?$/.test(line));
-  if (start < 0) throw new Error("Missing repair policy.");
-  const repair = {};
-  let currentList;
-  for (const rawLine of lines.slice(start + 1)) {
-    if (!rawLine.trim() || rawLine.trimStart().startsWith("#")) continue;
-    const indent = rawLine.match(/^\s*/)[0].length;
-    if (indent === 0) break;
-    const line = rawLine.trim();
-    if (line.startsWith("- ")) {
-      if (!currentList) throw new Error(`List item without a repair key: ${line}`);
-      repair[currentList].push(parseScalar(line.slice(2)));
-      continue;
-    }
-    const match = /^([a-z_]+):(?:\s*(.*))?$/.exec(line);
-    if (!match) throw new Error(`Unsupported repair policy line: ${line}`);
-    const [, key, value = ""] = match;
-    if (value === "") {
-      repair[key] = [];
-      currentList = key;
-    } else {
-      repair[key] = parseScalar(value);
-      currentList = undefined;
-    }
-  }
-  return repair;
-}
+export { parseRepairConfig } from "./atlas-pr-repair-policy.mjs";
 
 function pathIsForbidden(path, patterns) {
   return patterns.some((pattern) => {
@@ -62,10 +28,10 @@ function pathIsForbidden(path, patterns) {
   });
 }
 
-export function redactDiagnostic(value, maximumLength = 2_000) {
+export function redactDiagnostic(value, maximumLength = 2_000, { preserveWhitespace = false } = {}) {
   let result = String(value ?? "").replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, " ");
   for (const pattern of SECRET_PATTERNS) result = result.replace(pattern, "[REDACTED]");
-  result = result.replace(/\r\n/g, "\n").trim();
+  if (!preserveWhitespace) result = result.replace(/\r\n/g, "\n").trim();
   return result.length > maximumLength ? `${result.slice(0, maximumLength)}\n[TRUNCATED]` : result;
 }
 
@@ -155,6 +121,7 @@ export function validateExpectedHeadSha(expectedHeadSha, currentHeadSha) {
 }
 
 export function createRepairPlan(input, policy) {
+  validateRepairPolicy(policy);
   if (!Number.isInteger(input.prNumber) || input.prNumber < 1) throw new Error("A valid prNumber is required.");
   if (!/^[0-9a-f]{40}$/i.test(input.headSha ?? "")) throw new Error("A full headSha is required.");
   if (!REPAIR_STATUSES.has(input.supervisor?.status)) throw new Error("A valid supervisor result is required.");
@@ -171,6 +138,24 @@ export function createRepairPlan(input, policy) {
     relevantFindings: relevantFindings(input),
     repairExecuted: false,
   };
+  const pilot = evaluatePilotGates(policy, {
+    repository: input.repository,
+    prNumber: input.prNumber,
+    actor: input.actor,
+    triggeringActor: input.triggeringActor,
+    author: input.author,
+    state: input.state,
+    draft: input.draft,
+    baseBranch: input.baseBranch,
+    headBranch: input.headBranch,
+    baseRepository: input.baseRepository,
+    headRepository: input.headRepository,
+    isFork: input.isFork,
+    labels: input.labels,
+    expectedHeadSha: input.headSha,
+    headSha: input.headSha,
+  });
+  audit.pilotGateResults = pilot.gates;
   if (input.supervisor.status === "POLICY_READY") {
     return { ...audit, status: "NO_REPAIR_NEEDED", reasons: ["Pull request satisfies the supervisor policy."], prompt: "", safeToStart: false };
   }
@@ -219,11 +204,17 @@ export function createRepairPlan(input, policy) {
     );
   const prompt = promptFor(input, policy, rootCauses, changedPaths);
   const executionMode = policy.execution_mode ?? policy.mode;
-  const enabled = policy.enabled === true && executionMode === "manual";
+  const enabled = policy.enabled === true && policy.pilot_enabled === true
+    && executionMode === "manual" && pilot.passed;
+  const readinessReasons = [
+    ...(policy.enabled === true ? [] : ["Repair execution is disabled by policy."]),
+    ...(policy.pilot_enabled === true ? [] : ["Repair pilot is disabled by policy."]),
+    ...(pilot.passed ? [] : [`Pilot gates not satisfied: ${pilot.gates.filter((gate) => !gate.passed).map((gate) => gate.code).join(", ")}.`]),
+  ];
   return {
     ...audit,
     status: "REPAIR_ELIGIBLE",
-    reasons: (enabled ? rootCauses : [...rootCauses, "Repair execution is disabled by policy."])
+    reasons: (enabled ? rootCauses : [...rootCauses, ...readinessReasons])
       .map((reason) => redactDiagnostic(reason, 1_000)),
     prompt,
     safeToStart: enabled,

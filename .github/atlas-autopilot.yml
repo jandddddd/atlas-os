@@ -24,6 +24,13 @@ auto_merge: false
 
 repair:
   enabled: false
+  pilot_enabled: false
+  pilot_required_label: "atlas-repair-pilot"
+  pilot_allowed_pr_numbers:
+  pilot_allowed_actors:
+  pilot_allowed_authors:
+  pilot_allowed_head_prefixes:
+    - "pilot/atlas-repair-"
   mode: manual
   execution_mode: manual
   maximum_attempts_per_commit: 1

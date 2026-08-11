@@ -3,13 +3,15 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
-import { parseRepairConfig, redactDiagnostic } from "./atlas-pr-repair-plan.mjs";
+import { redactDiagnostic } from "./atlas-pr-repair-plan.mjs";
+import { assertPilotGates, parseRepairConfig, validateRepairPolicy } from "./atlas-pr-repair-policy.mjs";
 
 const SHA = /^[0-9a-f]{40}$/i;
 const EXECUTION_STATUSES = new Set(["BLOCKED", "FAILED", "PUSHED"]);
 const EXECUTION_REASON_CODES = new Set([
   "INVALID_DISPATCH",
   "POLICY_REJECTED",
+  "PILOT_GATES_REJECTED",
   "PR_OR_PLAN_RUN_INVALID",
   "PLAN_ARTIFACT_MISSING",
   "PLAN_ARTIFACT_INVALID",
@@ -31,7 +33,9 @@ const EXECUTION_REASON_CODES = new Set([
   "TREE_REVALIDATION_FAILED",
   "GIT_CONFIG_SETUP_FAILED",
   "REMOTE_HEAD_CHANGED",
+  "PRE_COMMIT_GATES_REJECTED",
   "COMMIT_FAILED",
+  "PRE_PUSH_GATES_REJECTED",
   "PUSH_FAILED",
   "NONE",
 ]);
@@ -47,39 +51,9 @@ export function pathMatches(path, patterns) {
   });
 }
 
-function requirePolicyValue(condition, message) {
-  if (!condition) throw new Error(message);
-}
-
 export function validateExecutionPolicy(source) {
   const policy = parseRepairConfig(source);
-  requirePolicyValue(policy.enabled === true, "Repair execution is disabled by policy.");
-  requirePolicyValue((policy.execution_mode ?? policy.mode) === "manual", "Repair execution mode must be manual.");
-  if (policy.execution_mode && policy.mode) {
-    requirePolicyValue(policy.execution_mode === policy.mode, "Repair mode and execution_mode must agree.");
-  }
-  requirePolicyValue(policy.maximum_attempts_per_commit === 1, "Exactly one repair attempt per commit is required.");
-  requirePolicyValue(policy.require_plan_artifact === true, "A repair plan artifact is required.");
-  requirePolicyValue(policy.require_expected_head_sha === true, "Expected-head SHA binding is required.");
-  requirePolicyValue(policy.require_same_repository === true, "Same-repository enforcement is required.");
-  requirePolicyValue(policy.require_non_fork === true, "Fork rejection is required.");
-  requirePolicyValue(
-    Number.isFinite(policy.maximum_changed_files) && Number.isInteger(policy.maximum_changed_files)
-      && policy.maximum_changed_files > 0,
-    "maximum_changed_files must be a finite positive integer.",
-  );
-  requirePolicyValue(
-    Number.isFinite(policy.maximum_changed_lines) && Number.isInteger(policy.maximum_changed_lines)
-      && policy.maximum_changed_lines > 0,
-    "maximum_changed_lines must be a finite positive integer.",
-  );
-  requirePolicyValue(
-    Array.isArray(policy.forbidden_paths) && policy.forbidden_paths.length > 0
-      && policy.forbidden_paths.every((path) => typeof path === "string" && path.trim() !== ""),
-    "forbidden_paths must be a non-empty list of non-empty strings.",
-  );
-  requirePolicyValue(policy.auto_merge === false, "auto_merge must remain false.");
-  return policy;
+  return validateRepairPolicy(policy, { requireEnabled: true });
 }
 
 export function validateDispatch({ confirm, prNumber, expectedHeadSha, planRunId }) {
@@ -99,7 +73,27 @@ export function requireOpenAiApiKey(value) {
   if (typeof value !== "string" || value.length === 0) throw new Error("OPENAI_API_KEY is not configured.");
 }
 
-export function validatePullRequest(pull, policy, repository, expectedHeadSha) {
+export function pullRequestPilotContext(pull, { repository, expectedHeadSha, actor, triggeringActor }) {
+  return {
+    repository,
+    prNumber: pull.number,
+    actor,
+    triggeringActor,
+    author: pull.user?.login,
+    state: pull.state,
+    draft: pull.draft,
+    baseBranch: pull.base?.ref,
+    headBranch: pull.head?.ref,
+    baseRepository: pull.base?.repo?.full_name,
+    headRepository: pull.head?.repo?.full_name,
+    isFork: pull.head?.repo?.fork === true || pull.head?.repo?.full_name !== pull.base?.repo?.full_name,
+    labels: (pull.labels ?? []).map((label) => typeof label === "string" ? label : label.name),
+    expectedHeadSha,
+    headSha: pull.head?.sha,
+  };
+}
+
+export function validatePullRequest(pull, policy, repository, expectedHeadSha, actors = {}) {
   if (pull.state !== "open") throw new Error("Pull request is not open.");
   if (pull.head?.sha !== expectedHeadSha) throw new Error("expected_head_sha is stale; the pull request head has changed.");
   const baseRepository = pull.base?.repo?.full_name;
@@ -114,7 +108,9 @@ export function validatePullRequest(pull, policy, repository, expectedHeadSha) {
   if (!pull.head?.ref || pull.head.ref === pull.base?.ref || pull.head.ref === "main") {
     throw new Error("Repair branch must be a non-main PR branch.");
   }
-  return { headBranch: pull.head.ref, headSha: pull.head.sha };
+  const context = pullRequestPilotContext(pull, { repository, expectedHeadSha, ...actors });
+  const pilot = assertPilotGates(policy, context);
+  return { headBranch: pull.head.ref, headSha: pull.head.sha, context, pilotGateResults: pilot.gates };
 }
 
 export function validatePlanArtifact(files, plan, { prNumber, expectedHeadSha }) {
@@ -170,6 +166,7 @@ export function deriveExecutionOutcome(steps) {
   const orderedFailures = [
     ["dispatch", "dispatch-validation", "INVALID_DISPATCH"],
     ["policy", "policy-validation", "POLICY_REJECTED"],
+    ["pilot", "pilot-gate-validation", "PILOT_GATES_REJECTED"],
     ["pull", "pr-and-plan-run-validation", "PR_OR_PLAN_RUN_INVALID"],
     ["download", "plan-artifact-download", "PLAN_ARTIFACT_MISSING"],
     ["plan", "plan-artifact-validation", "PLAN_ARTIFACT_INVALID"],
@@ -191,7 +188,9 @@ export function deriveExecutionOutcome(steps) {
     ["tree", "tree-revalidation", "TREE_REVALIDATION_FAILED"],
     ["fetch_config", "git-config-setup", "GIT_CONFIG_SETUP_FAILED"],
     ["remote", "remote-head-validation", "REMOTE_HEAD_CHANGED"],
+    ["precommit", "pre-commit-gate-revalidation", "PRE_COMMIT_GATES_REJECTED"],
     ["commit", "commit", "COMMIT_FAILED"],
+    ["prepush", "pre-push-gate-revalidation", "PRE_PUSH_GATES_REJECTED"],
     ["push", "push", "PUSH_FAILED"],
   ];
   const failed = orderedFailures.find(([step]) => steps[step] === "failure");
@@ -228,10 +227,29 @@ export function createExecutionReport(values) {
   const planRunId = Number.isInteger(values.planRunId) && values.planRunId > 0 ? values.planRunId : null;
   const attemptKey = prNumber !== null && expectedHeadSha !== null ? `${prNumber}:${expectedHeadSha}` : null;
   return {
+    repository: identifier(values.repository, 200),
+    runId: Number.isInteger(values.runId) && values.runId > 0 ? values.runId : null,
+    runUrl: identifier(values.runUrl, 500),
+    actor: identifier(values.actor, 100),
+    triggeringActor: identifier(values.triggeringActor, 100),
+    prAuthor: identifier(values.prAuthor, 100),
     prNumber,
+    baseBranch: identifier(values.baseBranch, 255),
+    headBranch: identifier(values.headBranch, 255),
+    baseRepository: identifier(values.baseRepository, 200),
+    headRepository: identifier(values.headRepository, 200),
     expectedHeadSha,
+    trustedPolicySha: SHA.test(values.trustedPolicySha ?? "") ? values.trustedPolicySha : null,
+    trustedWorkflowSha: SHA.test(values.trustedWorkflowSha ?? "") ? values.trustedWorkflowSha : null,
     attemptKey,
     planRunId,
+    planDigest: /^[0-9a-f]{64}$/i.test(values.planDigest ?? "") ? values.planDigest : null,
+    pilotGateResults: Array.isArray(values.pilotGateResults)
+      ? values.pilotGateResults.map((item) => ({
+        code: /^[A-Z][A-Z0-9_]*$/.test(item?.code ?? "") ? item.code : "INVALID_GATE",
+        passed: item?.passed === true,
+      }))
+      : [],
     status: values.status,
     phase: redactDiagnostic(values.phase, 100),
     reasonCode: values.reasonCode,
@@ -243,7 +261,7 @@ export function createExecutionReport(values) {
       : null,
     codexStarted: values.codexStarted === true,
     pushPerformed: values.pushPerformed === true,
-    changedFiles: (values.changedFiles ?? []).map((path) => redactDiagnostic(path, 500)),
+    changedFiles: (values.changedFiles ?? []).map((path) => redactDiagnostic(path, 500, { preserveWhitespace: true })),
     tests: Object.fromEntries(Object.entries(values.tests ?? {}).map(([name, result]) => [
       redactDiagnostic(name, 100), redactDiagnostic(result, 100),
     ])),
@@ -253,12 +271,42 @@ export function createExecutionReport(values) {
   };
 }
 
+function identifier(value, maximumLength) {
+  return typeof value === "string" && value.length > 0 && value.length <= maximumLength
+    && !/[\u0000-\u001f\u007f]/.test(value)
+    ? value
+    : null;
+}
+
+function escapeMarkdownInline(value) {
+  return String(value)
+    .replace(/\r\n/g, "\\r\\n")
+    .replace(/\r/g, "\\r")
+    .replace(/\n/g, "\\n")
+    .replace(/\t/g, "\\t")
+    .replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/g, (character) =>
+      `\\u${character.codePointAt(0).toString(16).padStart(4, "0")}`,
+    )
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;")
+    .replace(/([\\`*_[\]{}()#+.!|\-])/g, "\\$1");
+}
+
 export function renderExecutionReport(report) {
-  const files = report.changedFiles.length ? report.changedFiles.map((path) => `- \`${path}\``).join("\n") : "- None";
+  const shown = (value, fallback = "invalid") => value === null || value === undefined
+    ? fallback
+    : escapeMarkdownInline(value);
+  const files = report.changedFiles.length ? report.changedFiles.map((path) => `- ${shown(path)}`).join("\n") : "- None";
   const tests = Object.keys(report.tests).length
-    ? Object.entries(report.tests).map(([name, result]) => `- ${name}: ${result}`).join("\n")
+    ? Object.entries(report.tests).map(([name, result]) => `- ${shown(name)}: ${shown(result)}`).join("\n")
     : "- None recorded";
-  return `# Atlas repair execution report\n\n- PR: ${report.prNumber ?? "invalid"}\n- Expected head SHA: ${report.expectedHeadSha ? `\`${report.expectedHeadSha}\`` : "invalid"}\n- Attempt key: ${report.attemptKey ? `\`${report.attemptKey}\`` : "invalid"}\n- Plan run ID: ${report.planRunId ?? "invalid"}\n- Status: **${report.status}**\n- Phase: ${report.phase}\n- Reason code: \`${report.reasonCode}\`\n- Attempt reserved: ${report.attemptReserved}\n- Attempt tag: ${report.attemptTag ? `\`${report.attemptTag}\`` : "none"}\n- Codex started: ${report.codexStarted}\n- Push performed: ${report.pushPerformed}\n- Started: ${report.startedAt}\n- Finished: ${report.finishedAt}\n- Commit SHA: ${report.commitSha ? `\`${report.commitSha}\`` : "none"}\n\n## Changed files\n\n${files}\n\n## Validation\n\n${tests}\n\n**No merge was performed.**\n`;
+  const gates = report.pilotGateResults.length
+    ? report.pilotGateResults.map((gate) => `- ${shown(gate.code)}: ${gate.passed}`).join("\n")
+    : "- None recorded";
+  return `# Atlas repair execution report\n\n- Repository: ${shown(report.repository)}\n- Run: ${report.runId ?? "invalid"}${report.runUrl ? ` (${shown(report.runUrl)})` : ""}\n- Actor: ${shown(report.actor)}\n- Triggering actor: ${shown(report.triggeringActor)}\n- PR author: ${shown(report.prAuthor)}\n- PR: ${report.prNumber ?? "invalid"}\n- Base: ${shown(report.baseRepository)}:${shown(report.baseBranch)}\n- Head: ${shown(report.headRepository)}:${shown(report.headBranch)}\n- Expected head SHA: ${shown(report.expectedHeadSha)}\n- Trusted policy SHA: ${shown(report.trustedPolicySha)}\n- Trusted workflow SHA: ${shown(report.trustedWorkflowSha)}\n- Attempt key: ${shown(report.attemptKey)}\n- Plan run ID: ${report.planRunId ?? "invalid"}\n- Plan digest: ${shown(report.planDigest)}\n- Status: **${shown(report.status)}**\n- Phase: ${shown(report.phase)}\n- Reason code: ${shown(report.reasonCode)}\n- Attempt reserved: ${report.attemptReserved}\n- Attempt tag: ${shown(report.attemptTag, "none")}\n- Codex started: ${report.codexStarted}\n- Push performed: ${report.pushPerformed}\n- Started: ${shown(report.startedAt)}\n- Finished: ${shown(report.finishedAt)}\n- Commit SHA: ${shown(report.commitSha, "none")}\n\n## Pilot gates\n\n${gates}\n\n## Changed files\n\n${files}\n\n## Validation\n\n${tests}\n\n**No merge was performed.**\n`;
 }
 
 export async function writeExecutionReport(outputDirectory, report) {
