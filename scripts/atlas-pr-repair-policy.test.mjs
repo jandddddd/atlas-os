@@ -14,13 +14,14 @@ const active = {
   pilot_enabled: true,
   pilot_allowed_pr_numbers: [42],
   pilot_allowed_actors: ["operator"],
+  pilot_allowed_triggering_actors: ["trigger-operator"],
   pilot_allowed_authors: ["author"],
 };
 const context = {
   repository: "atlas/atlas-os",
   prNumber: 42,
   actor: "operator",
-  triggeringActor: "operator",
+  triggeringActor: "trigger-operator",
   author: "author",
   state: "open",
   draft: false,
@@ -38,6 +39,12 @@ test("repository policy keeps both repair switches disabled", () => {
   assert.equal(disabled.enabled, false);
   assert.equal(disabled.pilot_enabled, false);
   assert.equal(disabled.auto_merge, false);
+  assert.deepEqual(disabled.pilot_allowed_pr_numbers, []);
+  assert.deepEqual(disabled.pilot_allowed_actors, ["jandddddd"]);
+  assert.deepEqual(disabled.pilot_allowed_triggering_actors, ["jandddddd"]);
+  assert.deepEqual(disabled.pilot_allowed_authors, ["jandddddd"]);
+  assert.deepEqual(disabled.pilot_allowed_head_prefixes, ["pilot/atlas-repair-"]);
+  assert.equal(disabled.pilot_required_label, "atlas-repair-pilot");
   assert.doesNotThrow(() => validatePilotPolicy(disabled));
 });
 
@@ -150,7 +157,7 @@ for (const [name, override, code] of [
   });
 }
 
-for (const key of ["pilot_allowed_pr_numbers", "pilot_allowed_actors", "pilot_allowed_authors", "pilot_allowed_head_prefixes"]) {
+for (const key of ["pilot_allowed_pr_numbers", "pilot_allowed_actors", "pilot_allowed_triggering_actors", "pilot_allowed_authors", "pilot_allowed_head_prefixes"]) {
   test(`active pilot rejects empty ${key}`, () => {
     assert.throws(() => validatePilotPolicy({ ...active, [key]: [] }, { requireEnabled: true }), new RegExp(key));
   });
@@ -158,5 +165,14 @@ for (const key of ["pilot_allowed_pr_numbers", "pilot_allowed_actors", "pilot_al
 
 test("pilot lists reject wildcards and wrong element types", () => {
   assert.throws(() => validatePilotPolicy({ ...active, pilot_allowed_actors: ["*"] }), /wildcards/);
+  assert.throws(() => validatePilotPolicy({ ...active, pilot_allowed_triggering_actors: ["*"] }), /wildcards/);
   assert.throws(() => validatePilotPolicy({ ...active, pilot_allowed_pr_numbers: ["42"] }), /PR numbers/);
+});
+
+test("active pilot requires exactly one allowlisted PR", () => {
+  assert.doesNotThrow(() => validatePilotPolicy(active, { requireEnabled: true }));
+  assert.throws(
+    () => validatePilotPolicy({ ...active, pilot_allowed_pr_numbers: [42, 43] }, { requireEnabled: true }),
+    /exactly one/,
+  );
 });

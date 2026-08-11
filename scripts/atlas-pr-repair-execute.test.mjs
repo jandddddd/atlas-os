@@ -53,8 +53,9 @@ function enabledPolicySource() {
     .replace("  enabled: false", "  enabled: true")
     .replace("  pilot_enabled: false", "  pilot_enabled: true")
     .replace("  pilot_allowed_pr_numbers:", "  pilot_allowed_pr_numbers:\n    - 42")
-    .replace("  pilot_allowed_actors:", "  pilot_allowed_actors:\n    - operator")
-    .replace("  pilot_allowed_authors:", "  pilot_allowed_authors:\n    - author");
+    .replace("  pilot_allowed_triggering_actors:\n    - \"jandddddd\"", "  pilot_allowed_triggering_actors:\n    - \"operator\"")
+    .replace("  pilot_allowed_actors:\n    - \"jandddddd\"", "  pilot_allowed_actors:\n    - \"operator\"")
+    .replace("  pilot_allowed_authors:\n    - \"jandddddd\"", "  pilot_allowed_authors:\n    - \"author\"");
 }
 
 for (const [field, invalidValues] of [

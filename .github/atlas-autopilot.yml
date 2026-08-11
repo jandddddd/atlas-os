@@ -28,7 +28,11 @@ repair:
   pilot_required_label: "atlas-repair-pilot"
   pilot_allowed_pr_numbers:
   pilot_allowed_actors:
+    - "jandddddd"
+  pilot_allowed_triggering_actors:
+    - "jandddddd"
   pilot_allowed_authors:
+    - "jandddddd"
   pilot_allowed_head_prefixes:
     - "pilot/atlas-repair-"
   mode: manual

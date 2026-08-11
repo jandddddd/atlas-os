@@ -52,7 +52,9 @@ Die konkrete, manuell durch eine Repository-Administration einzurichtende Branch
 
 ## Sprint 2E: Vorbereitung eines kontrollierten Repair-Piloten
 
-Sprint 2E ergänzt ausschließlich die deaktivierte technische Vorbereitung eines eng begrenzten Piloten. Neben `repair.enabled` muss `repair.pilot_enabled` ausdrücklich aktiviert werden. Eine spätere Ausführung erfordert außerdem eine exakte PR-, Actor- und Author-Allowlist, ein Pilot-Label, einen erlaubten Head-Branch-Präfix und das GitHub Environment `atlas-repair-pilot`. Wildcards und implizite Freigaben sind nicht zulässig. Im Sprint-2E-Implementierungs-PR bleiben `repair.enabled`, `repair.pilot_enabled` und `repair.auto_merge` auf `false`.
+Sprint 2E ergänzt ausschließlich die deaktivierte technische Vorbereitung eines eng begrenzten Piloten. Neben `repair.enabled` muss `repair.pilot_enabled` ausdrücklich aktiviert werden. Eine spätere Ausführung erfordert außerdem eine exakte Allowlist mit genau einer PR-Nummer sowie getrennte exakte Allowlists für Actor, Triggering Actor und Author, ein Pilot-Label, einen erlaubten Head-Branch-Präfix und das GitHub Environment `atlas-repair-pilot`. Wildcards und implizite Freigaben sind nicht zulässig. Im Sprint-2E-Implementierungs-PR bleiben `repair.enabled`, `repair.pilot_enabled` und `repair.auto_merge` auf `false`.
+
+Sprint 2F bereitet die konkreten Solo-Accountwerte vor, lässt die PR-Allowlist bis zur Erstellung des echten Fixture-PRs leer und hält deshalb beide Repair-Schalter auf `false`. Erst das abschließende Update des Aktivierungs-PRs darf genau die echte Pilot-PR-Nummer ergänzen und beide Schalter aktivieren; `repair.auto_merge` bleibt immer `false`.
 
 Planning und Execution verwenden denselben deterministischen Pilot-Gate-Contract. Ein Plan bleibt als Auditnachweis erzeugbar, wenn der Pilot deaktiviert oder der PR nicht freigegeben ist; `safeToStart` wird aber nur bei vollständig erfüllter Repair- und Pilot-Policy `true`. Execution prüft die Gates erneut beim initialen PR-Laden und unmittelbar vor der Attempt-Reservierung. Der Remote-Head wird zusätzlich vor Commit und Push erneut validiert.
 
