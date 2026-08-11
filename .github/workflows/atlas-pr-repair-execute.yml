@@ -199,8 +199,21 @@ jobs:
 
       - name: Validate repair scope and size
         env:
+          ATLAS_REPAIR_TRUSTED: ${{ runner.temp }}/atlas-repair-trusted
+          ATLAS_REPAIR_MODULE_ROOT: ${{ runner.temp }}/atlas-repair-trusted
+          ATLAS_REPAIR_POLICY: ${{ runner.temp }}/atlas-repair-trusted/atlas-autopilot.yml
+          ATLAS_REPAIR_PLAN: ${{ runner.temp }}/atlas-validated-plan.json
           ATLAS_REPAIR_CHANGED_FILES: ${{ runner.temp }}/atlas-repair-changed-files.json
-        run: node scripts/atlas-pr-repair-tree-check.mjs
+        run: node "$RUNNER_TEMP/atlas-repair-trusted/atlas-pr-repair-tree-check.mjs"
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --include-workspace-root
 
       - name: Unit tests
         run: npm run test:unit
@@ -223,14 +236,33 @@ jobs:
           ATLAS_REPAIR_CHANGED_FILES: ${{ runner.temp }}/atlas-repair-changed-files.json
         run: node "$RUNNER_TEMP/atlas-repair-trusted/atlas-pr-repair-tree-check.mjs"
 
+      - name: Prepare trusted Git config for remote revalidation
+        env:
+          GIT_CONFIG_GLOBAL: /dev/null
+          GIT_CONFIG_NOSYSTEM: "1"
+        run: |
+          test -d .git
+          test ! -L .git
+          trusted_config="$(mktemp "$RUNNER_TEMP/atlas-repair-fetch-git-config.XXXXXX")"
+          git config --file "$trusted_config" core.repositoryFormatVersion 0
+          git config --file "$trusted_config" core.fileMode true
+          git config --file "$trusted_config" core.bare false
+          rm -f .git/config
+          install -m 600 "$trusted_config" .git/config
+
       - name: Revalidate remote head before commit
         env:
           HEAD_BRANCH: ${{ steps.pull.outputs.head-branch }}
           EXPECTED_HEAD_SHA: ${{ inputs.expected_head_sha }}
           GITHUB_TOKEN: ${{ github.token }}
+          GIT_CONFIG_GLOBAL: /dev/null
+          GIT_CONFIG_NOSYSTEM: "1"
         run: |
-          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GITHUB_TOKEN" | base64 -w0)" \
-            fetch --no-tags origin "refs/heads/$HEAD_BRANCH:refs/remotes/origin/atlas-repair-target"
+          git -c core.hooksPath=/dev/null \
+            -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GITHUB_TOKEN" | base64 -w0)" \
+            fetch --no-tags "https://github.com/${GITHUB_REPOSITORY}.git" \
+            "refs/heads/$HEAD_BRANCH:refs/remotes/origin/atlas-repair-target"
+          unset GITHUB_TOKEN
           test "$(git rev-parse refs/remotes/origin/atlas-repair-target)" = "$EXPECTED_HEAD_SHA"
 
       - name: Commit approved repair

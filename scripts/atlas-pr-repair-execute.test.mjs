@@ -152,6 +152,43 @@ test("post-validation generated forbidden file prevents commit", () => {
   assert.ok(workflow.indexOf("Revalidate complete repair tree after tests") < workflow.indexOf("name: Commit approved repair"));
 });
 
+test("initial scope validation uses the preserved trusted tree checker", () => {
+  const scopeCheck = workflow.slice(
+    workflow.indexOf("name: Validate repair scope and size"),
+    workflow.indexOf("name: Unit tests"),
+  );
+  assert.match(scopeCheck, /ATLAS_REPAIR_TRUSTED: \$\{\{ runner\.temp \}\}\/atlas-repair-trusted/);
+  assert.match(scopeCheck, /ATLAS_REPAIR_MODULE_ROOT: \$\{\{ runner\.temp \}\}\/atlas-repair-trusted/);
+  assert.match(scopeCheck, /run: node "\$RUNNER_TEMP\/atlas-repair-trusted\/atlas-pr-repair-tree-check\.mjs"/);
+  assert.doesNotMatch(scopeCheck, /run: node scripts\/atlas-pr-repair-tree-check\.mjs/);
+});
+
+test("workflow installs the same trusted Node dependencies as CI before validation commands", () => {
+  const setup = workflow.indexOf("name: Setup Node.js");
+  const install = workflow.indexOf("name: Install dependencies");
+  const unit = workflow.indexOf("name: Unit tests");
+  assert.ok(setup > 0 && install > setup && unit > install);
+  assert.match(workflow.slice(setup, unit), /uses: actions\/setup-node@v4[\s\S]*node-version: 24[\s\S]*cache: npm/);
+  assert.match(workflow.slice(install, unit), /run: npm ci --include-workspace-root/);
+});
+
+test("credentialed fetch uses only isolated trusted Git configuration", () => {
+  const fetchSecurity = workflow.slice(
+    workflow.indexOf("name: Prepare trusted Git config for remote revalidation"),
+    workflow.indexOf("name: Commit approved repair"),
+  );
+  const fetchStep = fetchSecurity.slice(fetchSecurity.indexOf("name: Revalidate remote head before commit"));
+  assert.match(fetchSecurity, /GIT_CONFIG_GLOBAL: \/dev\/null/);
+  assert.match(fetchSecurity, /GIT_CONFIG_NOSYSTEM: "1"/);
+  assert.match(fetchSecurity, /trusted_config="\$\(mktemp "\$RUNNER_TEMP\/atlas-repair-fetch-git-config\.XXXXXX"\)"/);
+  assert.match(fetchSecurity, /rm -f \.git\/config\n\s+install -m 600 "\$trusted_config" \.git\/config/);
+  assert.doesNotMatch(fetchSecurity.slice(0, fetchSecurity.indexOf("name: Revalidate remote head before commit")), /GITHUB_TOKEN/);
+  assert.match(fetchStep, /GITHUB_TOKEN: \$\{\{ github\.token \}\}/);
+  assert.match(fetchStep, /git -c core\.hooksPath=\/dev\/null \\\n[\s\S]*fetch --no-tags "https:\/\/github\.com\/\$\{GITHUB_REPOSITORY\}\.git"/);
+  assert.doesNotMatch(fetchStep, /fetch --no-tags origin/);
+  assert.match(fetchStep, /unset GITHUB_TOKEN/);
+});
+
 test("size limits prevent push", () => {
   assert.throws(() => validateChangedFiles({ files: ["scripts/example.mjs"], additions: 501, deletions: 0 }, plan, policy), /line limit/);
   const files = Array.from({ length: 11 }, (_, index) => `scripts/${index}.mjs`);
