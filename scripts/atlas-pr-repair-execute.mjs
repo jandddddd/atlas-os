@@ -272,20 +272,34 @@ export function createExecutionReport(values) {
 }
 
 function identifier(value, maximumLength) {
-  return typeof value === "string" && /^[A-Za-z0-9_./:@-]+$/.test(value) && value.length <= maximumLength
+  return typeof value === "string" && value.length > 0 && value.length <= maximumLength
+    && !/[\u0000-\u001f\u007f]/.test(value)
     ? value
     : null;
 }
 
+function escapeMarkdownInline(value) {
+  return String(value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;")
+    .replace(/([\\`*_[\]{}()#+.!|\-])/g, "\\$1");
+}
+
 export function renderExecutionReport(report) {
-  const files = report.changedFiles.length ? report.changedFiles.map((path) => `- \`${path}\``).join("\n") : "- None";
+  const shown = (value, fallback = "invalid") => value === null || value === undefined
+    ? fallback
+    : escapeMarkdownInline(value);
+  const files = report.changedFiles.length ? report.changedFiles.map((path) => `- ${shown(path)}`).join("\n") : "- None";
   const tests = Object.keys(report.tests).length
-    ? Object.entries(report.tests).map(([name, result]) => `- ${name}: ${result}`).join("\n")
+    ? Object.entries(report.tests).map(([name, result]) => `- ${shown(name)}: ${shown(result)}`).join("\n")
     : "- None recorded";
   const gates = report.pilotGateResults.length
-    ? report.pilotGateResults.map((gate) => `- ${gate.code}: ${gate.passed}`).join("\n")
+    ? report.pilotGateResults.map((gate) => `- ${shown(gate.code)}: ${gate.passed}`).join("\n")
     : "- None recorded";
-  return `# Atlas repair execution report\n\n- Repository: ${report.repository ?? "invalid"}\n- Run: ${report.runId ?? "invalid"}${report.runUrl ? ` (${report.runUrl})` : ""}\n- Actor: ${report.actor ?? "invalid"}\n- Triggering actor: ${report.triggeringActor ?? "invalid"}\n- PR author: ${report.prAuthor ?? "invalid"}\n- PR: ${report.prNumber ?? "invalid"}\n- Base: ${report.baseRepository ?? "invalid"}:${report.baseBranch ?? "invalid"}\n- Head: ${report.headRepository ?? "invalid"}:${report.headBranch ?? "invalid"}\n- Expected head SHA: ${report.expectedHeadSha ? `\`${report.expectedHeadSha}\`` : "invalid"}\n- Trusted policy SHA: ${report.trustedPolicySha ?? "invalid"}\n- Trusted workflow SHA: ${report.trustedWorkflowSha ?? "invalid"}\n- Attempt key: ${report.attemptKey ? `\`${report.attemptKey}\`` : "invalid"}\n- Plan run ID: ${report.planRunId ?? "invalid"}\n- Plan digest: ${report.planDigest ?? "invalid"}\n- Status: **${report.status}**\n- Phase: ${report.phase}\n- Reason code: \`${report.reasonCode}\`\n- Attempt reserved: ${report.attemptReserved}\n- Attempt tag: ${report.attemptTag ? `\`${report.attemptTag}\`` : "none"}\n- Codex started: ${report.codexStarted}\n- Push performed: ${report.pushPerformed}\n- Started: ${report.startedAt}\n- Finished: ${report.finishedAt}\n- Commit SHA: ${report.commitSha ? `\`${report.commitSha}\`` : "none"}\n\n## Pilot gates\n\n${gates}\n\n## Changed files\n\n${files}\n\n## Validation\n\n${tests}\n\n**No merge was performed.**\n`;
+  return `# Atlas repair execution report\n\n- Repository: ${shown(report.repository)}\n- Run: ${report.runId ?? "invalid"}${report.runUrl ? ` (${shown(report.runUrl)})` : ""}\n- Actor: ${shown(report.actor)}\n- Triggering actor: ${shown(report.triggeringActor)}\n- PR author: ${shown(report.prAuthor)}\n- PR: ${report.prNumber ?? "invalid"}\n- Base: ${shown(report.baseRepository)}:${shown(report.baseBranch)}\n- Head: ${shown(report.headRepository)}:${shown(report.headBranch)}\n- Expected head SHA: ${shown(report.expectedHeadSha)}\n- Trusted policy SHA: ${shown(report.trustedPolicySha)}\n- Trusted workflow SHA: ${shown(report.trustedWorkflowSha)}\n- Attempt key: ${shown(report.attemptKey)}\n- Plan run ID: ${report.planRunId ?? "invalid"}\n- Plan digest: ${shown(report.planDigest)}\n- Status: **${shown(report.status)}**\n- Phase: ${shown(report.phase)}\n- Reason code: ${shown(report.reasonCode)}\n- Attempt reserved: ${report.attemptReserved}\n- Attempt tag: ${shown(report.attemptTag, "none")}\n- Codex started: ${report.codexStarted}\n- Push performed: ${report.pushPerformed}\n- Started: ${shown(report.startedAt)}\n- Finished: ${shown(report.finishedAt)}\n- Commit SHA: ${shown(report.commitSha, "none")}\n\n## Pilot gates\n\n${gates}\n\n## Changed files\n\n${files}\n\n## Validation\n\n${tests}\n\n**No merge was performed.**\n`;
 }
 
 export async function writeExecutionReport(outputDirectory, report) {

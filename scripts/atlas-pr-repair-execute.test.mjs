@@ -351,6 +351,53 @@ test("execution report redacts secrets and records no merge", () => {
   assert.deepEqual(report.pilotGateResults, [{ code: "PR_ALLOWLISTED", passed: true }]);
 });
 
+function executionAuditValues(overrides = {}) {
+  return {
+    repository: "atlas/atlas-os", runId: 99, runUrl: "https://github.com/atlas/atlas-os/actions/runs/99",
+    actor: "operator", triggeringActor: "operator", prAuthor: "normal-user",
+    baseBranch: "main", headBranch: "pilot/atlas-repair-normal",
+    baseRepository: "atlas/atlas-os", headRepository: "atlas/atlas-os",
+    prNumber: 42, expectedHeadSha: sha, planRunId: 7,
+    status: "FAILED", phase: "pre-push-gate-revalidation", reasonCode: "PRE_PUSH_GATES_REJECTED",
+    attemptReserved: true, attemptTag: `atlas-repair-attempt/42-${sha}`,
+    codexStarted: true, pushPerformed: false,
+    startedAt: "2026-01-01T00:00:00Z", finishedAt: "2026-01-01T00:01:00Z",
+    ...overrides,
+  };
+}
+
+for (const branch of [
+  "pilot/atlas-repair-(parentheses)",
+  'pilot/atlas-repair-quote"branch',
+  "pilot/atlas-repair-key=value",
+  "pilot/atlas-repair-normal",
+]) {
+  test(`audit preserves bounded GitHub branch identifier ${branch}`, () => {
+    assert.equal(createExecutionReport(executionAuditValues({ headBranch: branch })).headBranch, branch);
+  });
+}
+
+test("audit preserves bounded bot and normal author identifiers", () => {
+  assert.equal(createExecutionReport(executionAuditValues({ prAuthor: "dependabot[bot]" })).prAuthor, "dependabot[bot]");
+  assert.equal(createExecutionReport(executionAuditValues({ prAuthor: "normal-user" })).prAuthor, "normal-user");
+});
+
+test("audit rejects overlong or control-character identifiers", () => {
+  assert.equal(createExecutionReport(executionAuditValues({ headBranch: "x".repeat(256) })).headBranch, null);
+  assert.equal(createExecutionReport(executionAuditValues({ prAuthor: "bot\nforged" })).prAuthor, null);
+});
+
+test("Markdown escapes identifier presentation without changing audit data", () => {
+  const branch = 'pilot/atlas-repair-(quoted)="value"';
+  const report = createExecutionReport(executionAuditValues({ headBranch: branch, prAuthor: "dependabot[bot]" }));
+  const markdown = renderExecutionReport(report);
+  assert.equal(report.headBranch, branch);
+  assert.equal(report.prAuthor, "dependabot[bot]");
+  assert.match(markdown, /dependabot\\\[bot\\\]/);
+  assert.match(markdown, /pilot\/atlas\\-repair\\-\\\(quoted\\\)=&quot;value&quot;/);
+  assert.doesNotMatch(markdown, /dependabot\[bot\]|\(quoted\)="value"/);
+});
+
 test("execution report rejects free-form statuses and reason codes", () => {
   const values = {
     prNumber: 42, expectedHeadSha: sha, planRunId: 7, status: "FAILED", phase: "codex",
