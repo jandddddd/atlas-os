@@ -49,11 +49,12 @@ function stringList(policy, key, { nonEmpty = true } = {}) {
   return value;
 }
 
-function integerList(policy, key, { nonEmpty = true } = {}) {
+function integerList(policy, key, { nonEmpty = true, exactlyOne = false } = {}) {
   const value = policy[key];
   if (!Array.isArray(value) || (nonEmpty && value.length === 0)
+      || (exactlyOne && value.length !== 1)
       || value.some((item) => !Number.isInteger(item) || item < 1)) {
-    throw new Error(`${key} must be ${nonEmpty ? "a non-empty" : "an"} list of positive PR numbers.`);
+    throw new Error(`${key} must be ${exactlyOne ? "a list containing exactly one" : nonEmpty ? "a non-empty list of" : "a list of"} positive PR numbers.`);
   }
   return value;
 }
@@ -65,8 +66,9 @@ export function validatePilotPolicy(policy, { requireEnabled = false } = {}) {
     throw new Error("pilot_required_label must be one exact non-empty label without wildcards.");
   }
   const active = requireEnabled || policy.pilot_enabled === true;
-  integerList(policy, "pilot_allowed_pr_numbers", { nonEmpty: active });
+  integerList(policy, "pilot_allowed_pr_numbers", { nonEmpty: active, exactlyOne: active });
   stringList(policy, "pilot_allowed_actors", { nonEmpty: active });
+  stringList(policy, "pilot_allowed_triggering_actors", { nonEmpty: active });
   stringList(policy, "pilot_allowed_authors", { nonEmpty: active });
   stringList(policy, "pilot_allowed_head_prefixes", { nonEmpty: active });
   if (requireEnabled && policy.pilot_enabled !== true) throw new Error("Repair pilot execution is disabled by policy.");
@@ -112,7 +114,7 @@ export function evaluatePilotGates(policy, context) {
     gate("PILOT_ENABLED", policy.pilot_enabled === true),
     gate("PR_ALLOWLISTED", policy.pilot_allowed_pr_numbers.includes(context.prNumber)),
     gate("ACTOR_ALLOWLISTED", policy.pilot_allowed_actors.includes(context.actor)),
-    gate("TRIGGERING_ACTOR_ALLOWLISTED", policy.pilot_allowed_actors.includes(context.triggeringActor)),
+    gate("TRIGGERING_ACTOR_ALLOWLISTED", policy.pilot_allowed_triggering_actors.includes(context.triggeringActor)),
     gate("AUTHOR_ALLOWLISTED", policy.pilot_allowed_authors.includes(context.author)),
     gate("PR_OPEN", context.state === "open"),
     gate("PR_NOT_DRAFT", context.draft === false),
