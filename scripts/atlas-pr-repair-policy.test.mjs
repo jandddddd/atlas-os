@@ -36,6 +36,7 @@ const context = {
 };
 
 test("repository policy keeps the completed repair pilot disabled", () => {
+  assert.match(source, /^auto_merge: false$/m);
   assert.equal(configuredPilot.enabled, false);
   assert.equal(configuredPilot.pilot_enabled, false);
   assert.equal(configuredPilot.auto_merge, false);
@@ -46,6 +47,17 @@ test("repository policy keeps the completed repair pilot disabled", () => {
   assert.deepEqual(configuredPilot.pilot_allowed_head_prefixes, ["pilot/atlas-repair-"]);
   assert.equal(configuredPilot.pilot_required_label, "atlas-repair-pilot");
   assert.doesNotThrow(() => validatePilotPolicy(configuredPilot));
+});
+
+test("active-pilot behavior is isolated in an explicit test fixture", () => {
+  assert.equal(configuredPilot.enabled, false);
+  assert.equal(configuredPilot.pilot_enabled, false);
+  assert.equal(active.enabled, true);
+  assert.equal(active.pilot_enabled, true);
+  assert.deepEqual(active.pilot_allowed_pr_numbers, [43]);
+  assert.deepEqual(active.pilot_allowed_actors, ["jandddddd"]);
+  assert.deepEqual(active.pilot_allowed_triggering_actors, ["jandddddd"]);
+  assert.deepEqual(active.pilot_allowed_authors, ["jandddddd"]);
 });
 
 test("activation PR 42 is not allowlisted", () => {

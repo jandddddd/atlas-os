@@ -21,6 +21,8 @@ import { parseRepairConfig } from "./atlas-pr-repair-plan.mjs";
 const policySource = readFileSync(new URL("../.github/atlas-autopilot.yml", import.meta.url), "utf8");
 const workflow = readFileSync(new URL("../.github/workflows/atlas-pr-repair-execute.yml", import.meta.url), "utf8");
 const planningWorkflow = readFileSync(new URL("../.github/workflows/atlas-pr-repair.yml", import.meta.url), "utf8");
+const supervisorWorkflow = readFileSync(new URL("../.github/workflows/atlas-pr-supervisor.yml", import.meta.url), "utf8");
+const ciWorkflow = readFileSync(new URL("../.github/workflows/ci.yml", import.meta.url), "utf8");
 const policy = parseRepairConfig(policySource);
 const sha = "a".repeat(40);
 const repository = "atlas/atlas-os";
@@ -52,6 +54,18 @@ test("repository repair policy is disabled after the pilot", () => {
   assert.deepEqual(policy.pilot_allowed_actors, []);
   assert.deepEqual(policy.pilot_allowed_triggering_actors, []);
   assert.deepEqual(policy.pilot_allowed_authors, []);
+});
+
+test("official GitHub actions use Node 24 majors without changing workflow scope", () => {
+  const workflows = [ciWorkflow, supervisorWorkflow, planningWorkflow, workflow].join("\n");
+  assert.doesNotMatch(workflows, /actions\/(?:checkout|setup-node)@v4|actions\/github-script@v7|actions\/(?:upload|download)-artifact@v4/);
+  assert.match(workflows, /actions\/checkout@v5/);
+  assert.match(workflows, /actions\/setup-node@v5/);
+  assert.match(workflows, /actions\/github-script@v8/);
+  assert.match(workflows, /actions\/upload-artifact@v6/);
+  assert.match(workflows, /actions\/download-artifact@v6/);
+  assert.match(workflow, /^on:\n  workflow_dispatch:/m);
+  assert.match(planningWorkflow, /^on:\n  workflow_dispatch:/m);
 });
 
 function enabledPolicySource() {
@@ -177,7 +191,7 @@ test("workflow installs the same trusted Node dependencies as CI before validati
   const install = workflow.indexOf("name: Install dependencies");
   const unit = workflow.indexOf("name: Unit tests");
   assert.ok(setup > 0 && install > setup && unit > install);
-  assert.match(workflow.slice(setup, unit), /uses: actions\/setup-node@v4[\s\S]*node-version: 24[\s\S]*cache: npm/);
+  assert.match(workflow.slice(setup, unit), /uses: actions\/setup-node@v5[\s\S]*node-version: 24[\s\S]*cache: npm/);
   assert.match(workflow.slice(install, unit), /run: npm ci --include-workspace-root/);
 });
 

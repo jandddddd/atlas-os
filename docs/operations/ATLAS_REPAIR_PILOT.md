@@ -1,5 +1,29 @@
 # Kontrollierter Atlas-Repair-Pilot
 
+## Post-Pilot-Betriebsbaseline
+
+Der kontrollierte Pilot war erfolgreich, weil genau ein manuell geplanter und separat über das Environment `atlas-repair-pilot` freigegebener Execute-Lauf den bekannten Fixture-Fehler auf dem bestehenden PR-Branch mit genau einem Repair-Commit behob. Der Lauf reservierte den Versuch dauerhaft für den ursprünglichen Head-SHA, erzeugte keinen Retry, keinen neuen Branch und keinen neuen PR und führte keinen Merge aus.
+
+Als Nachweis werden der erfolgreiche Plan-Run mit `repair-plan.json` und `repair-plan.md`, der Attempt-Tag `atlas-repair-attempt/<pr-number>-<full-head-sha>`, der Execute-Run samt Job Summary sowie `repair-execution-report.json` und `repair-execution-report.md` erwartet. Der Execution-Report muss insbesondere `PUSHED`, den reservierten Versuch, genau den Repair-Commit, `pushPerformed: true`, `mergePerformed: false`, die Plan-Bindung und alle bestandenen Pilot-Gates ausweisen. Der Commit und das Audit belegen eine erfolgreiche Reparatur; erst ein eigenständiger Merge-Commit beziehungsweise der GitHub-PR-Zustand `merged` würde einen abgeschlossenen Merge belegen.
+
+Nach dem automatisierten Repair-Push muss `CI / verify` vollständig für den neuen Head-SHA laufen und erfolgreich sein. Branch-Protection kann frühere PR-Approvals bei einem Push verwerfen; dann ist die verlangte menschliche Approval erneut einzuholen. Die einmalige Environment-Approval autorisiert nur den konkreten Execute-Job und ersetzt weder PR-Review noch CI oder Mergefreigabe. Es gibt keinen automatischen Merge und der Pilot-PR bleibt nach erfolgreicher Reparatur offen, bis Menschen separat über ihn entscheiden.
+
+Unmittelbar nach dem Lauf wird Repair über den geschützten normalen PR-Prozess deaktiviert. Der erwartete eingecheckte Endzustand lautet:
+
+```yaml
+auto_merge: false
+repair:
+  enabled: false
+  pilot_enabled: false
+  pilot_allowed_pr_numbers:
+  pilot_allowed_actors:
+  pilot_allowed_triggering_actors:
+  pilot_allowed_authors:
+  auto_merge: false
+```
+
+Die leeren Listen werden als `[]` geparst. Der weiterhin enge Head-Präfix ist keine aktive Identitäts- oder PR-Freigabe; bei deaktivierten Schaltern kann kein Execute-Lauf die Policy-Gates passieren. Repair darf nach dem Pilot weder für Prüfzwecke reaktiviert noch automatisch ausgelöst werden.
+
 ## Sprint-2F-Aktivierung für den Fixture-PR
 
 Der separate Fixture-Pilot existiert als PR #43 auf `pilot/atlas-repair-fixture`. Sein absichtlich fehlerhafter Head ist `8abcdacf1ba75f10267da4abec2db9af36af8791`. Der Sprint-2F-Aktivierungs-PR #42 schaltet die Policy ausschließlich für diesen Pilot-PR frei:
