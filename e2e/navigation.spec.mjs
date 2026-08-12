@@ -7,6 +7,27 @@ const visitTitle = "Besichtigung Weber als nächsten Schritt einplanen";
 const visitOverviewTitle = "Besichtigung Weber einordnen";
 const measurementTitle = "Fehlendes Maß vor der nächsten Einschätzung kennzeichnen";
 const measurementOverviewTitle = "Fehlendes Maß kennzeichnen";
+const inboxAnalysisFixture = {
+  customer: {
+    name: "Unbekannt",
+  },
+  project: {
+    trade: "Malerarbeiten",
+    service: "Wohnzimmer, Esszimmer und Flur streichen",
+    estimatedArea: 75,
+  },
+  workflow: {
+    priority: "normal",
+    confidence: 0.82,
+    nextAction: "Angebotsentwurf vorbereiten",
+  },
+  nextSteps: ["Besichtigung oder Bildmaterial anfordern"],
+  missingInformation: ["Bilder", "genaue Raummaße"],
+  recommendedTask: {
+    type: "offer",
+    title: "Angebotsentwurf Familie Schneider vorbereiten",
+  },
+};
 
 async function resetTodayState(context) {
   await context.clearCookies();
@@ -59,27 +80,7 @@ test.beforeEach(async ({ context, page }) => {
       status: 200,
       contentType: "application/json",
       body: JSON.stringify({
-        analysis: {
-          customer: {
-            name: "Unbekannt",
-          },
-          project: {
-            trade: "Malerarbeiten",
-            service: "Wohnzimmer, Esszimmer und Flur streichen",
-            estimatedArea: 75,
-          },
-          workflow: {
-            priority: "normal",
-            confidence: 0.82,
-            nextAction: "Angebotsentwurf vorbereiten",
-          },
-          nextSteps: ["Besichtigung oder Bildmaterial anfordern"],
-          missingInformation: ["Bilder", "genaue Raummaße"],
-          recommendedTask: {
-            type: "offer",
-            title: "Angebotsentwurf Familie Schneider vorbereiten",
-          },
-        },
+        analysis: inboxAnalysisFixture,
       }),
     });
   });
@@ -767,6 +768,67 @@ test("Inbox analysiert eine gültige Anfrage ohne optionalen Ort", async ({ page
 
   expect(request.postDataJSON().inquiry).not.toContain("Ort:");
   await expect(page.getByRole("heading", { name: "Analyse abgeschlossen" })).toBeVisible();
+});
+
+test("Eine wiederhergestellte Analyse benötigt vor der Angebotserstellung eine neue Analyse", async ({ page }) => {
+  await page.addInitScript((analysis) => {
+    window.localStorage.setItem("atlas-inquiry-analysis", JSON.stringify(analysis));
+  }, inboxAnalysisFixture);
+  await page.goto("/inbox");
+
+  const offerButton = page.getByRole("button", { name: "Angebotsentwurf erstellen" });
+  await expect(page.getByRole("heading", { name: "Analyse abgeschlossen" })).toBeVisible();
+  await expect(page.getByRole("status")).toContainText(
+    "Diese Analyse wurde aus dem letzten Vorgang wiederhergestellt.",
+  );
+  await expect(offerButton).toBeDisabled();
+
+  await fillInboxInquiry(page, {
+    customer: "Familie Anders",
+    location: "Ludwigshafen",
+    message: "Bitte die Fassade neu streichen.",
+  });
+  await expect(offerButton).toBeDisabled();
+
+  await page.getByRole("button", { name: "Analyse erneut starten" }).click();
+  await expect(page.getByRole("heading", { name: "Analyse abgeschlossen" })).toBeVisible();
+  await expect(offerButton).toBeEnabled();
+
+  const offerRequestPromise = page.waitForRequest("**/api/generate-offer");
+  await offerButton.click();
+  const offerRequest = await offerRequestPromise;
+  expect(offerRequest.postDataJSON().inquiry).toBe([
+    "Kunde/Kontakt: Familie Anders",
+    "Ort: Ludwigshafen",
+    "Kundenanfrage:",
+    "Bitte die Fassade neu streichen.",
+  ].join("\n"));
+});
+
+test("Die Angebotserstellung bleibt an die exakt analysierte Anfrage gebunden", async ({ page }) => {
+  await page.goto("/inbox");
+  await fillInboxInquiry(page, {
+    customer: "Familie König",
+    location: "Speyer",
+    message: "Bitte das Treppenhaus streichen.",
+  });
+  await page.getByRole("button", { name: "Anfrage analysieren" }).click();
+  await expect(page.getByRole("heading", { name: "Analyse abgeschlossen" })).toBeVisible();
+
+  await page.getByLabel("Kunde oder Kontakt").fill("Familie Nachträglich");
+  await page.getByLabel("Ort (optional)").fill("Mannheim");
+  await page.getByLabel("Kundenanfrage").fill("Eine andere Anfrage.");
+
+  const offerRequestPromise = page.waitForRequest("**/api/generate-offer");
+  await page.getByRole("button", { name: "Angebotsentwurf erstellen" }).click();
+  const offerRequest = await offerRequestPromise;
+
+  expect(offerRequest.postDataJSON().inquiry).toBe([
+    "Kunde/Kontakt: Familie König",
+    "Ort: Speyer",
+    "Kundenanfrage:",
+    "Bitte das Treppenhaus streichen.",
+  ].join("\n"));
 });
 
 test("Inbox bewahrt die bestehenden Analyse- und Angebotsverträge im lokalen Speicher", async ({ page }) => {

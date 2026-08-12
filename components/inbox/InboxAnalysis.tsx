@@ -29,7 +29,10 @@ export function InboxAnalysis() {
   const workflowVersion = useRef(0);
   const customerInputRef = useRef<HTMLInputElement>(null);
   const messageInputRef = useRef<HTMLTextAreaElement>(null);
-  const submittedInquiry = useRef("");
+  const [analysisSource, setAnalysisSource] = useState<
+    "none" | "restored" | "current"
+  >("none");
+  const [analysisInquiry, setAnalysisInquiry] = useState<string | null>(null);
   const [intake, setIntake] = useState<InquiryIntake>({
     customer: "",
     location: "",
@@ -60,6 +63,7 @@ export function InboxAnalysis() {
 
       if (savedAnalysis) {
         setAnalysis(savedAnalysis);
+        setAnalysisSource("restored");
         setStatus("completed");
       }
 
@@ -95,10 +99,11 @@ export function InboxAnalysis() {
     }
 
     const inquiry = composeInquiry(intake);
-    submittedInquiry.current = inquiry;
 
     try {
       setStatus("analyzing");
+      setAnalysisSource("none");
+      setAnalysisInquiry(null);
       setAnalysisError("");
       setResetError("");
       setOffer(null);
@@ -124,6 +129,8 @@ export function InboxAnalysis() {
       }
 
       setAnalysis(data.analysis);
+      setAnalysisSource("current");
+      setAnalysisInquiry(inquiry);
       saveInquiryAnalysis(data.analysis);
       setStatus("completed");
     } catch (error) {
@@ -137,19 +144,7 @@ export function InboxAnalysis() {
   }
 
   async function generateOffer() {
-    if (!analysis) return;
-    const inquiry = submittedInquiry.current || composeInquiry(intake);
-
-    if (
-      !submittedInquiry.current &&
-      Object.keys(validateInquiryIntake(intake)).length > 0
-    ) {
-      setOfferError(
-        "Bitte die Kontaktdaten und Kundenanfrage ergänzen, bevor ein Angebotsentwurf erstellt wird.",
-      );
-      setOfferStatus("error");
-      return;
-    }
+    if (!analysis || analysisSource !== "current" || !analysisInquiry) return;
 
     const currentWorkflowVersion = workflowVersion.current;
 
@@ -160,7 +155,7 @@ export function InboxAnalysis() {
       const response = await fetch("/api/generate-offer", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ inquiry, analysis }),
+        body: JSON.stringify({ inquiry: analysisInquiry, analysis }),
       });
       const data = await response.json();
 
@@ -227,7 +222,8 @@ export function InboxAnalysis() {
       setOfferError("");
       setEditableOffer(null);
       setLastSavedAt(null);
-      submittedInquiry.current = "";
+      setAnalysisSource("none");
+      setAnalysisInquiry(null);
     }
   }
 
@@ -304,6 +300,7 @@ export function InboxAnalysis() {
       <div className="mt-8 space-y-6">
         <AnalysisResultView
           analysis={analysis}
+          isOfferGenerationBlocked={analysisSource !== "current"}
           offerStatus={offerStatus}
           onGenerateOffer={generateOffer}
           onRestartAnalysis={() => void startAnalysis()}
