@@ -8,8 +8,10 @@ import { fileURLToPath } from "node:url";
 
 import {
   createRepairPlan,
+  evaluateAutomaticPlanEligibility,
   parseRepairConfig,
   renderRepairPlanMarkdown,
+  repairStateFingerprint,
   validateExpectedHeadSha,
   writeRepairPlanArtifacts,
 } from "./atlas-pr-repair-plan.mjs";
@@ -17,6 +19,7 @@ import {
 const policySource = readFileSync(new URL("../.github/atlas-autopilot.yml", import.meta.url), "utf8");
 const policy = parseRepairConfig(policySource);
 const workflow = readFileSync(new URL("../.github/workflows/atlas-pr-repair.yml", import.meta.url), "utf8");
+const supervisorWorkflow = readFileSync(new URL("../.github/workflows/atlas-pr-supervisor.yml", import.meta.url), "utf8");
 const sha = "a".repeat(40);
 
 test("repair modules can be imported without a CLI argv entry", () => {
@@ -32,14 +35,17 @@ test("repair modules can be imported without a CLI argv entry", () => {
 });
 
 const repairable = {
+  repository: "atlas/atlas-os",
   prNumber: 42,
+  state: "open",
+  draft: false,
   baseBranch: "main",
   headBranch: "feature/fix",
   headSha: sha,
   headRepository: "atlas/atlas-os",
   baseRepository: "atlas/atlas-os",
   isFork: false,
-  labels: ["atlas-repair"],
+  labels: ["atlas-autopilot", "atlas-repair"],
   files: ["scripts/example.mjs"],
   changedFiles: 1,
   additions: 10,
@@ -48,11 +54,59 @@ const repairable = {
   reviewThreads: [],
   supervisor: { status: "BLOCKED", reasons: ["CI failed"] },
   blockReasons: ["required_check_failed"],
+  supervisorObservedHeadSha: sha,
+  autopilotRequiredLabel: "atlas-autopilot",
 };
 
 function plan(overrides = {}) {
   return createRepairPlan({ ...repairable, ...overrides }, policy);
 }
+
+function automatic(overrides = {}) {
+  return evaluateAutomaticPlanEligibility({ ...repairable, ...overrides }, policy);
+}
+
+test("eligible blocked PR produces an automatic read-only plan", () => {
+  assert.deepEqual(automatic(), { eligible: true, reasons: [] });
+  const result = plan({ triggerSource: "automatic", trustedWorkflowSha: "b".repeat(40) });
+  assert.equal(result.triggerSource, "automatic");
+  assert.equal(result.planningMode, "NON_EXECUTING_READ_ONLY");
+  assert.equal(result.attemptReserved, false);
+  assert.equal(result.repairExecuted, false);
+  assert.equal(result.safeToStart, false);
+  assert.equal(result.trustedWorkflowSha, "b".repeat(40));
+});
+
+for (const [name, overrides, reason] of [
+  ["successful/ready PR", { supervisor: { status: "POLICY_READY", reasons: [] }, blockReasons: [] }, "SUPERVISOR_NOT_BLOCKED"],
+  ["draft PR", { draft: true }, "PR_DRAFT"],
+  ["closed PR", { state: "closed" }, "PR_NOT_OPEN"],
+  ["fork PR", { isFork: true, headRepository: "fork/atlas-os" }, "FORK_PR"],
+  ["wrong base", { baseBranch: "release" }, "BASE_NOT_ALLOWED"],
+  ["stale head", { supervisorObservedHeadSha: "b".repeat(40) }, "HEAD_SHA_STALE"],
+  ["forbidden path", { files: [".github/workflows/rogue.yml"] }, "FORBIDDEN_PATH"],
+  ["P1 finding", { reviewThreads: [{ priority: "P1", resolved: false }] }, "BLOCKING_REVIEW_FINDING"],
+  ["P2 finding", { reviewThreads: [{ priority: "P2", resolved: false }] }, "BLOCKING_REVIEW_FINDING"],
+  ["missing repair label", { labels: ["atlas-autopilot"] }, "REPAIR_LABEL_MISSING"],
+  ["missing autopilot label", { labels: ["atlas-repair"] }, "AUTOPILOT_LABEL_MISSING"],
+]) {
+  test(`automatic planning rejects ${name}`, () => {
+    const result = automatic(overrides);
+    assert.equal(result.eligible, false);
+    assert.ok(result.reasons.includes(reason));
+  });
+}
+
+test("Supervisor state fingerprint is deterministic and state-sensitive", () => {
+  assert.equal(
+    repairStateFingerprint({ status: "BLOCKED", reasons: ["b", "a"] }),
+    repairStateFingerprint({ status: "BLOCKED", reasons: ["a", "b"] }),
+  );
+  assert.notEqual(
+    repairStateFingerprint({ status: "BLOCKED", reasons: ["a"] }),
+    repairStateFingerprint({ status: "BLOCKED", reasons: ["b"] }),
+  );
+});
 
 test("repair plan direct CLI execution still works", () => {
   const scriptPath = fileURLToPath(new URL("./atlas-pr-repair-plan.mjs", import.meta.url));
@@ -174,18 +228,56 @@ for (const [status, overrides] of [
   });
 }
 
-test("workflow is manual, read-only, trusted-main planning only", () => {
-  assert.match(workflow, /^on:\n  workflow_dispatch:/m);
+test("workflow keeps manual dispatch and adds only completed-Supervisor automatic planning", () => {
+  assert.match(workflow, /^on:\n(?:.|\n)*?  workflow_dispatch:/m);
+  assert.match(workflow, /workflow_run:\n\s+workflows: \[Atlas PR Supervisor\]\n\s+types: \[completed\]/);
   assert.doesNotMatch(workflow, /pull_request_target:|pull_request:|schedule:/);
   assert.match(workflow, /contents: read\n  pull-requests: read\n  checks: read\n  actions: read/);
-  assert.match(workflow, /ref: main/);
+  assert.match(workflow, /ref: \$\{\{ steps\.trigger\.outputs\.trusted-workflow-sha \|\| 'main' \}\}/);
   assert.match(workflow, /persist-credentials: false/);
   assert.doesNotMatch(workflow, /OPENAI_API_KEY|codex|openai|git push|contents: write|pull-requests: write|issues: write/iu);
+  assert.match(workflow, /listArtifactsForRepo/);
+  assert.match(workflow, /atlas-auto-repair-plan-pr-/);
+  assert.match(workflow, /create-plan", "false"/);
+});
+
+test("Supervisor and Plan use the same shared multi-ref check collector", () => {
+  for (const source of [supervisorWorkflow, workflow]) {
+    assert.match(source, /collectPullRequestCheckRuns/);
+    assert.match(source, /pull\.merge_commit_sha|collectPullRequestCheckRuns/);
+    assert.match(source, /ref: `pull\/\$\{number\}\/merge`/);
+    assert.match(source, /checkFacts\(rawChecks, workflowNames/);
+  }
+  assert.doesNotMatch(workflow, /deduplicateCheckRuns\(await github\.paginate/);
+});
+
+test("automatic planning executes and audits the exact Supervisor trusted SHA", () => {
+  const download = workflow.indexOf("name: Download trusted Supervisor observation");
+  const resolve = workflow.indexOf("name: Resolve manual or automatic trigger binding");
+  const checkout = workflow.indexOf("name: Checkout exact trusted planning code");
+  const verify = workflow.indexOf("name: Verify exact trusted checkout");
+  const collect = workflow.indexOf("name: Collect bounded pull request diagnostics");
+  assert.ok(download >= 0 && download < resolve && resolve < checkout && checkout < verify && verify < collect);
+  assert.match(workflow, /EXPECTED_TRUSTED_SHA: \$\{\{ steps\.trigger\.outputs\.trusted-workflow-sha \}\}/);
+  assert.match(workflow, /actual_sha="\$\(git rev-parse HEAD\)"/);
+  assert.match(workflow, /\[ "\$actual_sha" != "\$EXPECTED_TRUSTED_SHA" \]/);
+  assert.match(workflow, /TRUSTED_WORKFLOW_SHA: \$\{\{ steps\.trusted\.outputs\.sha \}\}/);
+  assert.match(workflow, /ref: \$\{\{ steps\.trigger\.outputs\.trusted-workflow-sha \|\| 'main' \}\}/);
+});
+
+test("missing or mismatched automatic trusted SHA fails closed before policy execution", () => {
+  const checkout = workflow.indexOf("name: Checkout exact trusted planning code");
+  const verify = workflow.indexOf("name: Verify exact trusted checkout");
+  const evaluate = workflow.indexOf("name: Evaluate supervisor facts from trusted code");
+  assert.ok(checkout >= 0 && checkout < verify && verify < evaluate);
+  assert.match(workflow, /!\/\^\[0-9a-f\]\{40\}\$\/i\.test\(observation\.trustedWorkflowSha\)/);
+  assert.match(workflow, /exit 1/);
+  assert.doesNotMatch(workflow.slice(0, verify), /scripts\/atlas-pr-(?:supervisor|repair)/);
 });
 
 test("workflow uploads exactly the two repair plan files for seven days", () => {
   assert.match(workflow, /uses: actions\/upload-artifact@v6/);
-  assert.match(workflow, /name: atlas-repair-plan-pr-\$\{\{ steps\.pull\.outputs\.number \}\}-\$\{\{ steps\.pull\.outputs\.short-head-sha \}\}/);
+  assert.match(workflow, /format\('atlas-repair-plan-pr-\{0\}-\{1\}'/);
   const upload = workflow.slice(workflow.indexOf("name: Upload repair plan artifact"));
   const paths = [...upload.matchAll(/\$\{\{ runner\.temp \}\}\/atlas-repair-plan\/(repair-plan\.(?:json|md))/g)].map((match) => match[1]);
   assert.deepEqual(paths, ["repair-plan.json", "repair-plan.md"]);

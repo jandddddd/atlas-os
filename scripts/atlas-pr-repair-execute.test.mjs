@@ -65,7 +65,8 @@ test("official GitHub actions use Node 24 majors without changing workflow scope
   assert.match(workflows, /actions\/upload-artifact@v6/);
   assert.match(workflows, /actions\/download-artifact@v6/);
   assert.match(workflow, /^on:\n  workflow_dispatch:/m);
-  assert.match(planningWorkflow, /^on:\n  workflow_dispatch:/m);
+  assert.match(planningWorkflow, /^on:\n(?:.|\n)*?  workflow_dispatch:/m);
+  assert.match(planningWorkflow, /workflow_run:\n\s+workflows: \[Atlas PR Supervisor\]/);
 });
 
 function enabledPolicySource() {
@@ -109,6 +110,12 @@ test("trusted plan workflow accepts GitHub workflow ref suffix", () => {
   assert.equal(isTrustedRepairPlanWorkflowPath(".github/workflows/atlas-pr-repair.yml"), true);
   assert.equal(isTrustedRepairPlanWorkflowPath(".github/workflows/atlas-pr-repair.yml@main"), true);
   assert.equal(isTrustedRepairPlanWorkflowPath(".github/workflows/other.yml@main"), false);
+});
+
+test("automatic plan runs cannot be used for Repair Execution", () => {
+  assert.match(workflow, /if \(run\.event !== "workflow_dispatch"/);
+  assert.match(workflow, /^on:\n  workflow_dispatch:/m);
+  assert.doesNotMatch(workflow, /workflow_run:|repository_dispatch:|schedule:/);
 });
 
 test("missing OPENAI_API_KEY blocks", () => {

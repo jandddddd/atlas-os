@@ -1,5 +1,17 @@
 # Kontrollierter Atlas-Repair-Pilot
 
+## Sprint-2H-Betrieb: automatische Read-only-Pläne
+
+Nach einem erfolgreich abgeschlossenen regulären `Atlas PR Supervisor`-Lauf kann `Atlas PR Repair Plan` automatisch einen Diagnoseplan erzeugen. Der automatische Pfad ist ausschließlich Planung: keine Environment-Freigabe, keine Secrets, kein Codex, kein Attempt-Tag, kein Commit, kein Push, kein Execute-Dispatch, kein PR und kein Merge. Seine Token-Rechte sind `contents: read`, `pull-requests: read`, `checks: read` und `actions: read`.
+
+Vor der Erzeugung müssen Operatoren keine Freigabe erteilen. Der Workflow prüft jedoch fail-closed: regulärer Supervisor-Quelllauf mit PR-Zuordnung, identisches Repository, offen, kein Draft, kein Fork, Base exakt `main`, aktueller Head exakt gleich dem vom Supervisor beobachteten SHA, Supervisor `BLOCKED` mit erlaubtem Repair-Grund, Labels `atlas-autopilot` und `atlas-repair`, keine Never-run-Labels, keine offenen P1/P2-Findings, keine verbotenen Pfade und eingehaltene Datei-/Zeilenlimits. Ein nicht erfülltes Gate erzeugt kein Planartefakt.
+
+Vor der Reevaluation checkt der automatische Pfad exakt den in der Supervisor-Beobachtung gespeicherten trusted SHA aus und verifiziert den tatsächlichen Git-`HEAD`; ein inzwischen fortgeschrittenes `main`, ein nicht verfügbarer SHA oder jede Abweichung führt nicht zur Ausführung von Policy-/Planungscode. Supervisor und Plan sammeln Checks identisch von Head-SHA, `merge_commit_sha` und dem verfügbaren PR-Merge-Ref und deduplizieren sie über dieselbe gemeinsame Funktion. Dadurch bleibt insbesondere `CI / verify` am Merge-SHA in beiden Bewertungen sichtbar.
+
+Für denselben PR-Head laufen Planungen nicht parallel. Ein automatischer Artefaktname aus PR, Head und stabilem Supervisor-State-Fingerprint unterdrückt einen bereits vollständig erzeugten Plan desselben Zustands; Wiederholungsschleifen gibt es nicht. Nach einem Head-Wechsel ist jeder alte Plan stale und nur informativ. Der manuelle Repair-Plan-Dispatch mit `REPAIR` bleibt weiterhin verfügbar.
+
+Jeder automatische Plan muss `NON_EXECUTING_READ_ONLY`, `triggerSource: automatic`, Repository, PR, exakten Head, Supervisor-Quelle, vertrauenswürdigen Workflow-SHA sowie `attemptReserved: false` und `repairExecuted: false` ausweisen. Das Artefakt ist keine Autorisierung für Reparatur oder Merge. Execution bleibt separat, manuell und aufgrund der eingecheckten deaktivierten Repair-/Pilot-Policy blockiert.
+
 ## Post-Pilot-Betriebsbaseline
 
 Der kontrollierte Pilot war erfolgreich, weil genau ein manuell geplanter und separat über das Environment `atlas-repair-pilot` freigegebener Execute-Lauf den bekannten Fixture-Fehler auf dem bestehenden PR-Branch mit genau einem Repair-Commit behob. Der Lauf reservierte den Versuch dauerhaft für den ursprünglichen Head-SHA, erzeugte keinen Retry, keinen neuen Branch und keinen neuen PR und führte keinen Merge aus.

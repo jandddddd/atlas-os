@@ -27,6 +27,38 @@ export function deduplicateCheckRuns(checkRuns) {
   return [...uniqueChecks.values()];
 }
 
+export async function collectPullRequestCheckRuns({
+  pull,
+  pullNumber,
+  listChecksForRef,
+  getMergeRef,
+  onMissingMergeRef = () => {},
+}) {
+  const checkRefs = new Set([pull.head.sha]);
+  if (pull.merge_commit_sha) checkRefs.add(pull.merge_commit_sha);
+  try {
+    const mergeRefSha = await getMergeRef(pullNumber);
+    if (mergeRefSha) checkRefs.add(mergeRefSha);
+  } catch (error) {
+    if (error?.status !== 404) throw error;
+    onMissingMergeRef();
+  }
+  const runs = (await Promise.all([...checkRefs].map((ref) => listChecksForRef(ref)))).flat();
+  return deduplicateCheckRuns(runs);
+}
+
+export function checkFacts(checkRuns, workflowNames, excludedRunIds = new Set()) {
+  return checkRuns.flatMap((check) => {
+    const runId = check.details_url?.match(/\/actions\/runs\/(\d+)/)?.[1];
+    if (runId && excludedRunIds.has(runId)) return [];
+    return [{
+      name: normalizeCheckName(runId ? workflowNames.get(runId) : "", check.name),
+      status: check.status,
+      conclusion: check.conclusion,
+    }];
+  });
+}
+
 export function normalizeCheckName(workflowName, checkName) {
   const workflow = String(workflowName ?? "").trim();
   const job = String(checkName ?? "").trim();
