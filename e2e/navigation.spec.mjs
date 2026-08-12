@@ -28,6 +28,24 @@ const inboxAnalysisFixture = {
     title: "Angebotsentwurf Familie Schneider vorbereiten",
   },
 };
+const inboxOfferFixture = {
+  customerName: "Unbekannt",
+  title: "Angebotsentwurf Familie Schneider",
+  projectSummary: "Streichen von Wohnzimmer, Esszimmer und Flur auf Basis der Kundenanfrage.",
+  positions: [
+    {
+      id: 1,
+      description: "Malerarbeiten in den angefragten Räumen",
+      quantity: 0,
+      unit: "noch zu ermitteln",
+      notes: "Exakte Mengen und Untergründe müssen vor Ort oder anhand belastbarer Bilder geprüft werden.",
+    },
+  ],
+  assumptions: ["Die genannte Fläche beschreibt die Raumfläche, nicht automatisch Wand- oder Deckenflächen."],
+  missingInformation: ["Bilder", "genaue Raummaße"],
+  recommendedNextStep: "Besichtigung oder Bild- und Maßmaterial anfordern.",
+  status: "draft",
+};
 
 async function resetTodayState(context) {
   await context.clearCookies();
@@ -90,24 +108,7 @@ test.beforeEach(async ({ context, page }) => {
       status: 200,
       contentType: "application/json",
       body: JSON.stringify({
-        offer: {
-          customerName: "Unbekannt",
-          title: "Angebotsentwurf Familie Schneider",
-          projectSummary: "Streichen von Wohnzimmer, Esszimmer und Flur auf Basis der Kundenanfrage.",
-          positions: [
-            {
-              id: 1,
-              description: "Malerarbeiten in den angefragten Räumen",
-              quantity: 0,
-              unit: "noch zu ermitteln",
-              notes: "Exakte Mengen und Untergründe müssen vor Ort oder anhand belastbarer Bilder geprüft werden.",
-            },
-          ],
-          assumptions: ["Die genannte Fläche beschreibt die Raumfläche, nicht automatisch Wand- oder Deckenflächen."],
-          missingInformation: ["Bilder", "genaue Raummaße"],
-          recommendedNextStep: "Besichtigung oder Bild- und Maßmaterial anfordern.",
-          status: "draft",
-        },
+        offer: inboxOfferFixture,
       }),
     });
   });
@@ -829,6 +830,123 @@ test("Die Angebotserstellung bleibt an die exakt analysierte Anfrage gebunden", 
     "Kundenanfrage:",
     "Bitte das Treppenhaus streichen.",
   ].join("\n"));
+});
+
+test("Eine erfolgreiche Ersatzanalyse entfernt den alten Angebotsentwurf dauerhaft", async ({ page }) => {
+  await page.goto("/");
+  await page.evaluate(({ analysis, offer }) => {
+    window.localStorage.setItem("atlas-inquiry-analysis", JSON.stringify(analysis));
+    window.localStorage.setItem("atlas-editable-offer", JSON.stringify(offer));
+  }, { analysis: inboxAnalysisFixture, offer: inboxOfferFixture });
+  await page.goto("/inbox");
+
+  await expect(page.getByText("Angebotsentwurf Familie Schneider", { exact: true })).toBeVisible();
+  await fillInboxInquiry(page, {
+    customer: "Familie B",
+    location: "Heidelberg",
+    message: "Bitte das Schlafzimmer streichen.",
+  });
+  await page.getByRole("button", { name: "Analyse erneut starten" }).click();
+  await expect(page.getByRole("heading", { name: "Analyse abgeschlossen" })).toBeVisible();
+  await expect(page.getByText("Angebotsentwurf Familie Schneider", { exact: true })).toHaveCount(0);
+  await expect.poll(
+    () => page.evaluate(() => window.localStorage.getItem("atlas-editable-offer")),
+  ).toBeNull();
+
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "Analyse abgeschlossen" })).toBeVisible();
+  await expect(page.getByText("Angebotsentwurf Familie Schneider", { exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Angebotsentwurf erstellen" })).toBeDisabled();
+});
+
+test("Eine fehlgeschlagene Ersatzanalyse erhält den vorherigen persistenten Vorgang", async ({ page }) => {
+  await page.goto("/");
+  await page.evaluate(({ analysis, offer }) => {
+    window.localStorage.setItem("atlas-inquiry-analysis", JSON.stringify(analysis));
+    window.localStorage.setItem("atlas-editable-offer", JSON.stringify(offer));
+  }, { analysis: inboxAnalysisFixture, offer: inboxOfferFixture });
+  await page.route("**/api/analyze-inquiry", async (route) => {
+    await route.fulfill({
+      status: 500,
+      contentType: "application/json",
+      body: JSON.stringify({ error: "Analyse B fehlgeschlagen." }),
+    });
+  });
+  await page.goto("/inbox");
+  await fillInboxInquiry(page, {
+    customer: "Familie B",
+    message: "Bitte das Schlafzimmer streichen.",
+  });
+  await page.getByRole("button", { name: "Analyse erneut starten" }).click();
+  await expect(page.getByText("Analyse B fehlgeschlagen.")).toBeVisible();
+
+  const storedWorkflow = await page.evaluate(() => ({
+    analysis: JSON.parse(window.localStorage.getItem("atlas-inquiry-analysis") ?? "null"),
+    offer: JSON.parse(window.localStorage.getItem("atlas-editable-offer") ?? "null"),
+  }));
+  expect(storedWorkflow.analysis).toEqual(inboxAnalysisFixture);
+  expect(storedWorkflow.offer).toEqual(inboxOfferFixture);
+});
+
+test("Eine ausstehende Angebot-Antwort bleibt nach Start der Analyse B wirkungslos", async ({ page }) => {
+  let releaseOfferA;
+  let offerAFulfilled = false;
+  let offerRequestCount = 0;
+  await page.route("**/api/generate-offer", async (route) => {
+    offerRequestCount += 1;
+    if (offerRequestCount === 1) {
+      await new Promise((resolve) => {
+        releaseOfferA = resolve;
+      });
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ offer: inboxOfferFixture }),
+      });
+      offerAFulfilled = true;
+      return;
+    }
+
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        offer: {
+          ...inboxOfferFixture,
+          title: "Angebotsentwurf B",
+          projectSummary: "Anfrage B",
+        },
+      }),
+    });
+  });
+  await page.goto("/inbox");
+  await fillInboxInquiry(page, {
+    customer: "Familie A",
+    message: "Anfrage A",
+  });
+  await page.getByRole("button", { name: "Anfrage analysieren" }).click();
+  await expect(page.getByRole("heading", { name: "Analyse abgeschlossen" })).toBeVisible();
+  await page.getByRole("button", { name: "Angebotsentwurf erstellen" }).click();
+  await expect.poll(() => typeof releaseOfferA).toBe("function");
+
+  await page.getByLabel("Kunde oder Kontakt").fill("Familie B");
+  await page.getByLabel("Kundenanfrage").fill("Anfrage B");
+  await page.getByRole("button", { name: "Analyse erneut starten" }).click();
+  await expect(page.getByRole("heading", { name: "Analyse abgeschlossen" })).toBeVisible();
+  releaseOfferA();
+  await expect.poll(() => offerAFulfilled).toBe(true);
+  await expect(page.getByText("Angebotsentwurf Familie Schneider", { exact: true })).toHaveCount(0);
+  await expect.poll(
+    () => page.evaluate(() => window.localStorage.getItem("atlas-editable-offer")),
+  ).toBeNull();
+
+  await page.getByRole("button", { name: "Angebotsentwurf erstellen" }).click();
+  await expect(page.getByText("Angebotsentwurf B", { exact: true })).toBeVisible();
+  await expect.poll(
+    () => page.evaluate(() => JSON.parse(
+      window.localStorage.getItem("atlas-editable-offer") ?? "null",
+    )?.title),
+  ).toBe("Angebotsentwurf B");
 });
 
 test("Inbox bewahrt die bestehenden Analyse- und Angebotsverträge im lokalen Speicher", async ({ page }) => {

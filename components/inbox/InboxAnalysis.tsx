@@ -12,6 +12,7 @@ import { AnalysisResultView } from "./AnalysisResultView";
 import { OfferDraftView } from "./OfferDraftView";
 import type { AnalysisResult, OfferDraft, OfferStatus } from "./types";
 import {
+  clearOfferDraft,
   clearInboxWorkflow,
   loadInquiryAnalysis,
   loadOfferDraft,
@@ -99,6 +100,7 @@ export function InboxAnalysis() {
     }
 
     const inquiry = composeInquiry(intake);
+    workflowVersion.current += 1;
 
     try {
       setStatus("analyzing");
@@ -106,7 +108,6 @@ export function InboxAnalysis() {
       setAnalysisInquiry(null);
       setAnalysisError("");
       setResetError("");
-      setOffer(null);
       setOfferStatus("idle");
 
       const response = await fetch("/api/analyze-inquiry", {
@@ -131,6 +132,13 @@ export function InboxAnalysis() {
       setAnalysis(data.analysis);
       setAnalysisSource("current");
       setAnalysisInquiry(inquiry);
+      setIsEditingOffer(false);
+      setOffer(null);
+      setOfferStatus("idle");
+      setOfferError("");
+      setEditableOffer(null);
+      setLastSavedAt(null);
+      clearOfferDraft();
       saveInquiryAnalysis(data.analysis);
       setStatus("completed");
     } catch (error) {
