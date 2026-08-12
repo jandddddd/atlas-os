@@ -1,4 +1,4 @@
-import { Inbox, Mail, MapPin, UserRound } from "lucide-react";
+import { Inbox } from "lucide-react";
 
 import { InboxAnalysis } from "@/components/inbox/InboxAnalysis";
 
@@ -22,58 +22,7 @@ export default function InboxPage() {
           </div>
         </div>
 
-        <section className="mt-10 rounded-2xl border bg-white p-8">
-          <div className="grid gap-4 sm:grid-cols-3">
-            <div className="rounded-xl bg-neutral-50 p-5">
-              <UserRound className="h-5 w-5 text-neutral-700" />
-
-              <p className="mt-4 text-sm text-neutral-500">
-                Kunde
-              </p>
-
-              <p className="mt-1 font-medium">
-                Familie Schneider
-              </p>
-            </div>
-
-            <div className="rounded-xl bg-neutral-50 p-5">
-              <Mail className="h-5 w-5 text-neutral-700" />
-
-              <p className="mt-4 text-sm text-neutral-500">
-                Eingang
-              </p>
-
-              <p className="mt-1 font-medium">
-                E-Mail
-              </p>
-            </div>
-
-            <div className="rounded-xl bg-neutral-50 p-5">
-              <MapPin className="h-5 w-5 text-neutral-700" />
-
-              <p className="mt-4 text-sm text-neutral-500">
-                Ort
-              </p>
-
-              <p className="mt-1 font-medium">
-                Mannheim
-              </p>
-            </div>
-          </div>
-
-          <div className="mt-8">
-            <p className="text-sm font-medium text-neutral-500">
-              Nachricht
-            </p>
-
-            <div className="mt-3 rounded-xl border bg-neutral-50 p-6 leading-7 text-neutral-700">
-              Guten Tag, wir möchten unser Wohnzimmer, Esszimmer und den
-              Flur streichen lassen. Die Räume sind zusammen ungefähr
-              75 Quadratmeter groß. Könnten Sie uns bitte ein Angebot
-              erstellen? Bilder können wir gerne nachreichen.
-            </div>
-          </div>
-
+        <section className="mt-10 rounded-2xl border bg-white p-5 sm:p-8">
           <InboxAnalysis />
         </section>
       </div>

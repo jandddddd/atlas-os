@@ -119,6 +119,19 @@ export function saveOfferDraft(offer: OfferDraft) {
   saveStoredValue(OFFER_DRAFT_KEY, offer);
 }
 
+export function clearOfferDraft() {
+  if (typeof window === "undefined") return;
+
+  try {
+    window.localStorage.removeItem(OFFER_DRAFT_KEY);
+  } catch (error) {
+    console.error(
+      "Gespeicherter Atlas-Angebotsentwurf konnte nicht gelöscht werden:",
+      error,
+    );
+  }
+}
+
 export function clearInboxWorkflow() {
   if (typeof window === "undefined") return;
 

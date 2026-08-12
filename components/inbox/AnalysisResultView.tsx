@@ -4,6 +4,7 @@ import type { AnalysisResult, OfferStatus } from "./types";
 
 type AnalysisResultViewProps = {
   analysis: AnalysisResult;
+  isOfferGenerationBlocked: boolean;
   offerStatus: OfferStatus;
   onGenerateOffer: () => void;
   onRestartAnalysis: () => void;
@@ -11,6 +12,7 @@ type AnalysisResultViewProps = {
 
 export function AnalysisResultView({
   analysis,
+  isOfferGenerationBlocked,
   offerStatus,
   onGenerateOffer,
   onRestartAnalysis,
@@ -100,11 +102,30 @@ export function AnalysisResultView({
         </div>
       )}
 
+      {isOfferGenerationBlocked ? (
+        <p
+          id="restored-analysis-offer-warning"
+          role="status"
+          className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900"
+        >
+          Diese Analyse wurde aus dem letzten Vorgang wiederhergestellt. Bitte
+          analysiere die aktuelle Kundenanfrage erneut, bevor du einen
+          Angebotsentwurf erstellst.
+        </p>
+      ) : null}
+
       <div className="mt-6 flex flex-wrap gap-3">
         <button
           type="button"
           onClick={onGenerateOffer}
-          disabled={offerStatus === "generating"}
+          aria-describedby={
+            isOfferGenerationBlocked
+              ? "restored-analysis-offer-warning"
+              : undefined
+          }
+          disabled={
+            isOfferGenerationBlocked || offerStatus === "generating"
+          }
           className="inline-flex items-center gap-2 rounded-xl bg-neutral-900 px-6 py-3 font-medium text-white transition hover:bg-neutral-700 disabled:cursor-not-allowed disabled:opacity-50"
         >
           <FileText className="h-5 w-5" />
