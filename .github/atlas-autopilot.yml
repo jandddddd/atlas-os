@@ -23,17 +23,13 @@ never_merge_labels:
 auto_merge: false
 
 repair:
-  enabled: true
-  pilot_enabled: true
+  enabled: false
+  pilot_enabled: false
   pilot_required_label: "atlas-repair-pilot"
   pilot_allowed_pr_numbers:
-    - 43
   pilot_allowed_actors:
-    - "jandddddd"
   pilot_allowed_triggering_actors:
-    - "jandddddd"
   pilot_allowed_authors:
-    - "jandddddd"
   pilot_allowed_head_prefixes:
     - "pilot/atlas-repair-"
   mode: manual
