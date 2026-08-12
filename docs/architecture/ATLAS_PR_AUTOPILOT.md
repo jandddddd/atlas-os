@@ -6,6 +6,12 @@ Der Atlas PR Autopilot soll Pull Requests schrittweise von einer nachvollziehbar
 
 Der Supervisor liefert immer einen strukturierten Zustand (`POLICY_READY`, `WAITING` oder `BLOCKED`), begründende Meldungen und das Feld `supervisorPolicySatisfied`. `POLICY_READY` bedeutet ausschließlich, dass die deterministische Atlas-Supervisor-Policy erfüllt ist. Der Zustand ist keine formale Mergefreigabe und trifft keine Aussage darüber, ob GitHub-Reviews, Required Checks oder Branch Protection erfüllt sind. Der PR-Kommentar ist die für Menschen lesbare Zusammenfassung; GitHub-Regeln und menschliche Freigabe bleiben maßgeblich.
 
+## Automatisierungsgrenze nach dem kontrollierten Pilot
+
+Sprint 2G friert den erfolgreichen Pilot als deaktivierte Betriebsbaseline ein. Eine spätere Ausbaustufe darf höchstens die automatische, rein lesende Erzeugung eines Repair-Plans für eng begrenzte PRs prüfen. Eine solche Planung muss weiterhin an einen konkreten Head-SHA gebunden sein und darf weder Code ausführen noch schreiben.
+
+Repair Execution bleibt manuell ausgelöst, über das separate Environment bewusst freigegeben und auf einen zuvor geprüften Plan beschränkt. Automatische Execution, Retry-Schleifen und Auto-Merge bleiben außerhalb der freigegebenen Architektur. Ein erfolgreicher Repair-Push ist nur ein neuer PR-Head und keine Mergefreigabe; CI, gegebenenfalls erneute Approval und ein separater menschlicher Merge-Entschluss bleiben erforderlich.
+
 ## Sprint 1: Dry-Run
 
 Sprint 1 implementiert nur die Bewertungsstufe. Der Supervisor prüft PR-Status, Base-Branch, Labels, Check Runs, Merge-Konflikte, offene priorisierte Review-Threads, Größenlimits und verbotene Pfade. Laufende oder noch nicht vorhandene Pflicht-Checks führen zu `WAITING`; Fehler und Policy-Verstöße führen zu `BLOCKED`. Nur ein nach der Supervisor-Policy vollständig grüner PR wird als `POLICY_READY` gemeldet.

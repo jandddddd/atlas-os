@@ -38,7 +38,7 @@ jobs:
     steps:
       - name: Checkout trusted main branch
         id: trusted-checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           ref: main
           fetch-depth: 1
@@ -94,7 +94,7 @@ jobs:
 
       - name: Validate PR and pilot gates
         id: pilot
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         env:
           PR_NUMBER: ${{ inputs.pr_number }}
           EXPECTED_HEAD_SHA: ${{ inputs.expected_head_sha }}
@@ -135,7 +135,7 @@ jobs:
 
       - name: Validate plan workflow run and attempt availability
         id: pull
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         env:
           PR_NUMBER: ${{ inputs.pr_number }}
           EXPECTED_HEAD_SHA: ${{ inputs.expected_head_sha }}
@@ -170,7 +170,7 @@ jobs:
 
       - name: Download bound repair plan artifact
         id: download
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v6
         with:
           name: ${{ steps.pull.outputs.plan-artifact }}
           path: ${{ runner.temp }}/atlas-repair-plan
@@ -213,7 +213,7 @@ jobs:
 
       - name: Checkout the exact PR head for repair
         id: checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           ref: ${{ steps.pull.outputs.head-sha }}
           fetch-depth: 0
@@ -230,7 +230,7 @@ jobs:
 
       - name: Revalidate PR head immediately before repair
         id: head
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         env:
           PR_NUMBER: ${{ inputs.pr_number }}
           EXPECTED_HEAD_SHA: ${{ inputs.expected_head_sha }}
@@ -265,7 +265,7 @@ jobs:
 
       - name: Reserve the single repair attempt
         id: reserve
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         env:
           PR_NUMBER: ${{ inputs.pr_number }}
           EXPECTED_HEAD_SHA: ${{ inputs.expected_head_sha }}
@@ -328,7 +328,7 @@ jobs:
 
       - name: Setup Node.js
         id: setup
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: 24
           cache: npm
@@ -396,7 +396,7 @@ jobs:
 
       - name: Revalidate current pilot gates before commit
         id: precommit
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         env:
           PR_NUMBER: ${{ inputs.pr_number }}
           EXPECTED_HEAD_SHA: ${{ inputs.expected_head_sha }}
@@ -440,7 +440,7 @@ jobs:
 
       - name: Revalidate current pilot gates before push
         id: prepush
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         env:
           PR_NUMBER: ${{ inputs.pr_number }}
           EXPECTED_HEAD_SHA: ${{ inputs.expected_head_sha }}
@@ -588,7 +588,7 @@ jobs:
 
       - name: Upload read-only execution audit
         if: always() && steps.audit.outcome == 'success'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: atlas-repair-execution-report-run-${{ github.run_id }}
           path: |

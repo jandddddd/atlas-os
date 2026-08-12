@@ -184,7 +184,7 @@ test("workflow is manual, read-only, trusted-main planning only", () => {
 });
 
 test("workflow uploads exactly the two repair plan files for seven days", () => {
-  assert.match(workflow, /uses: actions\/upload-artifact@v4/);
+  assert.match(workflow, /uses: actions\/upload-artifact@v6/);
   assert.match(workflow, /name: atlas-repair-plan-pr-\$\{\{ steps\.pull\.outputs\.number \}\}-\$\{\{ steps\.pull\.outputs\.short-head-sha \}\}/);
   const upload = workflow.slice(workflow.indexOf("name: Upload repair plan artifact"));
   const paths = [...upload.matchAll(/\$\{\{ runner\.temp \}\}\/atlas-repair-plan\/(repair-plan\.(?:json|md))/g)].map((match) => match[1]);

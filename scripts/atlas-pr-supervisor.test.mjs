@@ -176,7 +176,7 @@ test("Supervisor-Kommentar grenzt Policy-Bereitschaft von formaler Mergefreigabe
 });
 
 test("Workflow checkt den Base-SHA vor dem absoluten Supervisor-Import aus", () => {
-  const checkoutIndex = workflow.indexOf("uses: actions/checkout@v4");
+  const checkoutIndex = workflow.indexOf("uses: actions/checkout@v5");
   const debugIndex = workflow.indexOf("ls -la scripts");
   const importIndex = workflow.indexOf("pathToFileURL(`${process.env.GITHUB_WORKSPACE}/scripts/atlas-pr-supervisor.mjs`).href");
   assert.ok(checkoutIndex >= 0 && checkoutIndex < debugIndex && debugIndex < importIndex);
