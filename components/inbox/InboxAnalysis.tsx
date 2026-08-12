@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { ScanSearch, Sparkles, TriangleAlert } from "lucide-react";
 
 import {
@@ -18,16 +18,24 @@ import {
   saveInquiryAnalysis,
   saveOfferDraft,
 } from "@/lib/storage/inbox-storage";
-
-const inquiry = `
-Guten Tag, wir möchten unser Wohnzimmer, Esszimmer und den Flur
-streichen lassen. Die Räume sind zusammen ungefähr 75 Quadratmeter
-groß. Könnten Sie uns bitte ein Angebot erstellen?
-Bilder können wir gerne nachreichen.
-`.trim();
+import {
+  composeInquiry,
+  validateInquiryIntake,
+  type InquiryIntake,
+  type InquiryIntakeErrors,
+} from "@/lib/inbox/inquiry-intake";
 
 export function InboxAnalysis() {
   const workflowVersion = useRef(0);
+  const customerInputRef = useRef<HTMLInputElement>(null);
+  const messageInputRef = useRef<HTMLTextAreaElement>(null);
+  const submittedInquiry = useRef("");
+  const [intake, setIntake] = useState<InquiryIntake>({
+    customer: "",
+    location: "",
+    message: "",
+  });
+  const [intakeErrors, setIntakeErrors] = useState<InquiryIntakeErrors>({});
   const [isEditingOffer, setIsEditingOffer] = useState(false);
   const [status, setStatus] = useState<
     "idle" | "analyzing" | "completed" | "error"
@@ -67,7 +75,28 @@ export function InboxAnalysis() {
     };
   }, []);
 
-  async function startAnalysis() {
+  function updateIntake(field: keyof InquiryIntake, value: string) {
+    setIntake((current) => ({ ...current, [field]: value }));
+    setIntakeErrors((current) => ({ ...current, [field]: undefined }));
+  }
+
+  async function startAnalysis(event?: FormEvent<HTMLFormElement>) {
+    event?.preventDefault();
+    const errors = validateInquiryIntake(intake);
+
+    if (Object.keys(errors).length > 0) {
+      setIntakeErrors(errors);
+      if (errors.customer) {
+        customerInputRef.current?.focus();
+      } else {
+        messageInputRef.current?.focus();
+      }
+      return;
+    }
+
+    const inquiry = composeInquiry(intake);
+    submittedInquiry.current = inquiry;
+
     try {
       setStatus("analyzing");
       setAnalysisError("");
@@ -109,6 +138,19 @@ export function InboxAnalysis() {
 
   async function generateOffer() {
     if (!analysis) return;
+    const inquiry = submittedInquiry.current || composeInquiry(intake);
+
+    if (
+      !submittedInquiry.current &&
+      Object.keys(validateInquiryIntake(intake)).length > 0
+    ) {
+      setOfferError(
+        "Bitte die Kontaktdaten und Kundenanfrage ergänzen, bevor ein Angebotsentwurf erstellt wird.",
+      );
+      setOfferStatus("error");
+      return;
+    }
+
     const currentWorkflowVersion = workflowVersion.current;
 
     try {
@@ -185,6 +227,7 @@ export function InboxAnalysis() {
       setOfferError("");
       setEditableOffer(null);
       setLastSavedAt(null);
+      submittedInquiry.current = "";
     }
   }
 
@@ -198,76 +241,73 @@ export function InboxAnalysis() {
     setIsEditingOffer(false);
   }
 
-  if (status === "idle") {
-    return (
-      <div className="mt-8 space-y-4">
-        {resetError ? (
-          <p
-            role="status"
-            className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900"
-          >
-            {resetError}
-          </p>
-        ) : null}
-        <button
-          type="button"
-          onClick={startAnalysis}
-          className="inline-flex items-center gap-2 rounded-xl bg-neutral-900 px-6 py-3 font-medium text-white transition hover:bg-neutral-700"
-        >
-          <Sparkles className="h-5 w-5" />
-          Anfrage analysieren
-        </button>
-      </div>
-    );
-  }
-
-  if (status === "analyzing") {
-    return (
-      <div className="mt-8 rounded-xl border bg-neutral-50 p-6">
-        <div className="flex items-center gap-3">
-          <ScanSearch className="h-5 w-5 animate-pulse text-neutral-700" />
-          <div>
-            <p className="font-semibold">Atlas analysiert die Anfrage mit Claude</p>
-            <p className="mt-1 text-sm text-neutral-500">
-              Leistung, Dringlichkeit und nächste Schritte werden geprüft.
-            </p>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  if (status === "error") {
-    return (
-      <div className="mt-8 rounded-xl border border-red-200 bg-red-50 p-6">
-        <div className="flex items-start gap-3">
-          <TriangleAlert className="mt-0.5 h-5 w-5 text-red-700" />
-          <div className="flex-1">
-            <p className="font-semibold text-red-900">Analyse fehlgeschlagen</p>
-            <p className="mt-1 text-sm text-red-700">{analysisError}</p>
-            <button
-              type="button"
-              onClick={startAnalysis}
-              className="mt-4 rounded-xl bg-red-900 px-5 py-2.5 text-sm font-medium text-white"
+  function renderWorkflow() {
+    if (status === "idle") {
+      return (
+        <div className="mt-6 space-y-4">
+          {resetError ? (
+            <p
+              role="status"
+              className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900"
             >
-              Erneut versuchen
-            </button>
+              {resetError}
+            </p>
+          ) : null}
+        </div>
+      );
+    }
+
+    if (status === "analyzing") {
+      return (
+        <div className="mt-8 rounded-xl border bg-neutral-50 p-6">
+          <div className="flex items-center gap-3">
+            <ScanSearch className="h-5 w-5 animate-pulse text-neutral-700" />
+            <div>
+              <p className="font-semibold">
+                Atlas analysiert die Anfrage mit Claude
+              </p>
+              <p className="mt-1 text-sm text-neutral-500">
+                Leistung, Dringlichkeit und nächste Schritte werden geprüft.
+              </p>
+            </div>
           </div>
         </div>
-      </div>
-    );
-  }
+      );
+    }
 
-  if (!analysis) return null;
+    if (status === "error") {
+      return (
+        <div className="mt-8 rounded-xl border border-red-200 bg-red-50 p-6">
+          <div className="flex items-start gap-3">
+            <TriangleAlert className="mt-0.5 h-5 w-5 text-red-700" />
+            <div className="flex-1">
+              <p className="font-semibold text-red-900">
+                Analyse fehlgeschlagen
+              </p>
+              <p className="mt-1 text-sm text-red-700">{analysisError}</p>
+              <button
+                type="button"
+                onClick={() => void startAnalysis()}
+                className="mt-4 rounded-xl bg-red-900 px-5 py-2.5 text-sm font-medium text-white"
+              >
+                Erneut versuchen
+              </button>
+            </div>
+          </div>
+        </div>
+      );
+    }
 
-  return (
-    <div className="mt-8 space-y-6">
-      <AnalysisResultView
-        analysis={analysis}
-        offerStatus={offerStatus}
-        onGenerateOffer={generateOffer}
-        onRestartAnalysis={startAnalysis}
-      />
+    if (!analysis) return null;
+
+    return (
+      <div className="mt-8 space-y-6">
+        <AnalysisResultView
+          analysis={analysis}
+          offerStatus={offerStatus}
+          onGenerateOffer={generateOffer}
+          onRestartAnalysis={() => void startAnalysis()}
+        />
 
       {offerStatus === "error" && (
         <section className="rounded-xl border border-red-200 bg-red-50 p-6">
@@ -306,6 +346,116 @@ export function InboxAnalysis() {
           Gespeicherten Vorgang zurücksetzen
         </button>
       </div>
-    </div>
+      </div>
+    );
+  }
+
+  const isAnalyzing = status === "analyzing";
+
+  return (
+    <>
+      <form noValidate onSubmit={startAnalysis}>
+        <div className="grid gap-5 sm:grid-cols-2">
+          <div>
+            <label
+              htmlFor="inquiry-customer"
+              className="text-sm font-medium text-neutral-700"
+            >
+              Kunde oder Kontakt
+            </label>
+            <input
+              ref={customerInputRef}
+              id="inquiry-customer"
+              name="customer"
+              value={intake.customer}
+              onChange={(event) => updateIntake("customer", event.target.value)}
+              aria-describedby={
+                intakeErrors.customer ? "inquiry-customer-error" : undefined
+              }
+              aria-invalid={Boolean(intakeErrors.customer)}
+              disabled={isAnalyzing}
+              className="mt-2 w-full rounded-xl border bg-neutral-50 px-4 py-3 text-neutral-900 outline-none transition focus:border-neutral-500 focus:ring-2 focus:ring-neutral-200 disabled:cursor-wait disabled:opacity-60"
+            />
+            {intakeErrors.customer ? (
+              <p
+                id="inquiry-customer-error"
+                role="alert"
+                className="mt-2 text-sm text-red-700"
+              >
+                {intakeErrors.customer}
+              </p>
+            ) : null}
+          </div>
+
+          <div>
+            <label
+              htmlFor="inquiry-location"
+              className="text-sm font-medium text-neutral-700"
+            >
+              Ort{" "}
+              <span className="font-normal text-neutral-500">(optional)</span>
+            </label>
+            <input
+              id="inquiry-location"
+              name="location"
+              value={intake.location}
+              onChange={(event) => updateIntake("location", event.target.value)}
+              disabled={isAnalyzing}
+              className="mt-2 w-full rounded-xl border bg-neutral-50 px-4 py-3 text-neutral-900 outline-none transition focus:border-neutral-500 focus:ring-2 focus:ring-neutral-200 disabled:cursor-wait disabled:opacity-60"
+            />
+          </div>
+        </div>
+
+        <div className="mt-5">
+          <label
+            htmlFor="inquiry-message"
+            className="text-sm font-medium text-neutral-700"
+          >
+            Kundenanfrage
+          </label>
+          <textarea
+            ref={messageInputRef}
+            id="inquiry-message"
+            name="message"
+            rows={7}
+            value={intake.message}
+            onChange={(event) => updateIntake("message", event.target.value)}
+            aria-describedby={
+              intakeErrors.message
+                ? "inquiry-message-error"
+                : "inquiry-message-help"
+            }
+            aria-invalid={Boolean(intakeErrors.message)}
+            disabled={isAnalyzing}
+            className="mt-2 w-full resize-y rounded-xl border bg-neutral-50 px-4 py-3 leading-7 text-neutral-900 outline-none transition focus:border-neutral-500 focus:ring-2 focus:ring-neutral-200 disabled:cursor-wait disabled:opacity-60"
+          />
+          {intakeErrors.message ? (
+            <p
+              id="inquiry-message-error"
+              role="alert"
+              className="mt-2 text-sm text-red-700"
+            >
+              {intakeErrors.message}
+            </p>
+          ) : (
+            <p id="inquiry-message-help" className="mt-2 text-sm text-neutral-500">
+              Übernimm die Anfrage so, wie sie eingegangen ist. Fehlende
+              Angaben bleiben offen.
+            </p>
+          )}
+        </div>
+
+        <button
+          type="submit"
+          disabled={isAnalyzing}
+          className="mt-6 inline-flex items-center gap-2 rounded-xl bg-neutral-900 px-6 py-3 font-medium text-white transition hover:bg-neutral-700 disabled:cursor-wait disabled:opacity-60"
+        >
+          <Sparkles className="h-5 w-5" />
+          {isAnalyzing ? "Anfrage wird analysiert ..." : "Anfrage analysieren"}
+        </button>
+      </form>
+
+      {renderWorkflow()}
+    </>
   );
 }

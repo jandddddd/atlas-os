@@ -12,6 +12,18 @@ async function resetTodayState(context) {
   await context.clearCookies();
 }
 
+async function fillInboxInquiry(page, {
+  customer = "Familie Berger",
+  location = "Heidelberg",
+  message = "Bitte unser Wohnzimmer streichen. Bilder reichen wir nach.",
+} = {}) {
+  await page.getByLabel("Kunde oder Kontakt").fill(customer);
+  if (location) {
+    await page.getByLabel("Ort (optional)").fill(location);
+  }
+  await page.getByLabel("Kundenanfrage").fill(message);
+}
+
 async function prioritizeDecision(page, overviewTitle, expectedTitle) {
   await page.getByRole("button", { name: overviewTitle }).click();
   await expect(page.getByRole("heading", { name: expectedTitle })).toBeVisible();
@@ -120,6 +132,7 @@ test("Today-Seite ist erreichbar", async ({ page }) => {
 
 test("Inbox-Analyse wird als vorbereitete Entscheidung auf Today geladen", async ({ page }) => {
   await page.goto("/inbox");
+  await fillInboxInquiry(page);
   await page.getByRole("button", { name: "Anfrage analysieren" }).click();
 
   await expect(
@@ -136,6 +149,7 @@ test("Inbox-Analyse wird als vorbereitete Entscheidung auf Today geladen", async
 
 test("Inbox-Reset entfernt die vorbereitete Entscheidung aus Today", async ({ page }) => {
   await page.goto("/inbox");
+  await fillInboxInquiry(page);
   await page.getByRole("button", { name: "Anfrage analysieren" }).click();
   await expect(
     page.getByRole("heading", { name: "Analyse abgeschlossen" }),
@@ -144,9 +158,7 @@ test("Inbox-Reset entfernt die vorbereitete Entscheidung aus Today", async ({ pa
   await page
     .getByRole("button", { name: "Gespeicherten Vorgang zurücksetzen" })
     .click();
-  await expect(
-    page.getByRole("button", { name: "Anfrage analysieren" }),
-  ).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Analyse abgeschlossen" })).toHaveCount(0);
 
   await page.goto("/today");
 
@@ -158,6 +170,7 @@ test("Inbox-Reset entfernt die vorbereitete Entscheidung aus Today", async ({ pa
 
 test("Inbox-Reset leert den lokalen Vorgang auch bei fehlgeschlagenem Server-Cleanup", async ({ page }) => {
   await page.goto("/inbox");
+  await fillInboxInquiry(page);
   await page.getByRole("button", { name: "Anfrage analysieren" }).click();
   await expect(
     page.getByRole("heading", { name: "Analyse abgeschlossen" }),
@@ -195,6 +208,7 @@ test("Eine erneute Inbox-Analyse entfernt eine alte manuelle Priorisierung", asy
   const inboxDecisionTitle = "Angebotsentwurf Familie Schneider vorbereiten";
 
   await page.goto("/inbox");
+  await fillInboxInquiry(page);
   await page.getByRole("button", { name: "Anfrage analysieren" }).click();
   await expect(
     page.getByRole("heading", { name: "Analyse abgeschlossen" }),
@@ -205,6 +219,7 @@ test("Eine erneute Inbox-Analyse entfernt eine alte manuelle Priorisierung", asy
   await expect(manualPriorityExplanation(page)).toBeVisible();
 
   await page.goto("/inbox");
+  await fillInboxInquiry(page);
   await page.getByRole("button", { name: "Analyse erneut starten" }).click();
   await expect(
     page.getByRole("heading", { name: "Analyse abgeschlossen" }),
@@ -702,7 +717,98 @@ test("Inbox ist erreichbar", async ({ page }) => {
   await page.goto("/inbox");
 
   await expect(page.getByRole("heading", { name: "Neue Kundenanfrage" })).toBeVisible();
+  await expect(page.getByLabel("Kunde oder Kontakt")).toHaveValue("");
+  await expect(page.getByLabel("Ort (optional)")).toHaveValue("");
+  await expect(page.getByLabel("Kundenanfrage")).toHaveValue("");
+  await expect(page.getByText("Familie Schneider", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("Mannheim", { exact: true })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Anfrage analysieren" })).toBeVisible();
+});
+
+test("Inbox weist leere Pflichtfelder zugänglich zurück", async ({ page }) => {
+  await page.goto("/inbox");
+  await page.getByRole("button", { name: "Anfrage analysieren" }).click();
+
+  await expect(page.getByText("Bitte einen Kunden oder Kontakt angeben.")).toBeVisible();
+  await expect(page.getByText("Bitte die Kundenanfrage eingeben.")).toBeVisible();
+  await expect(page.getByLabel("Kunde oder Kontakt")).toBeFocused();
+});
+
+test("Inbox übermittelt Kontakt, optionalen Ort und Anfrage im bestehenden Analysevertrag", async ({ page }) => {
+  await page.goto("/inbox");
+  await fillInboxInquiry(page, {
+    customer: "Malerbetrieb König",
+    location: "Speyer",
+    message: "Bitte prüfen Sie einen neuen Anstrich im Treppenhaus.",
+  });
+
+  const requestPromise = page.waitForRequest("**/api/analyze-inquiry");
+  await page.getByRole("button", { name: "Anfrage analysieren" }).click();
+  const request = await requestPromise;
+
+  expect(request.postDataJSON()).toEqual({
+    inquiry: [
+      "Kunde/Kontakt: Malerbetrieb König",
+      "Ort: Speyer",
+      "Kundenanfrage:",
+      "Bitte prüfen Sie einen neuen Anstrich im Treppenhaus.",
+    ].join("\n"),
+  });
+  await expect(page.getByRole("heading", { name: "Analyse abgeschlossen" })).toBeVisible();
+});
+
+test("Inbox analysiert eine gültige Anfrage ohne optionalen Ort", async ({ page }) => {
+  await page.goto("/inbox");
+  await fillInboxInquiry(page, { location: "" });
+
+  const requestPromise = page.waitForRequest("**/api/analyze-inquiry");
+  await page.getByRole("button", { name: "Anfrage analysieren" }).click();
+  const request = await requestPromise;
+
+  expect(request.postDataJSON().inquiry).not.toContain("Ort:");
+  await expect(page.getByRole("heading", { name: "Analyse abgeschlossen" })).toBeVisible();
+});
+
+test("Inbox bewahrt die bestehenden Analyse- und Angebotsverträge im lokalen Speicher", async ({ page }) => {
+  await page.goto("/inbox");
+  await fillInboxInquiry(page);
+  await page.getByRole("button", { name: "Anfrage analysieren" }).click();
+  await expect(page.getByRole("heading", { name: "Analyse abgeschlossen" })).toBeVisible();
+  await page.getByRole("button", { name: "Angebotsentwurf erstellen" }).click();
+
+  await expect(page.getByText("Angebotsentwurf Familie Schneider", { exact: true })).toBeVisible();
+  const stored = await page.evaluate(() => ({
+    analysis: JSON.parse(window.localStorage.getItem("atlas-inquiry-analysis") ?? "null"),
+    offer: JSON.parse(window.localStorage.getItem("atlas-editable-offer") ?? "null"),
+  }));
+
+  expect(stored.analysis).toMatchObject({
+    customer: { name: "Unbekannt" },
+    project: { trade: "Malerarbeiten", estimatedArea: 75 },
+    recommendedTask: { type: "offer" },
+  });
+  expect(stored.offer).toMatchObject({
+    customerName: "Unbekannt",
+    positions: [{ quantity: 0, unit: "noch zu ermitteln" }],
+    status: "draft",
+  });
+});
+
+test("Inbox zeigt den bestehenden Analysefehler und erlaubt einen neuen Versuch", async ({ page }) => {
+  await page.route("**/api/analyze-inquiry", async (route) => {
+    await route.fulfill({
+      status: 500,
+      contentType: "application/json",
+      body: JSON.stringify({ error: "Analyse vorübergehend nicht verfügbar." }),
+    });
+  });
+  await page.goto("/inbox");
+  await fillInboxInquiry(page);
+  await page.getByRole("button", { name: "Anfrage analysieren" }).click();
+
+  await expect(page.getByText("Analyse fehlgeschlagen")).toBeVisible();
+  await expect(page.getByText("Analyse vorübergehend nicht verfügbar.")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Erneut versuchen" })).toBeVisible();
 });
 
 test("Lieferantenangebot ist erreichbar und Zurück-Link funktioniert", async ({ page }) => {
