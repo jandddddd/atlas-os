@@ -10,6 +10,12 @@ const source = readFileSync(new URL("../.github/atlas-autopilot.yml", import.met
 const configuredPilot = parseRepairConfig(source);
 const active = {
   ...configuredPilot,
+  enabled: true,
+  pilot_enabled: true,
+  pilot_allowed_pr_numbers: [43],
+  pilot_allowed_actors: ["jandddddd"],
+  pilot_allowed_triggering_actors: ["jandddddd"],
+  pilot_allowed_authors: ["jandddddd"],
 };
 const context = {
   repository: "atlas/atlas-os",
@@ -29,21 +35,21 @@ const context = {
   headSha: "a".repeat(40),
 };
 
-test("repository policy activates only the exact repair pilot", () => {
-  assert.equal(configuredPilot.enabled, true);
-  assert.equal(configuredPilot.pilot_enabled, true);
+test("repository policy keeps the completed repair pilot disabled", () => {
+  assert.equal(configuredPilot.enabled, false);
+  assert.equal(configuredPilot.pilot_enabled, false);
   assert.equal(configuredPilot.auto_merge, false);
-  assert.deepEqual(configuredPilot.pilot_allowed_pr_numbers, [43]);
-  assert.deepEqual(configuredPilot.pilot_allowed_actors, ["jandddddd"]);
-  assert.deepEqual(configuredPilot.pilot_allowed_triggering_actors, ["jandddddd"]);
-  assert.deepEqual(configuredPilot.pilot_allowed_authors, ["jandddddd"]);
+  assert.deepEqual(configuredPilot.pilot_allowed_pr_numbers, []);
+  assert.deepEqual(configuredPilot.pilot_allowed_actors, []);
+  assert.deepEqual(configuredPilot.pilot_allowed_triggering_actors, []);
+  assert.deepEqual(configuredPilot.pilot_allowed_authors, []);
   assert.deepEqual(configuredPilot.pilot_allowed_head_prefixes, ["pilot/atlas-repair-"]);
   assert.equal(configuredPilot.pilot_required_label, "atlas-repair-pilot");
-  assert.doesNotThrow(() => validatePilotPolicy(configuredPilot, { requireEnabled: true }));
+  assert.doesNotThrow(() => validatePilotPolicy(configuredPilot));
 });
 
 test("activation PR 42 is not allowlisted", () => {
-  const gates = evaluatePilotGates(configuredPilot, { ...context, prNumber: 42 });
+  const gates = evaluatePilotGates(active, { ...context, prNumber: 42 });
   assert.equal(gates.gates.find((gate) => gate.code === "PR_ALLOWLISTED")?.passed, false);
 });
 

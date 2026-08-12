@@ -43,20 +43,25 @@ const plan = {
   allowedAreas: ["scripts/example.mjs"],
 };
 
-test("repository repair policy is explicitly enabled for the pilot", () => {
-  assert.doesNotThrow(() => validateExecutionPolicy(policySource));
-  assert.equal(policy.enabled, true);
-  assert.equal(policy.pilot_enabled, true);
+test("repository repair policy is disabled after the pilot", () => {
+  assert.throws(() => validateExecutionPolicy(policySource), /disabled/);
+  assert.equal(policy.enabled, false);
+  assert.equal(policy.pilot_enabled, false);
   assert.equal(policy.auto_merge, false);
-  assert.deepEqual(policy.pilot_allowed_pr_numbers, [43]);
+  assert.deepEqual(policy.pilot_allowed_pr_numbers, []);
+  assert.deepEqual(policy.pilot_allowed_actors, []);
+  assert.deepEqual(policy.pilot_allowed_triggering_actors, []);
+  assert.deepEqual(policy.pilot_allowed_authors, []);
 });
 
 function enabledPolicySource() {
   return policySource
-    .replace("  pilot_allowed_pr_numbers:\n    - 43", "  pilot_allowed_pr_numbers:\n    - 42")
-    .replace("  pilot_allowed_triggering_actors:\n    - \"jandddddd\"", "  pilot_allowed_triggering_actors:\n    - \"operator\"")
-    .replace("  pilot_allowed_actors:\n    - \"jandddddd\"", "  pilot_allowed_actors:\n    - \"operator\"")
-    .replace("  pilot_allowed_authors:\n    - \"jandddddd\"", "  pilot_allowed_authors:\n    - \"author\"");
+    .replace("  enabled: false", "  enabled: true")
+    .replace("  pilot_enabled: false", "  pilot_enabled: true")
+    .replace("  pilot_allowed_pr_numbers:", "  pilot_allowed_pr_numbers:\n    - 42")
+    .replace("  pilot_allowed_triggering_actors:", "  pilot_allowed_triggering_actors:\n    - \"operator\"")
+    .replace("  pilot_allowed_actors:", "  pilot_allowed_actors:\n    - \"operator\"")
+    .replace("  pilot_allowed_authors:", "  pilot_allowed_authors:\n    - \"author\"");
 }
 
 for (const [field, invalidValues] of [
