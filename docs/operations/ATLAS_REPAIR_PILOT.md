@@ -1,5 +1,28 @@
 # Kontrollierter Atlas-Repair-Pilot
 
+## Sprint-2-Closeout: Trigger- und Berechtigungsmatrix
+
+Die Matrix beschreibt die tatsächlich eingecheckten Workflows. „Repository-Inhalt ändern“ meint persistente Änderungen am Git-Repository; der Supervisor darf separat seinen eigenen PR-Kommentar verwalten.
+
+| Workflow | Trigger | Token-Berechtigungen | Repository-Inhalt ändern | Commit | Push | Merge | Secrets / Environment-Approval | Automatischer Start |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Atlas PR Supervisor | `pull_request_target`, `pull_request_review`, `pull_request_review_comment`, abgeschlossener `CI`-`workflow_run`, `workflow_dispatch` | `contents: read`, `pull-requests: write`, `checks: read`, `actions: read` | Nein | Nein | Nein | Nein | Keine zusätzlichen Secrets; kein Environment | Ja |
+| Atlas PR Repair Plan | abgeschlossener `Atlas PR Supervisor`-`workflow_run`, `workflow_dispatch` | `contents: read`, `pull-requests: read`, `checks: read`, `actions: read` | Nein | Nein | Nein | Nein | Keine zusätzlichen Secrets; kein Environment | Ja, ausschließlich read-only unter den Sprint-2H-Gates |
+| Atlas PR Repair Execute | nur `workflow_dispatch` | `contents: write`, `pull-requests: read`, `actions: read`, `checks: read` | Ja, nur auf dem bestehenden validierten PR-Branch | Ja, höchstens ein Repair-Commit je zulässigem Versuch | Ja, normaler Push nur auf den bestehenden PR-Branch | Nein | `OPENAI_API_KEY` aus `atlas-repair-pilot`; Environment-Approval soweit administrativ konfiguriert | Nein |
+| CI | `pull_request` | `contents: read` | Nein | Nein | Nein | Nein | Keine zusätzlichen Secrets; kein Environment | Ja |
+
+Die Schreibberechtigung des Supervisors ist auf den Statuskommentar beschränkt. Nur Repair Execute benötigt `contents: write`, weil sein ausdrücklich manuell freigegebener Zweck der einzelne Commit und Push auf einen bereits bestehenden PR-Branch ist. Kein Workflow besitzt oder nutzt einen Mergepfad.
+
+## Operative Erkenntnisse aus dem Live-Pilot
+
+- Ohne das erforderliche Repair-Label wird bereits die Planung fail-closed blockiert; Labels sind echte Eligibility-Gates und keine reine Kennzeichnung.
+- Importierbare CLI-Module müssen `process.argv[1] === undefined` tolerieren. Der Import-Guard ist deshalb abgesichert und durch einen Regressionstest gedeckt.
+- Environment-Approval autorisiert nur den konkreten Execute-Job. Es ersetzt weder Planprüfung, PR-Review, CI noch Mergefreigabe.
+- Ein automatisierter Push erzeugt einen neuen PR-Head. CI muss dafür erneut laufen; Branch Protection kann bestehende Approvals verwerfen und eine neue menschliche Approval verlangen.
+- Required Checks können am PR-Head, GitHubs `merge_commit_sha` oder dem PR-Merge-Ref hängen. Supervisor und Plan sammeln und deduplizieren deshalb Checks über alle verfügbaren Referenzen.
+- Der in der Supervisor-Beobachtung gebundene vertrauenswürdige Workflow-SHA muss exakt dem tatsächlich ausgecheckten und ausgeführten Code entsprechen; jede Abweichung beendet die automatische Planung vor dem Import.
+- Nach dem Pilot wurden Repair, Pilotmodus und alle aktiven Allowlists sofort wieder deaktiviert beziehungsweise geleert. Eine Aktivierung zu Testzwecken gehört nicht in die eingecheckte Baseline.
+
 ## Sprint-2H-Betrieb: automatische Read-only-Pläne
 
 Nach einem erfolgreich abgeschlossenen regulären `Atlas PR Supervisor`-Lauf kann `Atlas PR Repair Plan` automatisch einen Diagnoseplan erzeugen. Der automatische Pfad ist ausschließlich Planung: keine Environment-Freigabe, keine Secrets, kein Codex, kein Attempt-Tag, kein Commit, kein Push, kein Execute-Dispatch, kein PR und kein Merge. Seine Token-Rechte sind `contents: read`, `pull-requests: read`, `checks: read` und `actions: read`.

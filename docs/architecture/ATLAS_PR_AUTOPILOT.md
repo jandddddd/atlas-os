@@ -12,6 +12,17 @@ Sprint 2G friert den erfolgreichen Pilot als deaktivierte Betriebsbaseline ein. 
 
 Repair Execution bleibt manuell ausgelöst, über das separate Environment bewusst freigegeben und auf einen zuvor geprüften Plan beschränkt. Automatische Execution, Retry-Schleifen und Auto-Merge bleiben außerhalb der freigegebenen Architektur. Ein erfolgreicher Repair-Push ist nur ein neuer PR-Head und keine Mergefreigabe; CI, gegebenenfalls erneute Approval und ein separater menschlicher Merge-Entschluss bleiben erforderlich.
 
+## Sprint-2-Abschluss: finales Betriebsmodell
+
+- **Supervisor:** Darf durch die eingecheckten PR-, Review- und CI-Ereignisse automatisch sowie manuell starten. Er beobachtet und klassifiziert den PR-Zustand. Er schreibt ausschließlich seinen eigenen PR-Statuskommentar und das begrenzte Beobachtungsartefakt; er verändert keinen Code, erstellt keinen Commit und pusht oder mergt nicht.
+- **Repair Plan:** Der manuelle `workflow_dispatch` bleibt unterstützt. Zusätzlich darf ausschließlich ein vertrauenswürdiger, erfolgreich abgeschlossener regulärer Supervisor-Lauf unter allen Sprint-2H-Fail-closed-Gates automatisch eine Planung anstoßen. Jede automatische Planung ist `NON_EXECUTING_READ_ONLY`, reserviert keinen Attempt, verwendet keine Secrets, schreibt keinen Branch und startet Repair Execute nicht. Ein Plan ist weder Ausführungs- noch Merge-Autorisierung.
+- **Repair Execute:** Besitzt ausschließlich `workflow_dispatch`. Er verlangt die exakte Bindung von PR-Nummer, unverändertem Head-SHA und einem erfolgreichen, manuell ausgelösten validierten Plan. Das Environment `atlas-repair-pilot` und dessen Approval gelten weiterhin, soweit administrativ konfiguriert. Es gibt keinen automatischen Retry, keine Branch- oder PR-Erstellung und keinen Merge. Der bestehende Attempt-Tag-Vertrag erlaubt höchstens einen Repair-Versuch pro geeignetem PR-Head-SHA.
+- **Eingecheckte Baseline:** `repair.enabled`, `repair.pilot_enabled` und `repair.auto_merge` sind `false`. Die aktiven Pilot-Allowlists für PR, Actor, Triggering Actor und Autor sind leer. Keine temporäre Pilot-Aktivierung bleibt eingecheckt. Der Unit-Test `repository policy satisfies the Sprint 2 closeout baseline` erzwingt diesen Zustand.
+
+## Sprint-3-Handoff
+
+Mit dem Abschluss von Sprint 2 gelten Supervisor, Repair Plan und Repair Execute als Baseline-Infrastruktur. Weitere Repair-Automatisierung gehört nicht zur unmittelbaren Roadmap; Sprint 3 kehrt zur Atlas-Produkt- und Anwendungsentwicklung zurück. Jede künftige Erweiterung von Schreibautomatisierung benötigt einen neuen, ausdrücklich beauftragten Safety Review und einen separaten Aktivierungssprint. Die in Sprint 2 abgeschlossenen Grenzen dürfen nicht implizit durch Produktarbeit erweitert werden.
+
 ## Sprint 1: Dry-Run
 
 Sprint 1 implementiert nur die Bewertungsstufe. Der Supervisor prüft PR-Status, Base-Branch, Labels, Check Runs, Merge-Konflikte, offene priorisierte Review-Threads, Größenlimits und verbotene Pfade. Laufende oder noch nicht vorhandene Pflicht-Checks führen zu `WAITING`; Fehler und Policy-Verstöße führen zu `BLOCKED`. Nur ein nach der Supervisor-Policy vollständig grüner PR wird als `POLICY_READY` gemeldet.
