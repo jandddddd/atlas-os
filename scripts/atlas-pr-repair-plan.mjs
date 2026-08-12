@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -44,6 +45,44 @@ function filePaths(files) {
 
 function sortedUnique(values) {
   return [...new Set(values)].sort((left, right) => left.localeCompare(right, "en"));
+}
+
+export function repairStateFingerprint(supervisor) {
+  const state = JSON.stringify({
+    status: supervisor?.status ?? "",
+    reasons: sortedUnique(supervisor?.reasons ?? []),
+  });
+  return createHash("sha256").update(state).digest("hex").slice(0, 16);
+}
+
+export function evaluateAutomaticPlanEligibility(input, policy) {
+  validateRepairPolicy(policy);
+  const reasons = [];
+  const labels = new Set(input.labels ?? []);
+  const changedPaths = sortedUnique(filePaths(input.files ?? []));
+  const blockingFindings = (input.reviewThreads ?? []).filter(
+    (thread) => !thread.resolved && ["P1", "P2"].includes(thread.priority),
+  );
+  if (input.repository !== input.baseRepository || input.repository !== input.headRepository) reasons.push("REPOSITORY_MISMATCH");
+  if (input.isFork !== false) reasons.push("FORK_PR");
+  if (input.state !== "open") reasons.push("PR_NOT_OPEN");
+  if (input.draft !== false) reasons.push("PR_DRAFT");
+  if (input.baseBranch !== "main" || !policy.allowed_base_branches.includes(input.baseBranch)) reasons.push("BASE_NOT_ALLOWED");
+  if (input.supervisor?.status !== "BLOCKED") reasons.push("SUPERVISOR_NOT_BLOCKED");
+  if (blockingFindings.length) reasons.push("BLOCKING_REVIEW_FINDING");
+  if (!labels.has(policy.require_label)) reasons.push("REPAIR_LABEL_MISSING");
+  if (!labels.has(input.autopilotRequiredLabel)) reasons.push("AUTOPILOT_LABEL_MISSING");
+  if ((policy.never_run_labels ?? []).some((label) => labels.has(label))) reasons.push("NEVER_RUN_LABEL_PRESENT");
+  if (!/^[0-9a-f]{40}$/i.test(input.supervisorObservedHeadSha ?? "")
+      || input.headSha !== input.supervisorObservedHeadSha) reasons.push("HEAD_SHA_STALE");
+  if (changedPaths.some((path) => pathIsForbidden(path, policy.forbidden_paths ?? []))) reasons.push("FORBIDDEN_PATH");
+  if ((input.changedFiles ?? changedPaths.length) > policy.maximum_changed_files) reasons.push("FILE_LIMIT_EXCEEDED");
+  if ((input.additions ?? 0) + (input.deletions ?? 0) > policy.maximum_changed_lines) reasons.push("LINE_LIMIT_EXCEEDED");
+  const blockReasons = sortedUnique(input.blockReasons ?? []);
+  if (!blockReasons.length || blockReasons.some((reason) => !(policy.allowed_block_reasons ?? []).includes(reason))) {
+    reasons.push("BLOCK_REASON_NOT_REPAIRABLE");
+  }
+  return { eligible: reasons.length === 0, reasons: sortedUnique(reasons) };
 }
 
 function relevantCheckFailures(input) {
@@ -129,14 +168,21 @@ export function createRepairPlan(input, policy) {
   const attemptKey = `${input.prNumber}:${input.headSha}`;
   const changedPaths = sortedUnique(filePaths(input.files ?? [])).map((path) => redactDiagnostic(path, 500));
   const audit = {
+    planningMode: "NON_EXECUTING_READ_ONLY",
+    triggerSource: input.triggerSource ?? "manual",
+    repository: input.repository,
     prNumber: input.prNumber,
     headSha: input.headSha,
+    supervisorSource: input.supervisorSource ?? null,
+    trustedWorkflowSha: input.trustedWorkflowSha ?? null,
+    repairStateFingerprint: repairStateFingerprint(input.supervisor),
     attemptKey,
     allowedAreas: changedPaths,
     forbiddenAreas: sortedUnique(policy.forbidden_paths ?? []).map((path) => redactDiagnostic(path, 500)),
     relevantCheckFailures: relevantCheckFailures(input),
     relevantFindings: relevantFindings(input),
     repairExecuted: false,
+    attemptReserved: false,
   };
   const pilot = evaluatePilotGates(policy, {
     repository: input.repository,
@@ -236,9 +282,16 @@ export function renderRepairPlanMarkdown(plan, artifactName) {
     "# Atlas PR Repair Plan",
     "",
     `- **Repair status:** ${plan.status}`,
+    `- **Planning mode:** ${plan.planningMode}`,
+    `- **Trigger source:** ${plan.triggerSource}`,
+    `- **Repository:** ${plan.repository}`,
     `- **PR number:** ${plan.prNumber}`,
     `- **Head SHA:** \`${plan.headSha}\``,
     `- **attemptKey:** \`${plan.attemptKey}\``,
+    `- **Attempt reserved:** ${plan.attemptReserved}`,
+    `- **Repair executed:** ${plan.repairExecuted}`,
+    `- **Trusted workflow SHA:** \`${plan.trustedWorkflowSha ?? "unknown"}\``,
+    `- **Supervisor source:** \`${redactDiagnostic(JSON.stringify(plan.supervisorSource ?? {}), 1_000)}\``,
     ...(artifactName ? [`- **Download artifact:** \`${redactDiagnostic(artifactName, 300)}\``] : []),
     "",
     "## Reasons",
@@ -269,7 +322,7 @@ export function renderRepairPlanMarkdown(plan, artifactName) {
     "",
     "## Execution notice",
     "",
-    "**In diesem Workflow wurde kein Code verändert und kein Repair ausgeführt.**",
+    "**NON-EXECUTING / READ-ONLY: Dieser Plan ist weder eine Freigabe noch eine Autorisierung für Repair oder Merge. In diesem Workflow wurde kein Versuch reserviert, kein Code verändert und kein Repair ausgeführt.**",
     "",
   ].join("\n");
 }

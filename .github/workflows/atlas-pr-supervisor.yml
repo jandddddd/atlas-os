@@ -220,6 +220,36 @@ jobs:
           < "$RUNNER_TEMP/atlas-pr-input.json"
           > "$RUNNER_TEMP/atlas-pr-result.json"
 
+      - name: Record trusted supervisor observation
+        env:
+          PR_NUMBER: ${{ steps.trusted.outputs.pr-number }}
+          TRUSTED_WORKFLOW_SHA: ${{ steps.trusted.outputs.base-sha }}
+        run: |
+          node --input-type=module -e '
+            import { readFileSync, writeFileSync } from "node:fs";
+            import { repairStateFingerprint } from "./scripts/atlas-pr-repair-plan.mjs";
+            const input = JSON.parse(readFileSync(process.env.RUNNER_TEMP + "/atlas-pr-input.json", "utf8"));
+            const supervisor = JSON.parse(readFileSync(process.env.RUNNER_TEMP + "/atlas-pr-result.json", "utf8"));
+            writeFileSync(process.env.RUNNER_TEMP + "/atlas-supervisor-observation.json", JSON.stringify({
+              repository: process.env.GITHUB_REPOSITORY,
+              prNumber: Number(process.env.PR_NUMBER),
+              observedHeadSha: input.headSha,
+              supervisor,
+              stateFingerprint: repairStateFingerprint(supervisor),
+              supervisorRunId: Number(process.env.GITHUB_RUN_ID),
+              supervisorRunAttempt: Number(process.env.GITHUB_RUN_ATTEMPT),
+              trustedWorkflowSha: process.env.TRUSTED_WORKFLOW_SHA,
+            }));
+          '
+
+      - name: Upload trusted supervisor observation
+        uses: actions/upload-artifact@v6
+        with:
+          name: atlas-supervisor-observation
+          path: ${{ runner.temp }}/atlas-supervisor-observation.json
+          if-no-files-found: error
+          retention-days: 7
+
       - name: Create or update supervisor comment
         uses: actions/github-script@v8
         env:

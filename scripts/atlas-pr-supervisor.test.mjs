@@ -182,3 +182,12 @@ test("Workflow checkt den Base-SHA vor dem absoluten Supervisor-Import aus", () 
   assert.ok(checkoutIndex >= 0 && checkoutIndex < debugIndex && debugIndex < importIndex);
   assert.match(workflow, /ref: \$\{\{ github\.event\.pull_request\.base\.sha/);
 });
+
+test("Supervisor publishes a bounded trusted observation for read-only planning", () => {
+  assert.match(workflow, /name: Record trusted supervisor observation/);
+  assert.match(workflow, /name: atlas-supervisor-observation/);
+  assert.match(workflow, /observedHeadSha: input\.headSha/);
+  assert.match(workflow, /stateFingerprint: repairStateFingerprint\(supervisor\)/);
+  assert.match(workflow, /trustedWorkflowSha: process\.env\.TRUSTED_WORKFLOW_SHA/);
+  assert.match(workflow, /retention-days: 7/);
+});

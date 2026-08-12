@@ -1,6 +1,9 @@
 name: Atlas PR Repair Plan
 
 on:
+  workflow_run:
+    workflows: [Atlas PR Supervisor]
+    types: [completed]
   workflow_dispatch:
     inputs:
       pr_number:
@@ -23,14 +26,20 @@ permissions:
   actions: read
 
 concurrency:
-  group: atlas-pr-repair-plan-${{ inputs.pr_number }}
+  group: atlas-pr-repair-plan-${{ github.event.workflow_run.pull_requests[0].number || inputs.pr_number }}-${{ github.event.workflow_run.pull_requests[0].head.sha || inputs.expected_head_sha }}
   cancel-in-progress: false
 
 jobs:
   plan:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event != 'workflow_dispatch' &&
+       github.event.workflow_run.pull_requests[0] != null)
     runs-on: ubuntu-latest
     steps:
       - name: Validate manual confirmation
+        if: github.event_name == 'workflow_dispatch'
         env:
           CONFIRM: ${{ inputs.confirm }}
         run: test "$CONFIRM" = "REPAIR"
@@ -41,12 +50,60 @@ jobs:
           ref: main
           persist-credentials: false
 
+      - name: Download trusted Supervisor observation
+        if: github.event_name == 'workflow_run'
+        uses: actions/download-artifact@v7
+        with:
+          name: atlas-supervisor-observation
+          path: ${{ runner.temp }}/atlas-supervisor-observation
+          github-token: ${{ github.token }}
+          run-id: ${{ github.event.workflow_run.id }}
+
+      - name: Resolve manual or automatic trigger binding
+        id: trigger
+        uses: actions/github-script@v8
+        env:
+          MANUAL_PR_NUMBER: ${{ inputs.pr_number }}
+          MANUAL_HEAD_SHA: ${{ inputs.expected_head_sha }}
+          SOURCE_RUN_ID: ${{ github.event.workflow_run.id }}
+          SOURCE_RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
+          SOURCE_PR_NUMBER: ${{ github.event.workflow_run.pull_requests[0].number }}
+        with:
+          script: |
+            const fs = require("node:fs");
+            if (context.eventName === "workflow_dispatch") {
+              core.setOutput("source", "manual");
+              core.setOutput("pr-number", process.env.MANUAL_PR_NUMBER);
+              core.setOutput("head-sha", process.env.MANUAL_HEAD_SHA);
+              core.setOutput("trusted-workflow-sha", context.sha);
+              return;
+            }
+            const observation = JSON.parse(fs.readFileSync(
+              `${process.env.RUNNER_TEMP}/atlas-supervisor-observation/atlas-supervisor-observation.json`, "utf8",
+            ));
+            const repository = `${context.repo.owner}/${context.repo.repo}`;
+            if (observation.repository !== repository
+                || observation.prNumber !== Number(process.env.SOURCE_PR_NUMBER)
+                || observation.supervisorRunId !== Number(process.env.SOURCE_RUN_ID)
+                || observation.supervisorRunAttempt !== Number(process.env.SOURCE_RUN_ATTEMPT)
+                || !/^[0-9a-f]{40}$/i.test(observation.observedHeadSha)
+                || !/^[0-9a-f]{40}$/i.test(observation.trustedWorkflowSha)) {
+              core.setFailed("The trusted Supervisor observation does not match this workflow_run source.");
+              return;
+            }
+            core.setOutput("source", "automatic");
+            core.setOutput("pr-number", observation.prNumber);
+            core.setOutput("head-sha", observation.observedHeadSha);
+            core.setOutput("state-fingerprint", observation.stateFingerprint);
+            core.setOutput("supervisor-status", observation.supervisor.status);
+            core.setOutput("trusted-workflow-sha", observation.trustedWorkflowSha);
+
       - name: Load current pull request and verify head SHA
         id: pull
         uses: actions/github-script@v8
         env:
-          PR_NUMBER: ${{ inputs.pr_number }}
-          EXPECTED_HEAD_SHA: ${{ inputs.expected_head_sha }}
+          PR_NUMBER: ${{ steps.trigger.outputs.pr-number }}
+          EXPECTED_HEAD_SHA: ${{ steps.trigger.outputs.head-sha }}
         with:
           script: |
             const pullNumber = Number(process.env.PR_NUMBER);
@@ -221,14 +278,29 @@ jobs:
           < "$RUNNER_TEMP/atlas-pr-repair-input.json"
           > "$RUNNER_TEMP/atlas-pr-supervisor-result.json"
 
-      - name: Bind supervisor result and repairable block reasons
+      - name: Bind supervisor result, audit metadata and automatic eligibility
+        id: gate
         uses: actions/github-script@v8
+        env:
+          TRIGGER_SOURCE: ${{ steps.trigger.outputs.source }}
+          OBSERVED_STATUS: ${{ steps.trigger.outputs.supervisor-status }}
+          OBSERVED_FINGERPRINT: ${{ steps.trigger.outputs.state-fingerprint }}
+          OBSERVED_HEAD_SHA: ${{ steps.trigger.outputs.head-sha }}
+          TRUSTED_WORKFLOW_SHA: ${{ steps.trigger.outputs.trusted-workflow-sha }}
+          SOURCE_RUN_ID: ${{ github.event.workflow_run.id }}
+          SOURCE_RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
         with:
           script: |
             const fs = require("node:fs");
             const { pathToFileURL } = require("node:url");
             const { parseConfig } = await import(
               pathToFileURL(`${process.env.GITHUB_WORKSPACE}/scripts/atlas-pr-supervisor.mjs`).href
+            );
+            const { evaluateAutomaticPlanEligibility, repairStateFingerprint } = await import(
+              pathToFileURL(`${process.env.GITHUB_WORKSPACE}/scripts/atlas-pr-repair-plan.mjs`).href
+            );
+            const { parseRepairConfig } = await import(
+              pathToFileURL(`${process.env.GITHUB_WORKSPACE}/scripts/atlas-pr-repair-policy.mjs`).href
             );
             const inputPath = `${process.env.RUNNER_TEMP}/atlas-pr-repair-input.json`;
             const input = JSON.parse(fs.readFileSync(inputPath, "utf8"));
@@ -247,9 +319,46 @@ jobs:
               ...(blockingReview ? ["blocking_review_found"] : []),
               ...(supervisor.status === "BLOCKED" && !explained ? ["other_supervisor_block"] : []),
             ];
+            input.triggerSource = process.env.TRIGGER_SOURCE;
+            input.trustedWorkflowSha = process.env.TRUSTED_WORKFLOW_SHA;
+            input.supervisorSource = process.env.TRIGGER_SOURCE === "automatic" ? {
+              workflow: "Atlas PR Supervisor",
+              runId: Number(process.env.SOURCE_RUN_ID),
+              runAttempt: Number(process.env.SOURCE_RUN_ATTEMPT),
+              observedHeadSha: process.env.OBSERVED_HEAD_SHA,
+            } : { workflow: "Atlas PR Repair Plan", runId: context.runId, runAttempt: context.runAttempt };
+            if (process.env.TRIGGER_SOURCE === "automatic") {
+              const fingerprint = repairStateFingerprint(supervisor);
+              if (supervisor.status !== process.env.OBSERVED_STATUS || fingerprint !== process.env.OBSERVED_FINGERPRINT) {
+                core.setFailed("Current trusted Supervisor evaluation differs from the completed Supervisor observation.");
+                return;
+              }
+              input.supervisorObservedHeadSha = process.env.OBSERVED_HEAD_SHA;
+              input.autopilotRequiredLabel = config.required_label;
+              const eligibility = evaluateAutomaticPlanEligibility(input, parseRepairConfig(
+                fs.readFileSync(".github/atlas-autopilot.yml", "utf8"),
+              ));
+              if (!eligibility.eligible) {
+                core.notice(`Automatic read-only planning suppressed: ${eligibility.reasons.join(", ")}`);
+                core.setOutput("create-plan", "false");
+                return;
+              }
+              const artifactName = `atlas-auto-repair-plan-pr-${input.prNumber}-${input.headSha.slice(0, 12)}-${fingerprint}`;
+              const existing = await github.paginate(github.rest.actions.listArtifactsForRepo, {
+                ...context.repo, name: artifactName, per_page: 100,
+              });
+              if (existing.some((artifact) => artifact.name === artifactName && !artifact.expired)) {
+                core.notice("An automatic read-only plan already exists for this PR head and Supervisor state.");
+                core.setOutput("create-plan", "false");
+                return;
+              }
+              core.setOutput("artifact-name", artifactName);
+            }
+            core.setOutput("create-plan", "true");
             fs.writeFileSync(inputPath, JSON.stringify(input));
 
       - name: Revalidate head SHA before plan creation
+        if: steps.gate.outputs.create-plan == 'true'
         uses: actions/github-script@v8
         env:
           PR_NUMBER: ${{ steps.pull.outputs.number }}
@@ -265,9 +374,10 @@ jobs:
             }
 
       - name: Create deterministic repair plan
+        if: steps.gate.outputs.create-plan == 'true'
         id: plan
         env:
-          ARTIFACT_NAME: atlas-repair-plan-pr-${{ steps.pull.outputs.number }}-${{ steps.pull.outputs.short-head-sha }}
+          ARTIFACT_NAME: ${{ steps.gate.outputs.artifact-name || format('atlas-repair-plan-pr-{0}-{1}', steps.pull.outputs.number, steps.pull.outputs.short-head-sha) }}
         run: >-
           node scripts/atlas-pr-repair-plan.mjs
           --config .github/atlas-autopilot.yml
@@ -277,12 +387,14 @@ jobs:
           > "$RUNNER_TEMP/atlas-pr-repair-plan.json"
 
       - name: Write repair plan summary
+        if: steps.gate.outputs.create-plan == 'true'
         run: cat "$RUNNER_TEMP/atlas-repair-plan/repair-plan.md" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload repair plan artifact
+        if: steps.gate.outputs.create-plan == 'true'
         uses: actions/upload-artifact@v6
         with:
-          name: atlas-repair-plan-pr-${{ steps.pull.outputs.number }}-${{ steps.pull.outputs.short-head-sha }}
+          name: ${{ steps.gate.outputs.artifact-name || format('atlas-repair-plan-pr-{0}-{1}', steps.pull.outputs.number, steps.pull.outputs.short-head-sha) }}
           path: |
             ${{ runner.temp }}/atlas-repair-plan/repair-plan.json
             ${{ runner.temp }}/atlas-repair-plan/repair-plan.md
