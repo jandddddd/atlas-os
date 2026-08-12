@@ -241,6 +241,16 @@ test("workflow keeps manual dispatch and adds only completed-Supervisor automati
   assert.match(workflow, /create-plan", "false"/);
 });
 
+test("automatic Repair Plan remains non-executing and cannot start Repair Execute", () => {
+  const result = plan({ triggerSource: "automatic", trustedWorkflowSha: "b".repeat(40) });
+  assert.equal(result.planningMode, "NON_EXECUTING_READ_ONLY");
+  assert.equal(result.attemptReserved, false);
+  assert.equal(result.repairExecuted, false);
+  assert.equal(result.safeToStart, false);
+  assert.doesNotMatch(workflow, /atlas-pr-repair-execute|createWorkflowDispatch|workflow_dispatches|OPENAI_API_KEY|secrets\./i);
+  assert.doesNotMatch(workflow, /git\.(?:createRef|updateRef)|git\s+(?:commit|push)|contents: write|pull-requests: write/i);
+});
+
 test("Supervisor and Plan use the same shared multi-ref check collector", () => {
   for (const source of [supervisorWorkflow, workflow]) {
     assert.match(source, /collectPullRequestCheckRuns/);

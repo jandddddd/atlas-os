@@ -35,19 +35,37 @@ const context = {
   headSha: "a".repeat(40),
 };
 
-test("repository policy keeps the completed repair pilot disabled", () => {
+function assertSprint2CloseoutBaseline(policy) {
+  assert.equal(policy.enabled, false, "repair.enabled must remain false");
+  assert.equal(policy.pilot_enabled, false, "repair.pilot_enabled must remain false");
+  assert.equal(policy.auto_merge, false, "repair.auto_merge must remain false");
+  assert.deepEqual(policy.pilot_allowed_pr_numbers, [], "pilot PR allowlist must remain empty");
+  assert.deepEqual(policy.pilot_allowed_actors, [], "pilot actor allowlist must remain empty");
+  assert.deepEqual(policy.pilot_allowed_triggering_actors, [], "pilot triggering-actor allowlist must remain empty");
+  assert.deepEqual(policy.pilot_allowed_authors, [], "pilot author allowlist must remain empty");
+}
+
+test("repository policy satisfies the Sprint 2 closeout baseline", () => {
   assert.match(source, /^auto_merge: false$/m);
-  assert.equal(configuredPilot.enabled, false);
-  assert.equal(configuredPilot.pilot_enabled, false);
-  assert.equal(configuredPilot.auto_merge, false);
-  assert.deepEqual(configuredPilot.pilot_allowed_pr_numbers, []);
-  assert.deepEqual(configuredPilot.pilot_allowed_actors, []);
-  assert.deepEqual(configuredPilot.pilot_allowed_triggering_actors, []);
-  assert.deepEqual(configuredPilot.pilot_allowed_authors, []);
+  assertSprint2CloseoutBaseline(configuredPilot);
   assert.deepEqual(configuredPilot.pilot_allowed_head_prefixes, ["pilot/atlas-repair-"]);
   assert.equal(configuredPilot.pilot_required_label, "atlas-repair-pilot");
   assert.doesNotThrow(() => validatePilotPolicy(configuredPilot));
 });
+
+for (const [field, unsafeValue] of [
+  ["enabled", true],
+  ["pilot_enabled", true],
+  ["auto_merge", true],
+  ["pilot_allowed_pr_numbers", [43]],
+  ["pilot_allowed_actors", ["operator"]],
+  ["pilot_allowed_triggering_actors", ["operator"]],
+  ["pilot_allowed_authors", ["author"]],
+]) {
+  test(`Sprint 2 closeout assertion rejects unsafe ${field}`, () => {
+    assert.throws(() => assertSprint2CloseoutBaseline({ ...configuredPilot, [field]: unsafeValue }));
+  });
+}
 
 test("active-pilot behavior is isolated in an explicit test fixture", () => {
   assert.equal(configuredPilot.enabled, false);

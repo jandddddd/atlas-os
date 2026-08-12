@@ -69,6 +69,22 @@ test("official GitHub actions use Node 24 majors without changing workflow scope
   assert.match(planningWorkflow, /workflow_run:\n\s+workflows: \[Atlas PR Supervisor\]/);
 });
 
+test("Sprint 2 workflows keep their least-privilege trigger and permission boundaries", () => {
+  assert.match(ciWorkflow, /^on:\n  pull_request:\n\npermissions:\n  contents: read$/m);
+  assert.doesNotMatch(ciWorkflow, /contents: write|pull-requests: write|actions: write|checks: write/);
+
+  assert.match(supervisorWorkflow, /permissions:\n  contents: read\n  pull-requests: write\n  checks: read\n  actions: read/);
+  assert.doesNotMatch(supervisorWorkflow, /contents: write|checks: write|actions: write/);
+
+  assert.match(planningWorkflow, /permissions:\n  contents: read\n  pull-requests: read\n  checks: read\n  actions: read/);
+  assert.doesNotMatch(planningWorkflow, /contents: write|pull-requests: write|checks: write|actions: write/);
+
+  assert.match(workflow, /^on:\n  workflow_dispatch:/m);
+  assert.doesNotMatch(workflow, /workflow_run:|pull_request(?:_target)?:|repository_dispatch:|schedule:/);
+  assert.match(workflow, /permissions:\n  contents: write\n  pull-requests: read\n  actions: read\n  checks: read/);
+  assert.doesNotMatch(workflow, /pull-requests: write|checks: write|actions: write/);
+});
+
 function enabledPolicySource() {
   return policySource
     .replace("  enabled: false", "  enabled: true")
