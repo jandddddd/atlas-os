@@ -2,7 +2,9 @@ import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { spawnSync } from "node:child_process";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 
 import {
   createRepairPlan,
@@ -16,6 +18,18 @@ const policySource = readFileSync(new URL("../.github/atlas-autopilot.yml", impo
 const policy = parseRepairConfig(policySource);
 const workflow = readFileSync(new URL("../.github/workflows/atlas-pr-repair.yml", import.meta.url), "utf8");
 const sha = "a".repeat(40);
+
+test("repair modules can be imported without a CLI argv entry", () => {
+  for (const modulePath of ["./atlas-pr-repair-plan.mjs", "./atlas-pr-supervisor.mjs"]) {
+    const moduleUrl = new URL(modulePath, import.meta.url).href;
+    const result = spawnSync(process.execPath, ["--input-type=module", "--eval", `import(${JSON.stringify(moduleUrl)})`], {
+      encoding: "utf8",
+    });
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.stdout, "");
+    assert.equal(result.stderr, "");
+  }
+});
 
 const repairable = {
   prNumber: 42,
@@ -39,6 +53,18 @@ const repairable = {
 function plan(overrides = {}) {
   return createRepairPlan({ ...repairable, ...overrides }, policy);
 }
+
+test("repair plan direct CLI execution still works", () => {
+  const scriptPath = fileURLToPath(new URL("./atlas-pr-repair-plan.mjs", import.meta.url));
+  const configPath = fileURLToPath(new URL("../.github/atlas-autopilot.yml", import.meta.url));
+  const result = spawnSync(process.execPath, [scriptPath, "--config", configPath], {
+    encoding: "utf8",
+    input: JSON.stringify(repairable),
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(JSON.parse(result.stdout).status, "REPAIR_ELIGIBLE");
+  assert.equal(result.stderr, "");
+});
 
 test("POLICY_READY needs no repair", () => {
   assert.equal(plan({ supervisor: { status: "POLICY_READY", reasons: [] }, blockReasons: [] }).status, "NO_REPAIR_NEEDED");
