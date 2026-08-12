@@ -44,12 +44,6 @@ jobs:
           CONFIRM: ${{ inputs.confirm }}
         run: test "$CONFIRM" = "REPAIR"
 
-      - name: Checkout trusted main branch
-        uses: actions/checkout@v5
-        with:
-          ref: main
-          persist-credentials: false
-
       - name: Download trusted Supervisor observation
         if: github.event_name == 'workflow_run'
         uses: actions/download-artifact@v7
@@ -75,7 +69,6 @@ jobs:
               core.setOutput("source", "manual");
               core.setOutput("pr-number", process.env.MANUAL_PR_NUMBER);
               core.setOutput("head-sha", process.env.MANUAL_HEAD_SHA);
-              core.setOutput("trusted-workflow-sha", context.sha);
               return;
             }
             const observation = JSON.parse(fs.readFileSync(
@@ -97,6 +90,25 @@ jobs:
             core.setOutput("state-fingerprint", observation.stateFingerprint);
             core.setOutput("supervisor-status", observation.supervisor.status);
             core.setOutput("trusted-workflow-sha", observation.trustedWorkflowSha);
+
+      - name: Checkout exact trusted planning code
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ steps.trigger.outputs.trusted-workflow-sha || 'main' }}
+          persist-credentials: false
+
+      - name: Verify exact trusted checkout
+        id: trusted
+        env:
+          TRIGGER_SOURCE: ${{ steps.trigger.outputs.source }}
+          EXPECTED_TRUSTED_SHA: ${{ steps.trigger.outputs.trusted-workflow-sha }}
+        run: |
+          actual_sha="$(git rev-parse HEAD)"
+          if [ "$TRIGGER_SOURCE" = "automatic" ] && [ "$actual_sha" != "$EXPECTED_TRUSTED_SHA" ]; then
+            echo "Checked-out trusted SHA does not match the Supervisor observation." >&2
+            exit 1
+          fi
+          echo "sha=$actual_sha" >> "$GITHUB_OUTPUT"
 
       - name: Load current pull request and verify head SHA
         id: pull
@@ -132,11 +144,12 @@ jobs:
           EXPECTED_HEAD_SHA: ${{ steps.pull.outputs.head-sha }}
           ATLAS_ACTOR: ${{ github.actor }}
           ATLAS_TRIGGERING_ACTOR: ${{ github.triggering_actor }}
+          SOURCE_RUN_ID: ${{ github.event.workflow_run.id }}
         with:
           script: |
             const fs = require("node:fs");
             const { pathToFileURL } = require("node:url");
-            const { deduplicateCheckRuns, findReviewPriority, normalizeCheckName } = await import(
+            const { checkFacts, collectPullRequestCheckRuns, findReviewPriority, normalizeCheckName } = await import(
               pathToFileURL(`${process.env.GITHUB_WORKSPACE}/scripts/atlas-pr-supervisor.mjs`).href
             );
             const pullNumber = Number(process.env.PR_NUMBER);
@@ -151,11 +164,17 @@ jobs:
               pull_number: pullNumber,
               per_page: 100,
             });
-            const rawChecks = deduplicateCheckRuns(await github.paginate(github.rest.checks.listForRef, {
-              ...context.repo,
-              ref: pull.head.sha,
-              per_page: 100,
-            }));
+            const rawChecks = await collectPullRequestCheckRuns({
+              pull,
+              pullNumber,
+              listChecksForRef: (ref) => github.paginate(github.rest.checks.listForRef, {
+                ...context.repo, ref, per_page: 100,
+              }),
+              getMergeRef: async (number) => (await github.rest.git.getRef({
+                ...context.repo, ref: `pull/${number}/merge`,
+              })).data.object.sha,
+              onMissingMergeRef: () => core.info("No PR merge ref is available; checks will use the available PR refs."),
+            });
             const workflowNames = new Map();
             for (const check of rawChecks) {
               const match = check.details_url?.match(/\/actions\/runs\/(\d+)/);
@@ -167,14 +186,8 @@ jobs:
                 core.warning(`Could not resolve workflow name for check ${check.name}: ${error.message}`);
               }
             }
-            const checks = rawChecks.map((check) => ({
-              name: normalizeCheckName(
-                workflowNames.get(check.details_url?.match(/\/actions\/runs\/(\d+)/)?.[1]) ?? "",
-                check.name,
-              ),
-              status: check.status,
-              conclusion: check.conclusion,
-            }));
+            const excludedRunIds = new Set(process.env.SOURCE_RUN_ID ? [process.env.SOURCE_RUN_ID] : []);
+            const checks = checkFacts(rawChecks, workflowNames, excludedRunIds);
             const failedChecks = [];
             for (const check of rawChecks
               .filter((item) => item.status === "completed" && !["success", "neutral", "skipped"].includes(item.conclusion))
@@ -286,7 +299,7 @@ jobs:
           OBSERVED_STATUS: ${{ steps.trigger.outputs.supervisor-status }}
           OBSERVED_FINGERPRINT: ${{ steps.trigger.outputs.state-fingerprint }}
           OBSERVED_HEAD_SHA: ${{ steps.trigger.outputs.head-sha }}
-          TRUSTED_WORKFLOW_SHA: ${{ steps.trigger.outputs.trusted-workflow-sha }}
+          TRUSTED_WORKFLOW_SHA: ${{ steps.trusted.outputs.sha }}
           SOURCE_RUN_ID: ${{ github.event.workflow_run.id }}
           SOURCE_RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
         with:

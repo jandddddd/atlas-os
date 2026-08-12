@@ -19,6 +19,7 @@ import {
 const policySource = readFileSync(new URL("../.github/atlas-autopilot.yml", import.meta.url), "utf8");
 const policy = parseRepairConfig(policySource);
 const workflow = readFileSync(new URL("../.github/workflows/atlas-pr-repair.yml", import.meta.url), "utf8");
+const supervisorWorkflow = readFileSync(new URL("../.github/workflows/atlas-pr-supervisor.yml", import.meta.url), "utf8");
 const sha = "a".repeat(40);
 
 test("repair modules can be imported without a CLI argv entry", () => {
@@ -73,6 +74,7 @@ test("eligible blocked PR produces an automatic read-only plan", () => {
   assert.equal(result.attemptReserved, false);
   assert.equal(result.repairExecuted, false);
   assert.equal(result.safeToStart, false);
+  assert.equal(result.trustedWorkflowSha, "b".repeat(40));
 });
 
 for (const [name, overrides, reason] of [
@@ -231,12 +233,46 @@ test("workflow keeps manual dispatch and adds only completed-Supervisor automati
   assert.match(workflow, /workflow_run:\n\s+workflows: \[Atlas PR Supervisor\]\n\s+types: \[completed\]/);
   assert.doesNotMatch(workflow, /pull_request_target:|pull_request:|schedule:/);
   assert.match(workflow, /contents: read\n  pull-requests: read\n  checks: read\n  actions: read/);
-  assert.match(workflow, /ref: main/);
+  assert.match(workflow, /ref: \$\{\{ steps\.trigger\.outputs\.trusted-workflow-sha \|\| 'main' \}\}/);
   assert.match(workflow, /persist-credentials: false/);
   assert.doesNotMatch(workflow, /OPENAI_API_KEY|codex|openai|git push|contents: write|pull-requests: write|issues: write/iu);
   assert.match(workflow, /listArtifactsForRepo/);
   assert.match(workflow, /atlas-auto-repair-plan-pr-/);
   assert.match(workflow, /create-plan", "false"/);
+});
+
+test("Supervisor and Plan use the same shared multi-ref check collector", () => {
+  for (const source of [supervisorWorkflow, workflow]) {
+    assert.match(source, /collectPullRequestCheckRuns/);
+    assert.match(source, /pull\.merge_commit_sha|collectPullRequestCheckRuns/);
+    assert.match(source, /ref: `pull\/\$\{number\}\/merge`/);
+    assert.match(source, /checkFacts\(rawChecks, workflowNames/);
+  }
+  assert.doesNotMatch(workflow, /deduplicateCheckRuns\(await github\.paginate/);
+});
+
+test("automatic planning executes and audits the exact Supervisor trusted SHA", () => {
+  const download = workflow.indexOf("name: Download trusted Supervisor observation");
+  const resolve = workflow.indexOf("name: Resolve manual or automatic trigger binding");
+  const checkout = workflow.indexOf("name: Checkout exact trusted planning code");
+  const verify = workflow.indexOf("name: Verify exact trusted checkout");
+  const collect = workflow.indexOf("name: Collect bounded pull request diagnostics");
+  assert.ok(download >= 0 && download < resolve && resolve < checkout && checkout < verify && verify < collect);
+  assert.match(workflow, /EXPECTED_TRUSTED_SHA: \$\{\{ steps\.trigger\.outputs\.trusted-workflow-sha \}\}/);
+  assert.match(workflow, /actual_sha="\$\(git rev-parse HEAD\)"/);
+  assert.match(workflow, /\[ "\$actual_sha" != "\$EXPECTED_TRUSTED_SHA" \]/);
+  assert.match(workflow, /TRUSTED_WORKFLOW_SHA: \$\{\{ steps\.trusted\.outputs\.sha \}\}/);
+  assert.match(workflow, /ref: \$\{\{ steps\.trigger\.outputs\.trusted-workflow-sha \|\| 'main' \}\}/);
+});
+
+test("missing or mismatched automatic trusted SHA fails closed before policy execution", () => {
+  const checkout = workflow.indexOf("name: Checkout exact trusted planning code");
+  const verify = workflow.indexOf("name: Verify exact trusted checkout");
+  const evaluate = workflow.indexOf("name: Evaluate supervisor facts from trusted code");
+  assert.ok(checkout >= 0 && checkout < verify && verify < evaluate);
+  assert.match(workflow, /!\/\^\[0-9a-f\]\{40\}\$\/i\.test\(observation\.trustedWorkflowSha\)/);
+  assert.match(workflow, /exit 1/);
+  assert.doesNotMatch(workflow.slice(0, verify), /scripts\/atlas-pr-(?:supervisor|repair)/);
 });
 
 test("workflow uploads exactly the two repair plan files for seven days", () => {

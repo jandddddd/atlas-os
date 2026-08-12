@@ -4,6 +4,8 @@ import test from "node:test";
 
 import {
   deduplicateCheckRuns,
+  checkFacts,
+  collectPullRequestCheckRuns,
   normalizeCheckName,
   evaluatePullRequest,
   findReviewPriority,
@@ -154,7 +156,54 @@ test("CI-Check vom PR-Merge-SHA wird erkannt und nicht doppelt gezählt", () => 
   ]);
   assert.equal(checks.length, 2);
   assert.equal(evaluate({ checks }).status, "POLICY_READY");
-  assert.match(workflow, /ref: `pull\/\$\{pullNumber\}\/merge`/);
+  assert.match(workflow, /ref: `pull\/\$\{number\}\/merge`/);
+});
+
+test("shared collector gives Supervisor and automatic Plan the same merge-SHA check facts", async () => {
+  const headSha = "a".repeat(40);
+  const mergeSha = "b".repeat(40);
+  const mergeRefSha = "c".repeat(40);
+  const failedVerify = {
+    id: 42,
+    name: "verify",
+    status: "completed",
+    conclusion: "failure",
+    details_url: "https://github.com/atlas/atlas-os/actions/runs/99",
+  };
+  const refs = [];
+  const collect = () => collectPullRequestCheckRuns({
+    pull: { head: { sha: headSha }, merge_commit_sha: mergeSha },
+    pullNumber: 47,
+    listChecksForRef: async (ref) => {
+      refs.push(ref);
+      return ref === mergeSha || ref === mergeRefSha ? [failedVerify] : [];
+    },
+    getMergeRef: async () => mergeRefSha,
+  });
+  const supervisorRuns = await collect();
+  const planRuns = await collect();
+  const workflowNames = new Map([["99", "CI"]]);
+  const supervisorFacts = checkFacts(supervisorRuns, workflowNames);
+  const planFacts = checkFacts(planRuns, workflowNames);
+  assert.deepEqual(planFacts, supervisorFacts);
+  assert.deepEqual(planFacts, [{ name: "CI / verify", status: "completed", conclusion: "failure" }]);
+  assert.equal(evaluate({ checks: planFacts }).status, "BLOCKED");
+  assert.deepEqual([...new Set(refs)], [headSha, mergeSha, mergeRefSha]);
+});
+
+test("shared collector tolerates an unavailable PR merge ref and uses head and merge commit", async () => {
+  const headSha = "a".repeat(40);
+  const mergeSha = "b".repeat(40);
+  let missing = false;
+  const checks = await collectPullRequestCheckRuns({
+    pull: { head: { sha: headSha }, merge_commit_sha: mergeSha },
+    pullNumber: 47,
+    listChecksForRef: async () => [],
+    getMergeRef: async () => { throw Object.assign(new Error("missing"), { status: 404 }); },
+    onMissingMergeRef: () => { missing = true; },
+  });
+  assert.deepEqual(checks, []);
+  assert.equal(missing, true);
 });
 
 test("normaler CI-Job behält seinen Namen und führt Unit-Tests vor Lint und E2E aus", () => {
@@ -189,5 +238,7 @@ test("Supervisor publishes a bounded trusted observation for read-only planning"
   assert.match(workflow, /observedHeadSha: input\.headSha/);
   assert.match(workflow, /stateFingerprint: repairStateFingerprint\(supervisor\)/);
   assert.match(workflow, /trustedWorkflowSha: process\.env\.TRUSTED_WORKFLOW_SHA/);
+  assert.match(workflow, /name: Record exact trusted Supervisor checkout/);
+  assert.match(workflow, /TRUSTED_WORKFLOW_SHA: \$\{\{ steps\.trusted-checkout\.outputs\.sha \}\}/);
   assert.match(workflow, /retention-days: 7/);
 });

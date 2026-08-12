@@ -40,6 +40,10 @@ jobs:
           ref: ${{ github.event.pull_request.base.sha || github.event.workflow_run.pull_requests[0].base.sha || github.event.repository.default_branch }}
           persist-credentials: false
 
+      - name: Record exact trusted Supervisor checkout
+        id: trusted-checkout
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
       - name: Verify supervisor module path
         run: |
           pwd
@@ -91,7 +95,7 @@ jobs:
           script: |
             const fs = require("node:fs");
             const { pathToFileURL } = require("node:url");
-            const { deduplicateCheckRuns, findReviewPriority, normalizeCheckName } = await import(
+            const { checkFacts, collectPullRequestCheckRuns, findReviewPriority } = await import(
               pathToFileURL(`${process.env.GITHUB_WORKSPACE}/scripts/atlas-pr-supervisor.mjs`).href
             );
             const pullNumber = Number(process.env.PR_NUMBER);
@@ -101,25 +105,17 @@ jobs:
               pull_number: pullNumber,
               per_page: 100,
             });
-            const checkRefs = new Set([pull.head.sha]);
-            if (pull.merge_commit_sha) checkRefs.add(pull.merge_commit_sha);
-            try {
-              const { data: mergeRef } = await github.rest.git.getRef({
-                ...context.repo,
-                ref: `pull/${pullNumber}/merge`,
-              });
-              checkRefs.add(mergeRef.object.sha);
-            } catch (error) {
-              if (error.status !== 404) throw error;
-              core.info("No PR merge ref is available; checks will be collected from the head SHA.");
-            }
-            const rawChecks = deduplicateCheckRuns((await Promise.all(
-              [...checkRefs].map((ref) => github.paginate(github.rest.checks.listForRef, {
-                ...context.repo,
-                ref,
-                per_page: 100,
-              })),
-            )).flat());
+            const rawChecks = await collectPullRequestCheckRuns({
+              pull,
+              pullNumber,
+              listChecksForRef: (ref) => github.paginate(github.rest.checks.listForRef, {
+                ...context.repo, ref, per_page: 100,
+              }),
+              getMergeRef: async (number) => (await github.rest.git.getRef({
+                ...context.repo, ref: `pull/${number}/merge`,
+              })).data.object.sha,
+              onMissingMergeRef: () => core.info("No PR merge ref is available; checks will use the available PR refs."),
+            });
             const workflowNames = new Map();
             for (const check of rawChecks) {
               const match = check.details_url?.match(/\/actions\/runs\/(\d+)/);
@@ -134,13 +130,7 @@ jobs:
                 core.warning(`Could not resolve workflow name for check ${check.name}: ${error.message}`);
               }
             }
-            const checks = rawChecks.flatMap((check) => {
-              const runId = check.details_url?.match(/\/actions\/runs\/(\d+)/)?.[1];
-              if (runId === String(context.runId)) return [];
-              const qualifiedName = normalizeCheckName(runId ? workflowNames.get(runId) : "", check.name);
-              const value = { name: qualifiedName, status: check.status, conclusion: check.conclusion };
-              return [value];
-            });
+            const checks = checkFacts(rawChecks, workflowNames, new Set([String(context.runId)]));
 
             const reviewThreads = [];
             let reviewCursor = null;
@@ -223,7 +213,7 @@ jobs:
       - name: Record trusted supervisor observation
         env:
           PR_NUMBER: ${{ steps.trusted.outputs.pr-number }}
-          TRUSTED_WORKFLOW_SHA: ${{ steps.trusted.outputs.base-sha }}
+          TRUSTED_WORKFLOW_SHA: ${{ steps.trusted-checkout.outputs.sha }}
         run: |
           node --input-type=module -e '
             import { readFileSync, writeFileSync } from "node:fs";
