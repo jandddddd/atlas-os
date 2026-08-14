@@ -39,6 +39,12 @@ Today macht Atlas OS nicht größer oder komplexer. Die Seite verdichtet die vor
 
 Der primäre Nutzer ist der Betriebsinhaber oder Meister eines Malerbetriebs. Er nutzt Today zu Beginn des Arbeitstags, zwischen Terminen oder nach neuen Eingängen, um schnell zu entscheiden, welche vorbereiteten Schritte freigegeben, angepasst oder zurückgestellt werden.
 
+### Übergang aus der Inbox
+
+Eine erfolgreich analysierte Anfrage wird als vorbereitete, weiterhin menschlich zu prüfende Entscheidung in Today übernommen. Die Inbox bietet nach der frischen Analyse einen direkten Übergang zu Today; die Sekundäraktion „Ändern“ führt von der Entscheidung zurück in den gespeicherten Inbox-Vorgang.
+
+Dieser Übergang ergänzt keinen neuen Persistenz- oder Automatisierungsvertrag. Analyse und Angebotsentwurf bleiben Entwürfe, und wiederhergestellte Analysen müssen vor einer neuen Angebotserstellung weiterhin mit der aktuellen Anfrage erneut analysiert werden.
+
 ## Erfolgskriterien
 
 Today ist produktseitig erfolgreich, wenn:

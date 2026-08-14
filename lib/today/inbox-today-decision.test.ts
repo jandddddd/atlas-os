@@ -31,6 +31,7 @@ test("creates an approval decision from a persisted inbox analysis", () => {
   assert.equal(decision.urgency, "high");
   assert.equal(decision.economicImpact, "high");
   assert.equal(decision.title, "Angebotsentwurf Familie Schneider vorbereiten");
+  assert.equal(decision.editHref, "/inbox");
   assert.deepEqual(decision.uncertainty, {
     title: "Angaben noch offen",
     description: "Bilder, genaue Maße",
