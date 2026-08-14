@@ -309,6 +309,7 @@ export function InboxAnalysis() {
         <AnalysisResultView
           analysis={analysis}
           isOfferGenerationBlocked={analysisSource !== "current"}
+          isTodayHandoffAvailable={analysisSource === "current" && !isEditingOffer}
           offerStatus={offerStatus}
           onGenerateOffer={generateOffer}
           onRestartAnalysis={() => void startAnalysis()}

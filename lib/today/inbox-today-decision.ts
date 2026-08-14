@@ -43,6 +43,7 @@ export function createInboxTodayDecision(
     consequence:
       "Mit der Freigabe wird der vorbereitete nächste Schritt als geprüft vorgemerkt.",
     primaryActionLabel: "Schritt freigeben",
+    editHref: "/inbox",
     completionMessage: "Der vorbereitete nächste Schritt wurde freigegeben.",
     details: {
       title: "Grundlage aus der Inbox",

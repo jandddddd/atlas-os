@@ -149,6 +149,28 @@ test("Inbox-Analyse wird als vorbereitete Entscheidung auf Today geladen", async
   ).toBeVisible();
 });
 
+test("Inbox und Today bilden einen beidseitigen Prüfpfad für die vorbereitete Entscheidung", async ({ page }) => {
+  const inboxDecisionTitle = "Angebotsentwurf Familie Schneider vorbereiten";
+
+  await page.goto("/inbox");
+  await fillInboxInquiry(page);
+  await page.getByRole("button", { name: "Anfrage analysieren" }).click();
+  await expect(page.getByRole("heading", { name: "Analyse abgeschlossen" })).toBeVisible();
+
+  await page.getByRole("link", { name: "In Heute weiterprüfen" }).click();
+  await expect(page).toHaveURL("/today");
+  await page.getByRole("button", { name: inboxDecisionTitle }).click();
+  await expect(page.getByRole("heading", { name: inboxDecisionTitle })).toBeVisible();
+
+  await page.getByRole("link", { name: "Ändern" }).click();
+  await expect(page).toHaveURL("/inbox");
+  await expect(page.getByRole("heading", { name: "Analyse abgeschlossen" })).toBeVisible();
+  await expect(page.getByRole("status")).toContainText(
+    "Diese Analyse wurde aus dem letzten Vorgang wiederhergestellt.",
+  );
+  await expect(page.getByRole("link", { name: "In Heute weiterprüfen" })).toHaveCount(0);
+});
+
 test("Inbox-Reset entfernt die vorbereitete Entscheidung aus Today", async ({ page }) => {
   await page.goto("/inbox");
   await fillInboxInquiry(page);
