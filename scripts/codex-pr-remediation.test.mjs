@@ -6,6 +6,8 @@ import {
   decodeState,
   encodeState,
   findPriority,
+  isCodexReviewer,
+  normalizeGitHubLogin,
   planRemediation,
   selectUnresolvedReviewFindings,
 } from "./codex-pr-remediation.mjs";
@@ -32,7 +34,7 @@ function reviewThread({ id, resolved = false, commentId, priority = "P2", path =
     isResolved: resolved,
     comments: [{
       databaseId: commentId,
-      author: "chatgpt-codex-connector",
+      author: "chatgpt-codex-connector[bot]",
       body: `${priority} review finding`,
       path,
     }],
@@ -48,6 +50,14 @@ test("priority parsing is limited to P1 and P2", () => {
   assert.equal(findPriority("P3 only"), null);
 });
 
+test("Codex author identity is normalized consistently across GitHub surfaces", () => {
+  assert.equal(normalizeGitHubLogin("chatgpt-codex-connector[bot]"), "chatgpt-codex-connector");
+  assert.equal(normalizeGitHubLogin("ChatGPT-Codex-Connector"), "chatgpt-codex-connector");
+  assert.equal(isCodexReviewer("chatgpt-codex-connector[bot]"), true);
+  assert.equal(isCodexReviewer("chatgpt-codex-connector"), true);
+  assert.equal(isCodexReviewer("another-reviewer[bot]"), false);
+});
+
 test("unresolved P2 from the current review triggers remediation", () => {
   const findings = selectUnresolvedReviewFindings(
     [reviewThread({ id: "thread-p2", commentId: 101 })],
@@ -56,6 +66,17 @@ test("unresolved P2 from the current review triggers remediation", () => {
   const result = planRemediation({ event: { name: "review", reviewHeadSha: shaA }, pull: basePull, findings, comments: [] });
   assert.equal(result.action, "REQUEST_REMEDIATION");
   assert.deepEqual(result.state.findingIds, ["thread-p2"]);
+});
+
+test("actual GraphQL Codex bot login keeps unresolved P1 out of CLEAN", () => {
+  const findings = selectUnresolvedReviewFindings(
+    [reviewThread({ id: "graphql-p1", commentId: 107, priority: "P1" })],
+    new Set(["107"]),
+  );
+  const result = planRemediation({ event: { name: "review", reviewHeadSha: shaA }, pull: basePull, findings, comments: [] });
+  assert.equal(findings[0].priority, "P1");
+  assert.equal(result.action, "REQUEST_REMEDIATION");
+  assert.notEqual(result.action, "CLEAN");
 });
 
 test("resolved P2 does not trigger or enter stored remediation state", () => {

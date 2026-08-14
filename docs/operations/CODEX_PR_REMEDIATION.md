@@ -8,6 +8,8 @@ When Codex submits an open P1/P2 finding against the exact current head, `Bounde
 
 The coordinator joins the exact submitted review's comment IDs to authoritative, fully paginated GraphQL `reviewThreads` data. Only threads whose current `isResolved` value is `false` become findings or enter stored state. If all P1/P2 threads have been resolved before evaluation, the coordinator performs no remediation action.
 
+Codex author identity passes through one canonical, case-insensitive GitHub-login comparison that treats the platform's optional `[bot]` suffix consistently. The webhook reviewer, REST review comments, and GraphQL thread comments must all match that canonical identity before a finding can be dispatched.
+
 After Codex validates and pushes one normal commit to the same branch, the PR `synchronize` event must identify the previously bound SHA as its immediate `before` value. Only then does the coordinator post `@codex review` for the new full head SHA. A new review may start one more remediation round. If P1/P2 findings remain after round two, automation stops and posts a human-escalation comment.
 
 The workflow stores its small state record in a hidden, bot-owned PR-comment marker. It records the PR number, phase, full bound head, round number, original changed paths, and finding thread IDs. It creates no branch, tag, replacement PR, environment, secret, ruleset, or repository setting.

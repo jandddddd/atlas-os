@@ -17,9 +17,6 @@ concurrency:
 
 jobs:
   coordinate:
-    if: >-
-      github.event_name == 'pull_request_target' ||
-      github.event.review.user.login == 'chatgpt-codex-connector[bot]'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout trusted base revision
@@ -46,9 +43,13 @@ jobs:
         with:
           script: |
             const { pathToFileURL } = require("node:url");
-            const { encodeState, planRemediation, selectUnresolvedReviewFindings } = await import(
+            const { encodeState, isCodexReviewer, planRemediation, selectUnresolvedReviewFindings } = await import(
               pathToFileURL(`${process.env.GITHUB_WORKSPACE}/scripts/codex-pr-remediation.mjs`).href
             );
+            if (context.eventName === "pull_request_review" && !isCodexReviewer(context.payload.review.user.login)) {
+              core.info("Ignoring a review submitted by a non-Codex author.");
+              return;
+            }
             const pullNumber = context.payload.pull_request.number;
             const { data: pull } = await github.rest.pulls.get({ ...context.repo, pull_number: pullNumber });
             const files = await github.paginate(github.rest.pulls.listFiles, {
@@ -66,7 +67,11 @@ jobs:
                   per_page: 100,
                 })
               : [];
-            const reviewCommentIds = new Set(reviewComments.map((comment) => String(comment.id)));
+            const reviewCommentIds = new Set(
+              reviewComments
+                .filter((comment) => isCodexReviewer(comment.user?.login))
+                .map((comment) => String(comment.id)),
+            );
             const reviewThreads = [];
             let reviewCursor = null;
             do {

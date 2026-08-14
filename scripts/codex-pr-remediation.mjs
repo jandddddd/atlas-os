@@ -3,6 +3,15 @@ export const MAX_ROUNDS = 2;
 
 const PRIORITY_ORDER = ["P1", "P2"];
 const TEST_OR_HELPER_PATH = /(?:^|\/)(?:__tests__|tests?|e2e|playwright|test-helpers?)(?:\/|$)|\.(?:test|spec)\.[^/]+$/i;
+const CODEX_REVIEWER_LOGIN = "chatgpt-codex-connector";
+
+export function normalizeGitHubLogin(login) {
+  return String(login ?? "").trim().toLowerCase().replace(/\[bot\]$/, "");
+}
+
+export function isCodexReviewer(login) {
+  return normalizeGitHubLogin(login) === CODEX_REVIEWER_LOGIN;
+}
 
 export function findPriority(body) {
   const priorities = [...String(body ?? "").matchAll(/(?:^|\W)(P[12])(?:\W|$)/gi)]
@@ -15,7 +24,7 @@ export function selectUnresolvedReviewFindings(reviewThreads, reviewCommentIds) 
   return reviewThreads.flatMap((thread) => {
     if (thread.isResolved) return [];
     const comment = thread.comments.find((candidate) =>
-      candidate.author === "chatgpt-codex-connector" && selectedCommentIds.has(String(candidate.databaseId)),
+      isCodexReviewer(candidate.author) && selectedCommentIds.has(String(candidate.databaseId)),
     );
     if (!comment) return [];
     const priority = findPriority(comment.body);
