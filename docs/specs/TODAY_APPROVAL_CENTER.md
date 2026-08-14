@@ -45,6 +45,8 @@ Eine erfolgreich analysierte Anfrage wird als vorbereitete, weiterhin menschlich
 
 Dieser Übergang ergänzt keinen neuen Persistenz- oder Automatisierungsvertrag. Analyse und Angebotsentwurf bleiben Entwürfe, und wiederhergestellte Analysen müssen vor einer neuen Angebotserstellung weiterhin mit der aktuellen Anfrage erneut analysiert werden.
 
+Inbox-basierte Entscheidungen zeigen in Today eine kompakte Prüfgrundlage: den Ursprung, die aus der Analyse bekannte Kundenanfrage, die fachliche Einordnung und den nächsten menschlichen Schritt. Fehlende Angaben bleiben im Unsicherheitsbereich sichtbar. Die Prüfgrundlage übernimmt nur bereits gespeicherte Analyseinformationen und kennzeichnet ausdrücklich, dass noch keine Freigabe oder finale Entscheidung erfolgt ist.
+
 ## Erfolgskriterien
 
 Today ist produktseitig erfolgreich, wenn:

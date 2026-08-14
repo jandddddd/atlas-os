@@ -130,6 +130,7 @@ test("Today-Seite ist erreichbar", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "Heute zuerst" })).toBeVisible();
   await expect(page.getByRole("heading", { name: visitTitle })).toHaveCount(1);
   await expect(page.getByRole("heading", { name: offerOverviewTitle })).toHaveCount(1);
+  await expect(page.getByRole("region", { name: "Prüfgrundlage aus der Inbox" })).toHaveCount(0);
 });
 
 test("Inbox-Analyse wird als vorbereitete Entscheidung auf Today geladen", async ({ page }) => {
@@ -161,6 +162,25 @@ test("Inbox und Today bilden einen beidseitigen Prüfpfad für die vorbereitete 
   await expect(page).toHaveURL("/today");
   await page.getByRole("button", { name: inboxDecisionTitle }).click();
   await expect(page.getByRole("heading", { name: inboxDecisionTitle })).toBeVisible();
+  const reviewContext = page.getByRole("region", { name: "Prüfgrundlage aus der Inbox" });
+  await expect(reviewContext).toContainText("Ursprung: Inbox · analysierte Kundenanfrage");
+  await expect(reviewContext).toContainText(
+    "Unbekannt: Wohnzimmer, Esszimmer und Flur streichen",
+  );
+  await expect(reviewContext).toContainText(
+    "Genannte Flächenangabe laut Analyse: 75 m². Sie ist keine automatisch abgeleitete Wand- oder Deckenfläche.",
+  );
+  await expect(reviewContext).toContainText("Angebotsentwurf vorbereiten");
+  await expect(reviewContext).toContainText(
+    "Dieser Schritt ist vorbereitet, aber noch nicht freigegeben oder final.",
+  );
+  await expect(page.getByText("Bilder, genaue Raummaße")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Als geprüft vormerken" })).toBeVisible();
+
+  await page.reload();
+  await expect(page.getByRole("region", { name: "Prüfgrundlage aus der Inbox" })).toContainText(
+    "Unbekannt: Wohnzimmer, Esszimmer und Flur streichen",
+  );
 
   await page.getByRole("link", { name: "Ändern" }).click();
   await expect(page).toHaveURL("/inbox");
@@ -169,6 +189,21 @@ test("Inbox und Today bilden einen beidseitigen Prüfpfad für die vorbereitete 
     "Diese Analyse wurde aus dem letzten Vorgang wiederhergestellt.",
   );
   await expect(page.getByRole("link", { name: "In Heute weiterprüfen" })).toHaveCount(0);
+});
+
+test("Inbox-Review-Kontext bleibt im mobilen Today-Happy-Path vollständig prüfbar", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/inbox");
+  await fillInboxInquiry(page);
+  await page.getByRole("button", { name: "Anfrage analysieren" }).click();
+  await page.getByRole("link", { name: "In Heute weiterprüfen" }).click();
+  await page.getByRole("button", { name: "Angebotsentwurf Familie Schneider vorbereiten" }).click();
+
+  const reviewContext = page.getByRole("region", { name: "Prüfgrundlage aus der Inbox" });
+  await expect(reviewContext).toBeVisible();
+  await expect(reviewContext).toContainText("Zugrunde liegende Anfrage");
+  await expect(reviewContext).toContainText("Nächster menschlicher Schritt");
+  await expect(page.getByRole("link", { name: "Ändern" })).toBeVisible();
 });
 
 test("Inbox-Reset entfernt die vorbereitete Entscheidung aus Today", async ({ page }) => {
