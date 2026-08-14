@@ -40,7 +40,7 @@ export function createInboxTodayDecision(
     summary:
       "Atlas hat diesen nächsten Schritt aus der Kundenanfrage vorbereitet. Bitte prüfe, ob er als geprüft vorgemerkt werden soll.",
     reviewContext: {
-      source: "Inbox · analysierte Kundenanfrage",
+      source: "Inbox · ungeprüfte KI-Analyse",
       inquiry: `${analysis.customer.name}: ${analysis.project.service}`,
       analysis: describeAnalyzedProject(analysis),
       nextStep: analysis.workflow.nextAction,
@@ -57,6 +57,7 @@ export function createInboxTodayDecision(
     consequence:
       "Mit dieser Vormerkung wird nichts versendet oder final freigegeben.",
     primaryActionLabel: "Als geprüft vormerken",
+    primaryActionPendingLabel: "Wird vorgemerkt …",
     editHref: "/inbox",
     completionMessage: "Der vorbereitete nächste Schritt wurde als geprüft vorgemerkt.",
     details: {

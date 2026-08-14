@@ -163,7 +163,10 @@ test("Inbox und Today bilden einen beidseitigen Prüfpfad für die vorbereitete 
   await page.getByRole("button", { name: inboxDecisionTitle }).click();
   await expect(page.getByRole("heading", { name: inboxDecisionTitle })).toBeVisible();
   const reviewContext = page.getByRole("region", { name: "Prüfgrundlage aus der Inbox" });
-  await expect(reviewContext).toContainText("Ursprung: Inbox · analysierte Kundenanfrage");
+  await expect(reviewContext).toContainText("Ursprung: Inbox · ungeprüfte KI-Analyse");
+  await expect(reviewContext).toContainText(
+    "KI-Zusammenfassung der Anfrage (ungeprüft)",
+  );
   await expect(reviewContext).toContainText(
     "Unbekannt: Wohnzimmer, Esszimmer und Flur streichen",
   );
@@ -191,6 +194,25 @@ test("Inbox und Today bilden einen beidseitigen Prüfpfad für die vorbereitete 
   await expect(page.getByRole("link", { name: "In Heute weiterprüfen" })).toHaveCount(0);
 });
 
+test("Inbox-Prüfvormerkung bleibt auch während der Verarbeitung klar benannt", async ({ page }) => {
+  await page.goto("/inbox");
+  await fillInboxInquiry(page);
+  await page.getByRole("button", { name: "Anfrage analysieren" }).click();
+  await page.getByRole("link", { name: "In Heute weiterprüfen" }).click();
+  await page.getByRole("button", { name: "Angebotsentwurf Familie Schneider vorbereiten" }).click();
+  await page.route("**/today", async (route) => {
+    if (route.request().method() === "POST") {
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+
+    await route.continue();
+  });
+
+  const submit = page.getByRole("button", { name: "Als geprüft vormerken" }).click();
+  await expect(page.getByRole("button", { name: "Wird vorgemerkt …" })).toBeDisabled();
+  await submit;
+});
+
 test("Inbox-Review-Kontext bleibt im mobilen Today-Happy-Path vollständig prüfbar", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/inbox");
@@ -201,7 +223,7 @@ test("Inbox-Review-Kontext bleibt im mobilen Today-Happy-Path vollständig prüf
 
   const reviewContext = page.getByRole("region", { name: "Prüfgrundlage aus der Inbox" });
   await expect(reviewContext).toBeVisible();
-  await expect(reviewContext).toContainText("Zugrunde liegende Anfrage");
+  await expect(reviewContext).toContainText("KI-Zusammenfassung der Anfrage (ungeprüft)");
   await expect(reviewContext).toContainText("Nächster menschlicher Schritt");
   await expect(page.getByRole("link", { name: "Ändern" })).toBeVisible();
 });

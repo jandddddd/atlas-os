@@ -33,6 +33,7 @@ test("creates an approval decision from a persisted inbox analysis", () => {
   assert.equal(decision.title, "Angebotsentwurf Familie Schneider vorbereiten");
   assert.equal(decision.editHref, "/inbox");
   assert.equal(decision.primaryActionLabel, "Als geprüft vormerken");
+  assert.equal(decision.primaryActionPendingLabel, "Wird vorgemerkt …");
   assert.equal(
     decision.consequence,
     "Mit dieser Vormerkung wird nichts versendet oder final freigegeben.",
@@ -42,7 +43,7 @@ test("creates an approval decision from a persisted inbox analysis", () => {
     "Der vorbereitete nächste Schritt wurde als geprüft vorgemerkt.",
   );
   assert.deepEqual(decision.reviewContext, {
-    source: "Inbox · analysierte Kundenanfrage",
+    source: "Inbox · ungeprüfte KI-Analyse",
     inquiry: "Familie Schneider: Wohnzimmer streichen",
     analysis:
       "Malerarbeiten. Genannte Flächenangabe laut Analyse: 75 m². Sie ist keine automatisch abgeleitete Wand- oder Deckenfläche.",
@@ -81,7 +82,7 @@ test("keeps a replacement analysis isolated from the previously stored inquiry",
   });
 
   assert.deepEqual(decision.reviewContext, {
-    source: "Inbox · analysierte Kundenanfrage",
+    source: "Inbox · ungeprüfte KI-Analyse",
     inquiry: "Familie Berger: Fassade prüfen",
     analysis: "Malerarbeiten. Keine Flächenangabe ist bekannt; Maße bleiben offen.",
     nextStep: "Besichtigung abstimmen",

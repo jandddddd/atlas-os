@@ -186,7 +186,9 @@ export function ApprovalCard({
               </div>
               <dl className="mt-4 grid gap-4 text-sm sm:grid-cols-2">
                 <div className="space-y-1">
-                  <dt className="font-medium text-neutral-500">Zugrunde liegende Anfrage</dt>
+                  <dt className="font-medium text-neutral-500">
+                    KI-Zusammenfassung der Anfrage (ungeprüft)
+                  </dt>
                   <dd className="leading-6 text-neutral-800">{reviewContext.inquiry}</dd>
                 </div>
                 <div className="space-y-1">
