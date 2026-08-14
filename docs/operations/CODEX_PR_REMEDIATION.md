@@ -24,6 +24,8 @@ Workflow files and `.github/atlas-autopilot.yml` are excluded from ordinary prod
 
 The coordinator checks out trusted base-branch code under `pull_request_target`; it never checks out or executes PR code. Its token has `contents: read` plus only the issue/PR comment permissions needed to dispatch Codex commands. It has no content-write, merge, administration, deployment, environment, or secret permission.
 
+The `coordinate` job has a GitHub-evaluated `base.ref == main` condition before runner allocation or any step. A PR targeting any other base is skipped before checkout, module import, or access to the job's write-capable comment token. Eligible PRs check out the exact event-bound `main` base SHA rather than arbitrary PR-head or non-main-base code.
+
 During the workflow's own rollout PR, the trusted base may not contain the coordinator module yet. That bootstrap case exits successfully without dispatching anything; the workflow never falls back to importing the untrusted PR copy. Once merged, every run imports the module from the checked-out trusted base revision.
 
 Codex remediation is governed by the repository instructions and performs validation in its isolated PR task. Immediately before pushing, it must re-fetch the remote PR branch and confirm the head still matches its bound input SHA. A mismatch stops without push. Each pushed head receives a fresh review request; old findings cannot authorize work on a new head.

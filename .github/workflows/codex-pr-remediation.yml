@@ -17,6 +17,7 @@ concurrency:
 
 jobs:
   coordinate:
+    if: github.event.pull_request.base.ref == 'main'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout trusted base revision

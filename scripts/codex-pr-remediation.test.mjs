@@ -178,6 +178,18 @@ test("workflow has no merge, Repair Execute, secret, or contents-write path", ()
   assert.match(workflow, /trusted-module\.outputs\.available == 'true'/);
 });
 
+test("non-main pull requests are rejected before trusted checkout or coordinator import", () => {
+  const workflow = readFileSync(new URL("../.github/workflows/codex-pr-remediation.yml", import.meta.url), "utf8");
+  const coordinateJob = workflow.slice(workflow.indexOf("  coordinate:"));
+  const mainOnlyGate = coordinateJob.indexOf("if: github.event.pull_request.base.ref == 'main'");
+  const checkout = coordinateJob.indexOf("name: Checkout trusted base revision");
+  const moduleImport = coordinateJob.indexOf("scripts/codex-pr-remediation.mjs");
+  assert.ok(mainOnlyGate >= 0, "coordinate job must have a main-only eligibility gate");
+  assert.ok(mainOnlyGate < checkout, "main-only eligibility must be evaluated before checkout");
+  assert.ok(mainOnlyGate < moduleImport, "main-only eligibility must be evaluated before coordinator import");
+  assert.match(coordinateJob, /ref: \$\{\{ github\.event\.pull_request\.base\.sha \}\}/);
+});
+
 test("state marker round-trips only a bounded valid state", () => {
   const state = { version: 1, prNumber: 49, round: 2, phase: "review_requested", boundHead: shaA, originalPaths: [], findingIds: [] };
   assert.deepEqual(decodeState(encodeState(state)), state);
