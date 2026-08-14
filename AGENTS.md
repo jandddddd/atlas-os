@@ -144,6 +144,14 @@ Wenn die Codex-Umgebung einen Schritt wegen einer externen Registry-, Proxy- ode
 - Fasse geänderte Dateien, Testergebnisse und bekannte Risiken zusammen.
 - Korrigiere bei fehlgeschlagenen Checks den bestehenden Pull Request, statt einen neuen parallelen Pull Request zu erstellen.
 
+## Codex-Review-Remediation
+
+- Automatisierte Review-Remediation bearbeitet ausschließlich offene P1/P2-Findings des aktuellen PR-Heads auf demselben bestehenden PR-Branch und folgt `.github/codex/pr-remediation-policy.md`.
+- Vor jedem Push müssen die dort festgelegten Validierungen erfolgreich sein. Direkt vor dem Push muss der Remote-Head noch dem gebundenen Ausgangs-SHA entsprechen; bei Abweichung wird ohne Push eskaliert.
+- Nach jedem Remediation-Push ist eine neue Codex-Review für den neuen Head erforderlich. Nach höchstens zwei Runden wird nicht weiter geändert, sondern an einen Menschen eskaliert.
+- Ein API-/Schema-/Persistenzvertrag, Workflow-Berechtigungen, Secrets, Environments, Rulesets, Branch Protection oder Repository-Administration dürfen nicht automatisiert geändert werden. Automatisches Mergen und direkte Pushes auf `main` sind verboten.
+- Atlas Repair/Pilot, Repair Execute, Repair-Attempts und Repair-Tags gehören nicht zu diesem Ablauf und dürfen dafür nicht aktiviert oder verwendet werden.
+
 ## Abschlussbericht
 
 Nenne am Ende:
