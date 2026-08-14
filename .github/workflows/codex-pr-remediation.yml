@@ -1,0 +1,190 @@
+name: Bounded Codex PR Remediation
+
+on:
+  pull_request_target:
+    types: [synchronize]
+  pull_request_review:
+    types: [submitted]
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
+concurrency:
+  group: codex-pr-remediation-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  coordinate:
+    if: github.event.pull_request.base.ref == 'main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout trusted base revision
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          persist-credentials: false
+
+      - name: Check trusted coordinator availability
+        id: trusted-module
+        shell: bash
+        run: |
+          if [[ -f scripts/codex-pr-remediation.mjs ]]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "Coordinator is not active until its trusted module exists on the base branch."
+          fi
+
+      - name: Plan bounded remediation action
+        id: plan
+        if: steps.trusted-module.outputs.available == 'true'
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const { pathToFileURL } = require("node:url");
+            const { encodeState, isCodexReviewer, planRemediation, selectUnresolvedReviewFindings } = await import(
+              pathToFileURL(`${process.env.GITHUB_WORKSPACE}/scripts/codex-pr-remediation.mjs`).href
+            );
+            if (context.eventName === "pull_request_review" && !isCodexReviewer(context.payload.review.user.login)) {
+              core.info("Ignoring a review submitted by a non-Codex author.");
+              return;
+            }
+            const pullNumber = context.payload.pull_request.number;
+            const { data: pull } = await github.rest.pulls.get({ ...context.repo, pull_number: pullNumber });
+            const files = await github.paginate(github.rest.pulls.listFiles, {
+              ...context.repo, pull_number: pullNumber, per_page: 100,
+            });
+            const issueComments = await github.paginate(github.rest.issues.listComments, {
+              ...context.repo, issue_number: pullNumber, per_page: 100,
+            });
+
+            const reviewComments = context.eventName === "pull_request_review"
+              ? await github.paginate(github.rest.pulls.listCommentsForReview, {
+                  ...context.repo,
+                  pull_number: pullNumber,
+                  review_id: context.payload.review.id,
+                  per_page: 100,
+                })
+              : [];
+            const reviewCommentIds = new Set(
+              reviewComments
+                .filter((comment) => isCodexReviewer(comment.user?.login))
+                .map((comment) => String(comment.id)),
+            );
+            const reviewThreads = [];
+            let reviewCursor = null;
+            do {
+              const threadData = await github.graphql(
+                `query($owner: String!, $repo: String!, $number: Int!, $cursor: String) {
+                  repository(owner: $owner, name: $repo) {
+                    pullRequest(number: $number) {
+                      reviewThreads(first: 100, after: $cursor) {
+                        pageInfo { hasNextPage endCursor }
+                        nodes {
+                          id
+                          isResolved
+                          comments(first: 100) {
+                            pageInfo { hasNextPage endCursor }
+                            nodes { databaseId body path author { login } }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }`,
+                { owner: context.repo.owner, repo: context.repo.repo, number: pullNumber, cursor: reviewCursor },
+              );
+              const page = threadData.repository.pullRequest.reviewThreads;
+              for (const thread of page.nodes) {
+                const comments = thread.comments.nodes.map((comment) => ({
+                  databaseId: comment.databaseId,
+                  body: comment.body,
+                  path: comment.path,
+                  author: comment.author?.login,
+                }));
+                let commentCursor = thread.comments.pageInfo.hasNextPage
+                  ? thread.comments.pageInfo.endCursor
+                  : null;
+                while (commentCursor) {
+                  const commentData = await github.graphql(
+                    `query($threadId: ID!, $cursor: String!) {
+                      node(id: $threadId) {
+                        ... on PullRequestReviewThread {
+                          comments(first: 100, after: $cursor) {
+                            pageInfo { hasNextPage endCursor }
+                            nodes { databaseId body path author { login } }
+                          }
+                        }
+                      }
+                    }`,
+                    { threadId: thread.id, cursor: commentCursor },
+                  );
+                  const commentPage = commentData.node.comments;
+                  comments.push(...commentPage.nodes.map((comment) => ({
+                    databaseId: comment.databaseId,
+                    body: comment.body,
+                    path: comment.path,
+                    author: comment.author?.login,
+                  })));
+                  commentCursor = commentPage.pageInfo.hasNextPage ? commentPage.pageInfo.endCursor : null;
+                }
+                reviewThreads.push({ id: thread.id, isResolved: thread.isResolved, comments });
+              }
+              reviewCursor = page.pageInfo.hasNextPage ? page.pageInfo.endCursor : null;
+            } while (reviewCursor);
+            const findings = selectUnresolvedReviewFindings(reviewThreads, reviewCommentIds);
+            const event = context.eventName === "pull_request_review"
+              ? { name: "review", reviewHeadSha: context.payload.review.commit_id }
+              : { name: "synchronize", before: context.payload.before };
+            const result = planRemediation({
+              event,
+              pull: {
+                number: pull.number,
+                state: pull.state,
+                draft: pull.draft,
+                baseRef: pull.base.ref,
+                headRef: pull.head.ref,
+                baseRepository: pull.base.repo.full_name,
+                headRepository: pull.head.repo?.full_name,
+                headSha: pull.head.sha,
+                changedPaths: files.flatMap((file) => [file.filename, file.previous_filename].filter(Boolean)),
+              },
+              findings,
+              comments: issueComments.map((comment) => ({
+                author: comment.user?.login,
+                createdAt: comment.created_at,
+                body: comment.body,
+              })),
+            });
+
+            let body = "";
+            if (result.action === "REQUEST_REMEDIATION") {
+              body = `${encodeState(result.state)}\n@codex address that feedback\n\nAddress only the currently open P1/P2 review feedback on this pull request. ` +
+                `This is bounded remediation round ${result.state.round}/2 for exact head \`${result.state.boundHead}\`. ` +
+                `Read and follow \`.github/codex/pr-remediation-policy.md\`. Validate before one normal push to this same PR branch; stop and report instead if any escalation condition applies.`;
+            } else if (result.action === "REQUEST_REVIEW") {
+              body = `${encodeState(result.state)}\n@codex review\n\nReview exact head \`${result.state.boundHead}\` after bounded remediation round ${result.state.round}/2.`;
+            } else if (result.action === "ESCALATE") {
+              const state = result.state
+                ? { ...result.state, phase: "escalated", boundHead: pull.head.sha }
+                : { version: 1, prNumber: pull.number, round: 1, phase: "escalated", boundHead: pull.head.sha, originalPaths: [], findingIds: [] };
+              body = `${encodeState(state)}\n## Codex remediation requires human review\n\n${result.reason}\n\nNo automated remediation, push, or merge was requested.`;
+            }
+            core.setOutput("action", result.action);
+            core.setOutput("comment", body);
+            core.info(`${result.action}: ${result.reason ?? "bounded transition accepted"}`);
+
+      - name: Publish Codex command or escalation
+        if: steps.plan.outputs.comment != ''
+        uses: actions/github-script@v8
+        env:
+          COMMENT_BODY: ${{ steps.plan.outputs.comment }}
+        with:
+          script: |
+            await github.rest.issues.createComment({
+              ...context.repo,
+              issue_number: context.payload.pull_request.number,
+              body: process.env.COMMENT_BODY,
+            });
