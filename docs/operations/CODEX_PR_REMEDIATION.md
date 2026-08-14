@@ -6,6 +6,8 @@ The normal path is intentionally short: create or mark a pull request ready, wai
 
 When Codex submits an open P1/P2 finding against the exact current head, `Bounded Codex PR Remediation` posts a PR-context `@codex` request. Codex receives the existing review threads directly, so an operator does not have to copy findings between tools. The request points to the reusable policy in `.github/codex/pr-remediation-policy.md` and binds the task to the full head SHA.
 
+The coordinator joins the exact submitted review's comment IDs to authoritative, fully paginated GraphQL `reviewThreads` data. Only threads whose current `isResolved` value is `false` become findings or enter stored state. If all P1/P2 threads have been resolved before evaluation, the coordinator performs no remediation action.
+
 After Codex validates and pushes one normal commit to the same branch, the PR `synchronize` event must identify the previously bound SHA as its immediate `before` value. Only then does the coordinator post `@codex review` for the new full head SHA. A new review may start one more remediation round. If P1/P2 findings remain after round two, automation stops and posts a human-escalation comment.
 
 The workflow stores its small state record in a hidden, bot-owned PR-comment marker. It records the PR number, phase, full bound head, round number, original changed paths, and finding thread IDs. It creates no branch, tag, replacement PR, environment, secret, ruleset, or repository setting.
@@ -19,6 +21,8 @@ Workflow files and `.github/atlas-autopilot.yml` are excluded from ordinary prod
 ## Security and ownership boundaries
 
 The coordinator checks out trusted base-branch code under `pull_request_target`; it never checks out or executes PR code. Its token has `contents: read` plus only the issue/PR comment permissions needed to dispatch Codex commands. It has no content-write, merge, administration, deployment, environment, or secret permission.
+
+During the workflow's own rollout PR, the trusted base may not contain the coordinator module yet. That bootstrap case exits successfully without dispatching anything; the workflow never falls back to importing the untrusted PR copy. Once merged, every run imports the module from the checked-out trusted base revision.
 
 Codex remediation is governed by the repository instructions and performs validation in its isolated PR task. Immediately before pushing, it must re-fetch the remote PR branch and confirm the head still matches its bound input SHA. A mismatch stops without push. Each pushed head receives a fresh review request; old findings cannot authorize work on a new head.
 

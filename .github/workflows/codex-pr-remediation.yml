@@ -28,13 +28,25 @@ jobs:
           ref: ${{ github.event.pull_request.base.sha }}
           persist-credentials: false
 
+      - name: Check trusted coordinator availability
+        id: trusted-module
+        shell: bash
+        run: |
+          if [[ -f scripts/codex-pr-remediation.mjs ]]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "Coordinator is not active until its trusted module exists on the base branch."
+          fi
+
       - name: Plan bounded remediation action
         id: plan
+        if: steps.trusted-module.outputs.available == 'true'
         uses: actions/github-script@v8
         with:
           script: |
             const { pathToFileURL } = require("node:url");
-            const { encodeState, findPriority, planRemediation } = await import(
+            const { encodeState, planRemediation, selectUnresolvedReviewFindings } = await import(
               pathToFileURL(`${process.env.GITHUB_WORKSPACE}/scripts/codex-pr-remediation.mjs`).href
             );
             const pullNumber = context.payload.pull_request.number;
@@ -54,10 +66,69 @@ jobs:
                   per_page: 100,
                 })
               : [];
-            const findings = reviewComments.flatMap((comment) => {
-              const priority = findPriority(comment.body);
-              return priority ? [{ id: String(comment.id), priority, path: comment.path, body: comment.body }] : [];
-            });
+            const reviewCommentIds = new Set(reviewComments.map((comment) => String(comment.id)));
+            const reviewThreads = [];
+            let reviewCursor = null;
+            do {
+              const threadData = await github.graphql(
+                `query($owner: String!, $repo: String!, $number: Int!, $cursor: String) {
+                  repository(owner: $owner, name: $repo) {
+                    pullRequest(number: $number) {
+                      reviewThreads(first: 100, after: $cursor) {
+                        pageInfo { hasNextPage endCursor }
+                        nodes {
+                          id
+                          isResolved
+                          comments(first: 100) {
+                            pageInfo { hasNextPage endCursor }
+                            nodes { databaseId body path author { login } }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }`,
+                { owner: context.repo.owner, repo: context.repo.repo, number: pullNumber, cursor: reviewCursor },
+              );
+              const page = threadData.repository.pullRequest.reviewThreads;
+              for (const thread of page.nodes) {
+                const comments = thread.comments.nodes.map((comment) => ({
+                  databaseId: comment.databaseId,
+                  body: comment.body,
+                  path: comment.path,
+                  author: comment.author?.login,
+                }));
+                let commentCursor = thread.comments.pageInfo.hasNextPage
+                  ? thread.comments.pageInfo.endCursor
+                  : null;
+                while (commentCursor) {
+                  const commentData = await github.graphql(
+                    `query($threadId: ID!, $cursor: String!) {
+                      node(id: $threadId) {
+                        ... on PullRequestReviewThread {
+                          comments(first: 100, after: $cursor) {
+                            pageInfo { hasNextPage endCursor }
+                            nodes { databaseId body path author { login } }
+                          }
+                        }
+                      }
+                    }`,
+                    { threadId: thread.id, cursor: commentCursor },
+                  );
+                  const commentPage = commentData.node.comments;
+                  comments.push(...commentPage.nodes.map((comment) => ({
+                    databaseId: comment.databaseId,
+                    body: comment.body,
+                    path: comment.path,
+                    author: comment.author?.login,
+                  })));
+                  commentCursor = commentPage.pageInfo.hasNextPage ? commentPage.pageInfo.endCursor : null;
+                }
+                reviewThreads.push({ id: thread.id, isResolved: thread.isResolved, comments });
+              }
+              reviewCursor = page.pageInfo.hasNextPage ? page.pageInfo.endCursor : null;
+            } while (reviewCursor);
+            const findings = selectUnresolvedReviewFindings(reviewThreads, reviewCommentIds);
             const event = context.eventName === "pull_request_review"
               ? { name: "review", reviewHeadSha: context.payload.review.commit_id }
               : { name: "synchronize", before: context.payload.before };

@@ -10,6 +10,25 @@ export function findPriority(body) {
   return PRIORITY_ORDER.find((priority) => priorities.includes(priority)) ?? null;
 }
 
+export function selectUnresolvedReviewFindings(reviewThreads, reviewCommentIds) {
+  const selectedCommentIds = new Set([...reviewCommentIds].map(String));
+  return reviewThreads.flatMap((thread) => {
+    if (thread.isResolved) return [];
+    const comment = thread.comments.find((candidate) =>
+      candidate.author === "chatgpt-codex-connector" && selectedCommentIds.has(String(candidate.databaseId)),
+    );
+    if (!comment) return [];
+    const priority = findPriority(comment.body);
+    return priority ? [{
+      id: thread.id,
+      commentId: String(comment.databaseId),
+      priority,
+      path: comment.path,
+      body: comment.body,
+    }] : [];
+  });
+}
+
 export function encodeState(state) {
   return `${STATE_MARKER}${JSON.stringify(state)} -->`;
 }

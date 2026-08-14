@@ -2,7 +2,13 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
-import { decodeState, encodeState, findPriority, planRemediation } from "./codex-pr-remediation.mjs";
+import {
+  decodeState,
+  encodeState,
+  findPriority,
+  planRemediation,
+  selectUnresolvedReviewFindings,
+} from "./codex-pr-remediation.mjs";
 
 const shaA = "a".repeat(40);
 const shaB = "b".repeat(40);
@@ -20,6 +26,19 @@ const basePull = {
 };
 const finding = { id: "thread-1", priority: "P1", path: "components/inbox/InboxAnalysis.tsx", body: "P1 fix this" };
 
+function reviewThread({ id, resolved = false, commentId, priority = "P2", path = "components/inbox/InboxAnalysis.tsx" }) {
+  return {
+    id,
+    isResolved: resolved,
+    comments: [{
+      databaseId: commentId,
+      author: "chatgpt-codex-connector",
+      body: `${priority} review finding`,
+      path,
+    }],
+  };
+}
+
 function comment(state, createdAt = "2026-08-14T10:00:00Z") {
   return { author: "github-actions[bot]", createdAt, body: encodeState(state) };
 }
@@ -27,6 +46,51 @@ function comment(state, createdAt = "2026-08-14T10:00:00Z") {
 test("priority parsing is limited to P1 and P2", () => {
   assert.equal(findPriority("[P2] issue"), "P2");
   assert.equal(findPriority("P3 only"), null);
+});
+
+test("unresolved P2 from the current review triggers remediation", () => {
+  const findings = selectUnresolvedReviewFindings(
+    [reviewThread({ id: "thread-p2", commentId: 101 })],
+    new Set(["101"]),
+  );
+  const result = planRemediation({ event: { name: "review", reviewHeadSha: shaA }, pull: basePull, findings, comments: [] });
+  assert.equal(result.action, "REQUEST_REMEDIATION");
+  assert.deepEqual(result.state.findingIds, ["thread-p2"]);
+});
+
+test("resolved P2 does not trigger or enter stored remediation state", () => {
+  const findings = selectUnresolvedReviewFindings(
+    [reviewThread({ id: "resolved-p2", resolved: true, commentId: 102 })],
+    new Set(["102"]),
+  );
+  const result = planRemediation({ event: { name: "review", reviewHeadSha: shaA }, pull: basePull, findings, comments: [] });
+  assert.deepEqual(findings, []);
+  assert.equal(result.action, "CLEAN");
+  assert.deepEqual(result.state.findingIds, []);
+});
+
+test("mixed thread state includes and stores only unresolved current-review findings", () => {
+  const findings = selectUnresolvedReviewFindings([
+    reviewThread({ id: "resolved", resolved: true, commentId: 103 }),
+    reviewThread({ id: "unresolved", commentId: 104 }),
+    reviewThread({ id: "other-review", commentId: 105 }),
+  ], new Set(["103", "104"]));
+  const result = planRemediation({ event: { name: "review", reviewHeadSha: shaA }, pull: basePull, findings, comments: [] });
+  assert.deepEqual(findings.map((item) => item.id), ["unresolved"]);
+  assert.deepEqual(result.state.findingIds, ["unresolved"]);
+});
+
+test("a later resolution snapshot cannot resurrect a previously open finding", () => {
+  const open = selectUnresolvedReviewFindings(
+    [reviewThread({ id: "thread-changing", commentId: 106 })],
+    new Set(["106"]),
+  );
+  const resolved = selectUnresolvedReviewFindings(
+    [reviewThread({ id: "thread-changing", resolved: true, commentId: 106 })],
+    new Set(["106"]),
+  );
+  assert.equal(open.length, 1);
+  assert.deepEqual(resolved, []);
 });
 
 test("first current-head finding requests round one on the same branch", () => {
@@ -89,6 +153,8 @@ test("workflow has no merge, Repair Execute, secret, or contents-write path", ()
   assert.doesNotMatch(workflow, /pulls\.merge|enablePullRequestAutoMerge|git push|contents:\s*write|OPENAI_API_KEY|secrets\.|atlas-pr-repair-execute|repair-attempt/i);
   assert.match(workflow, /pull-requests:\s*write/);
   assert.match(workflow, /@codex review/);
+  assert.match(workflow, /isResolved/);
+  assert.match(workflow, /trusted-module\.outputs\.available == 'true'/);
 });
 
 test("state marker round-trips only a bounded valid state", () => {
