@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import { Plus } from "lucide-react";
 
 import { OfferPositionRow } from "./OfferPositionRow";
@@ -22,6 +23,19 @@ export function OfferDraftView({
   onSave,
   onDiscard,
 }: OfferDraftViewProps) {
+  const sectionRef = useRef<HTMLElement>(null);
+
+  useEffect(() => {
+    if (window.location.hash !== "#offer-draft") return;
+
+    const frame = window.requestAnimationFrame(() => {
+      sectionRef.current?.scrollIntoView({ block: "start" });
+      sectionRef.current?.focus({ preventScroll: true });
+    });
+
+    return () => window.cancelAnimationFrame(frame);
+  }, []);
+
   function updatePosition(id: number, changes: Partial<OfferPosition>) {
     onChange({
       ...editableOffer,
@@ -53,7 +67,12 @@ export function OfferDraftView({
   }
 
   return (
-    <section id="offer-draft" className="scroll-mt-6 rounded-2xl border bg-white p-6">
+    <section
+      ref={sectionRef}
+      id="offer-draft"
+      tabIndex={-1}
+      className="scroll-mt-6 rounded-2xl border bg-white p-6 outline-none"
+    >
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <span className="rounded-full bg-amber-100 px-3 py-1 text-sm font-medium text-amber-800">
