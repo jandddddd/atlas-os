@@ -60,6 +60,12 @@ export function createInboxTodayDecision(
     primaryActionPendingLabel: "Wird vorgemerkt …",
     editHref: "/inbox",
     completionMessage: "Der vorbereitete nächste Schritt wurde als geprüft vorgemerkt.",
+    completionAction: isOffer
+      ? {
+          label: "Angebotsentwurf weiterbearbeiten",
+          href: "/inbox#offer-draft",
+        }
+      : undefined,
     details: {
       title: "Weitere Schritte aus der Analyse",
       items: analysis.nextSteps.length > 0
