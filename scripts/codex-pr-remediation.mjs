@@ -101,7 +101,10 @@ export function planRemediation({ event, pull, findings, comments = [] }) {
       return escalation("The PR head changed while awaiting review of the bound remediation head.", previous);
     }
     if (!previous || previous.phase !== "remediation_requested") return { action: "WAIT", reason: "No remediation push is pending." };
-    if (event.before !== previous.boundHead || pull.headSha === previous.boundHead) {
+    if (pull.headSha === previous.boundHead) {
+      return { action: "WAIT", reason: "This synchronize transition was already reconciled by a review for the current head." };
+    }
+    if (event.before !== previous.boundHead) {
       return escalation("The PR head changed outside the expected bound-head transition.", previous);
     }
     return {
