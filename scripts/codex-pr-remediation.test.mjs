@@ -142,6 +142,26 @@ test("unexpected head transition escalates", () => {
   assert.equal(result.action, "ESCALATE");
 });
 
+test("review after a failed synchronize state publication escalates without resetting the round", () => {
+  const state = { version: 1, prNumber: 49, round: 2, phase: "remediation_requested", boundHead: shaA, originalPaths: basePull.changedPaths, findingIds: ["thread-2"] };
+  const result = planRemediation({ event: { name: "review", reviewHeadSha: shaB }, pull: { ...basePull, headSha: shaB }, findings: [{ ...finding, id: "thread-3" }], comments: [comment(state)] });
+  assert.equal(result.action, "ESCALATE");
+  assert.match(result.reason, /not bound to the reviewed PR head/);
+  assert.equal(result.state.round, 2);
+  assert.equal(result.state.phase, "remediation_requested");
+  assert.equal(result.state.boundHead, shaA);
+});
+
+test("intervening synchronize while awaiting the bound review escalates immediately", () => {
+  const state = { version: 1, prNumber: 49, round: 1, phase: "awaiting_review_after_push", boundHead: shaB, originalPaths: basePull.changedPaths, findingIds: ["thread-1"] };
+  const result = planRemediation({ event: { name: "synchronize", before: shaB }, pull: { ...basePull, headSha: shaC }, findings: [], comments: [comment(state)] });
+  assert.equal(result.action, "ESCALATE");
+  assert.match(result.reason, /changed while awaiting review/);
+  assert.equal(result.state.round, 1);
+  assert.equal(result.state.phase, "awaiting_review_after_push");
+  assert.equal(result.state.boundHead, shaB);
+});
+
 test("second reviewed head gets the final allowed remediation round", () => {
   const state = { version: 1, prNumber: 49, round: 1, phase: "awaiting_review_after_push", boundHead: shaA, originalPaths: basePull.changedPaths, findingIds: ["thread-1"] };
   const result = planRemediation({ event: { name: "review", reviewHeadSha: shaA }, pull: basePull, findings: [{ ...finding, id: "thread-2" }], comments: [comment(state)] });

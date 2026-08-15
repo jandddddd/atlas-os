@@ -94,6 +94,9 @@ export function planRemediation({ event, pull, findings, comments = [] }) {
   const previous = latestState(comments);
   if (previous && previous.prNumber !== pull.number) return escalation("Stored remediation state belongs to another pull request.");
   if (event.name === "synchronize") {
+    if (previous?.phase === "awaiting_review_after_push" || previous?.phase === "review_requested") {
+      return escalation("The PR head changed while awaiting review of the bound remediation head.", previous);
+    }
     if (!previous || previous.phase !== "remediation_requested") return { action: "WAIT", reason: "No remediation push is pending." };
     if (event.before !== previous.boundHead || pull.headSha === previous.boundHead) {
       return escalation("The PR head changed outside the expected bound-head transition.", previous);
