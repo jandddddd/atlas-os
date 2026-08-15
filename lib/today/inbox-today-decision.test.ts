@@ -45,6 +45,7 @@ test("creates an approval decision from a persisted inbox analysis", () => {
   assert.deepEqual(decision.completionAction, {
     label: "Angebotsentwurf weiterbearbeiten",
     href: "/inbox#offer-draft",
+    requiresSavedOfferDraft: true,
   });
   assert.deepEqual(decision.reviewContext, {
     source: "Inbox · ungeprüfte KI-Analyse",
