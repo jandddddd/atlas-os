@@ -135,8 +135,19 @@ jobs:
               reviewCursor = page.pageInfo.hasNextPage ? page.pageInfo.endCursor : null;
             } while (reviewCursor);
             const findings = selectUnresolvedReviewFindings(reviewThreads, reviewCommentIds);
+
+            let reviewBefore = null;
+            if (context.eventName === "pull_request_review" && context.payload.review.commit_id === pull.head.sha) {
+              const { data: reviewedCommit } = await github.rest.repos.getCommit({
+                ...context.repo,
+                ref: pull.head.sha,
+              });
+              if (reviewedCommit.parents.length === 1) {
+                reviewBefore = reviewedCommit.parents[0].sha;
+              }
+            }
             const event = context.eventName === "pull_request_review"
-              ? { name: "review", reviewHeadSha: context.payload.review.commit_id }
+              ? { name: "review", reviewHeadSha: context.payload.review.commit_id, before: reviewBefore }
               : { name: "synchronize", before: context.payload.before };
             const result = planRemediation({
               event,
