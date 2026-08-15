@@ -1,6 +1,5 @@
 import type { AnalysisResult } from "@/components/inbox/types";
 import type { TodayApprovalDecisionInput } from "@/components/today/TodayApprovalCenter";
-import { createInboxAnalysisKey } from "../storage/inbox-storage.ts";
 
 export const inboxTodayDecisionId = "inbox-recommended-task";
 
@@ -61,14 +60,15 @@ export function createInboxTodayDecision(
     primaryActionPendingLabel: "Wird vorgemerkt …",
     editHref: "/inbox",
     completionMessage: "Der vorbereitete nächste Schritt wurde als geprüft vorgemerkt.",
-    completionAction: isOffer
-      ? {
-          label: "Angebotsentwurf weiterbearbeiten",
-          href: "/inbox#offer-draft",
-          requiresSavedOfferDraft: true,
-          analysisKey: createInboxAnalysisKey(analysis),
-        }
-      : undefined,
+    completionAction:
+      isOffer && analysis.workflowId
+        ? {
+            label: "Angebotsentwurf weiterbearbeiten",
+            href: "/inbox#offer-draft",
+            requiresSavedOfferDraft: true,
+            workflowId: analysis.workflowId,
+          }
+        : undefined,
     details: {
       title: "Weitere Schritte aus der Analyse",
       items: analysis.nextSteps.length > 0

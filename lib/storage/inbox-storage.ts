@@ -11,7 +11,7 @@ const OFFER_DRAFT_BINDING_VERSION = 1;
 
 type StoredOfferDraftBinding = {
   version: typeof OFFER_DRAFT_BINDING_VERSION;
-  analysisKey: string;
+  workflowId: string;
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -39,6 +39,7 @@ function isInquiryAnalysis(value: unknown): value is AnalysisResult {
   const { customer, project, workflow, recommendedTask } = value;
 
   return (
+    (value.workflowId === undefined || typeof value.workflowId === "string") &&
     isRecord(customer) &&
     typeof customer.name === "string" &&
     isRecord(project) &&
@@ -81,7 +82,7 @@ function isStoredOfferDraftBinding(value: unknown): value is StoredOfferDraftBin
   return (
     isRecord(value) &&
     value.version === OFFER_DRAFT_BINDING_VERSION &&
-    typeof value.analysisKey === "string"
+    typeof value.workflowId === "string"
   );
 }
 
@@ -123,16 +124,9 @@ function saveStoredValue(key: string, value: unknown) {
   }
 }
 
-export function createInboxAnalysisKey(analysis: AnalysisResult): string {
-  return JSON.stringify({
-    version: 1,
-    customer: analysis.customer,
-    project: analysis.project,
-    workflow: analysis.workflow,
-    nextSteps: analysis.nextSteps,
-    missingInformation: analysis.missingInformation,
-    recommendedTask: analysis.recommendedTask,
-  });
+function clearStoredValue(key: string) {
+  if (typeof window === "undefined") return;
+  window.localStorage.removeItem(key);
 }
 
 export function loadInquiryAnalysis(): AnalysisResult | null {
@@ -150,6 +144,8 @@ export function loadOfferDraft(): OfferDraft | null {
 export function loadOfferDraftForAnalysis(
   analysis: AnalysisResult,
 ): OfferDraft | null {
+  if (!analysis.workflowId) return null;
+
   const offer = loadOfferDraft();
   const binding = loadStoredValue(
     OFFER_DRAFT_BINDING_KEY,
@@ -157,15 +153,20 @@ export function loadOfferDraftForAnalysis(
   );
   if (!offer || !binding) return null;
 
-  return binding.analysisKey === createInboxAnalysisKey(analysis) ? offer : null;
+  return binding.workflowId === analysis.workflowId ? offer : null;
 }
 
 export function saveOfferDraft(offer: OfferDraft, analysis: AnalysisResult) {
   saveStoredValue(OFFER_DRAFT_KEY, offer);
-  saveStoredValue(OFFER_DRAFT_BINDING_KEY, {
-    version: OFFER_DRAFT_BINDING_VERSION,
-    analysisKey: createInboxAnalysisKey(analysis),
-  } satisfies StoredOfferDraftBinding);
+
+  if (analysis.workflowId) {
+    saveStoredValue(OFFER_DRAFT_BINDING_KEY, {
+      version: OFFER_DRAFT_BINDING_VERSION,
+      workflowId: analysis.workflowId,
+    } satisfies StoredOfferDraftBinding);
+  } else {
+    clearStoredValue(OFFER_DRAFT_BINDING_KEY);
+  }
 }
 
 export function clearOfferDraft() {

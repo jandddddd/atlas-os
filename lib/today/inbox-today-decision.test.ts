@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { createInboxAnalysisKey } from "../storage/inbox-storage.ts";
 import {
   createInboxTodayDecision,
   inboxTodayDecisionId,
@@ -9,6 +8,7 @@ import {
 
 test("creates an approval decision from a persisted inbox analysis", () => {
   const analysis = {
+    workflowId: "workflow-schneider",
     customer: { name: "Familie Schneider" },
     project: {
       trade: "Malerarbeiten",
@@ -48,7 +48,7 @@ test("creates an approval decision from a persisted inbox analysis", () => {
     label: "Angebotsentwurf weiterbearbeiten",
     href: "/inbox#offer-draft",
     requiresSavedOfferDraft: true,
-    analysisKey: createInboxAnalysisKey(analysis),
+    workflowId: "workflow-schneider",
   });
   assert.deepEqual(decision.reviewContext, {
     source: "Inbox · ungeprüfte KI-Analyse",
@@ -66,6 +66,30 @@ test("creates an approval decision from a persisted inbox analysis", () => {
     description: "Bilder, genaue Maße",
     nextStep: "Bitte prüfe, ob diese Angaben vor der Freigabe benötigt werden.",
   });
+});
+
+test("legacy offer analyses without workflow identity do not expose a draft handoff", () => {
+  const decision = createInboxTodayDecision({
+    customer: { name: "Familie Alt" },
+    project: {
+      trade: "Malerarbeiten",
+      service: "Flur streichen",
+      estimatedArea: null,
+    },
+    workflow: {
+      priority: "normal",
+      confidence: 0.7,
+      nextAction: "Entwurf prüfen",
+    },
+    nextSteps: [],
+    missingInformation: [],
+    recommendedTask: {
+      type: "offer",
+      title: "Altbestand prüfen",
+    },
+  });
+
+  assert.equal(decision.completionAction, undefined);
 });
 
 test("keeps a replacement analysis isolated from the previously stored inquiry", () => {

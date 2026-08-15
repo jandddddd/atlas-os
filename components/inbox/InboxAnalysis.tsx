@@ -123,13 +123,18 @@ export function InboxAnalysis() {
         );
       }
 
-      if (!(await persistInboxTodayDecision(data.analysis))) {
+      const analyzedWorkflow: AnalysisResult = {
+        ...data.analysis,
+        workflowId: crypto.randomUUID(),
+      };
+
+      if (!(await persistInboxTodayDecision(analyzedWorkflow))) {
         throw new Error(
           "Die vorbereitete Entscheidung konnte nicht gespeichert werden.",
         );
       }
 
-      setAnalysis(data.analysis);
+      setAnalysis(analyzedWorkflow);
       setAnalysisSource("current");
       setAnalysisInquiry(inquiry);
       setIsEditingOffer(false);
@@ -139,7 +144,7 @@ export function InboxAnalysis() {
       setEditableOffer(null);
       setLastSavedAt(null);
       clearOfferDraft();
-      saveInquiryAnalysis(data.analysis);
+      saveInquiryAnalysis(analyzedWorkflow);
       setStatus("completed");
     } catch (error) {
       setAnalysisError(

@@ -39,18 +39,6 @@ const inboxOfferFixture = {
   status: "draft",
 };
 
-function analysisKey(analysis) {
-  return JSON.stringify({
-    version: 1,
-    customer: analysis.customer,
-    project: analysis.project,
-    workflow: analysis.workflow,
-    nextSteps: analysis.nextSteps,
-    missingInformation: analysis.missingInformation,
-    recommendedTask: analysis.recommendedTask,
-  });
-}
-
 async function fillAndAnalyze(page) {
   await page.goto("/inbox");
   await page.getByLabel("Kunde oder Kontakt").fill("Familie Berger");
@@ -98,26 +86,15 @@ test("Today exposes no offer-draft handoff when no draft has been saved", async 
   ).toHaveCount(0);
 });
 
-test("Today hides a stale draft bound to another analysis even for the same customer", async ({ page }) => {
+test("Today hides a stale draft from another workflow even when analysis content matches", async ({ page }) => {
   await fillAndAnalyze(page);
-  const staleAnalysis = {
-    ...inboxAnalysisFixture,
-    project: {
-      ...inboxAnalysisFixture.project,
-      service: "Fassade streichen",
-    },
-    recommendedTask: {
-      type: "offer",
-      title: "Angebotsentwurf Fassade vorbereiten",
-    },
-  };
-  await page.evaluate(({ offer, staleKey }) => {
+  await page.evaluate((offer) => {
     window.localStorage.setItem("atlas-editable-offer", JSON.stringify(offer));
     window.localStorage.setItem(
       "atlas-editable-offer-analysis-binding",
-      JSON.stringify({ version: 1, analysisKey: staleKey }),
+      JSON.stringify({ version: 1, workflowId: "stale-other-tab" }),
     );
-  }, { offer: inboxOfferFixture, staleKey: analysisKey(staleAnalysis) });
+  }, inboxOfferFixture);
   await openInboxDecision(page);
 
   await page.getByRole("button", { name: "Als geprüft vormerken" }).click();

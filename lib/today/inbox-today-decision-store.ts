@@ -24,6 +24,7 @@ export function isAnalysisResult(value: unknown): value is AnalysisResult {
 
   const { customer, project, workflow, recommendedTask } = value;
   return (
+    (value.workflowId === undefined || typeof value.workflowId === "string") &&
     isRecord(customer) &&
     typeof customer.name === "string" &&
     isRecord(project) &&

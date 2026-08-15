@@ -10,7 +10,6 @@ import { TodayCompletionNotice } from "@/components/today/TodayCompletionNotice"
 import { TodayEmptyState } from "@/components/today/TodayEmptyState";
 import { TodayHeader } from "@/components/today/TodayHeader";
 import {
-  createInboxAnalysisKey,
   loadInquiryAnalysis,
   loadOfferDraftForAnalysis,
 } from "@/lib/storage/inbox-storage";
@@ -25,7 +24,7 @@ type CompletionAction = {
   label: string;
   href: string;
   requiresSavedOfferDraft?: boolean;
-  analysisKey?: string;
+  workflowId?: string;
 };
 
 type TodayApprovalDecision = Omit<ApprovalCardProps, "primaryAction" | "secondaryActions" | "details" | "notice"> & TodayDecisionPriorityFactors & {
@@ -68,11 +67,10 @@ function availableCompletionAction(
 ): CompletionAction | null {
   if (!action) return null;
   if (!action.requiresSavedOfferDraft) return action;
-  if (!action.analysisKey) return null;
+  if (!action.workflowId) return null;
 
   const savedAnalysis = loadInquiryAnalysis();
-  if (!savedAnalysis) return null;
-  if (createInboxAnalysisKey(savedAnalysis) !== action.analysisKey) return null;
+  if (!savedAnalysis || savedAnalysis.workflowId !== action.workflowId) return null;
   if (!loadOfferDraftForAnalysis(savedAnalysis)) return null;
 
   return action;
