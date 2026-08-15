@@ -149,6 +149,14 @@ test("second reviewed head gets the final allowed remediation round", () => {
   assert.equal(result.state.round, 2);
 });
 
+test("review of an unrecorded newer head escalates instead of advancing the round", () => {
+  const state = { version: 1, prNumber: 49, round: 1, phase: "awaiting_review_after_push", boundHead: shaA, originalPaths: basePull.changedPaths, findingIds: ["thread-1"] };
+  const result = planRemediation({ event: { name: "review", reviewHeadSha: shaB }, pull: { ...basePull, headSha: shaB }, findings: [{ ...finding, id: "thread-2" }], comments: [comment(state)] });
+  assert.equal(result.action, "ESCALATE");
+  assert.match(result.reason, /not bound to the reviewed PR head/);
+  assert.equal(result.state.round, 1);
+});
+
 test("clean automatic review on the pushed head completes the coordinator state", () => {
   const state = { version: 1, prNumber: 49, round: 1, phase: "awaiting_review_after_push", boundHead: shaB, originalPaths: basePull.changedPaths, findingIds: ["thread-1"] };
   const result = planRemediation({ event: { name: "review", reviewHeadSha: shaB }, pull: { ...basePull, headSha: shaB }, findings: [], comments: [comment(state)] });

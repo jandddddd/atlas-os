@@ -112,6 +112,9 @@ export function planRemediation({ event, pull, findings, comments = [] }) {
 
   if (event.name !== "review") return { action: "WAIT", reason: "Unsupported event." };
   if (event.reviewHeadSha !== pull.headSha) return escalation("The review is not bound to the current PR head.", previous);
+  if (previous && previous.boundHead !== pull.headSha) {
+    return escalation("Stored remediation state is not bound to the reviewed PR head.", previous);
+  }
   if (previous?.boundHead === pull.headSha && (previous.phase === "escalated" || previous.phase === "clean")) {
     return { action: "WAIT", reason: `This head is already ${previous.phase}.` };
   }
