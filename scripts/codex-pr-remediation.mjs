@@ -95,17 +95,20 @@ export function planRemediation({ event, pull, findings, comments = [] }) {
   if (previous && previous.prNumber !== pull.number) return escalation("Stored remediation state belongs to another pull request.");
   if (event.name === "synchronize") {
     if (previous?.phase === "awaiting_review_after_push" || previous?.phase === "review_requested") {
-      if (pull.headSha === previous.boundHead) {
+      if (event.after === previous.boundHead || pull.headSha === previous.boundHead) {
         return { action: "WAIT", reason: "This synchronize event has already been recorded for the current head." };
       }
       return escalation("The PR head changed while awaiting review of the bound remediation head.", previous);
     }
     if (!previous || previous.phase !== "remediation_requested") return { action: "WAIT", reason: "No remediation push is pending." };
-    if (pull.headSha === previous.boundHead) {
-      return { action: "WAIT", reason: "This synchronize transition was already reconciled by a review for the current head." };
+    if (event.after === previous.boundHead || (!event.after && pull.headSha === previous.boundHead)) {
+      return { action: "WAIT", reason: "This synchronize transition was already reconciled by a review for the event head." };
     }
     if (event.before !== previous.boundHead) {
       return escalation("The PR head changed outside the expected bound-head transition.", previous);
+    }
+    if (event.after && pull.headSha !== event.after) {
+      return escalation("The PR head advanced beyond the expected remediation transition before it was recorded.", previous);
     }
     return {
       action: "AWAIT_REVIEW",
