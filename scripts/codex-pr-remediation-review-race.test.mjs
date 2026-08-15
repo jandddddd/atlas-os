@@ -26,11 +26,14 @@ const state = {
   originalPaths: pull.changedPaths,
   findingIds: ["thread-1"],
 };
-const comments = [{
-  author: "github-actions[bot]",
-  createdAt: "2026-08-15T10:00:00Z",
-  body: encodeState(state),
-}];
+function stateComment(value) {
+  return [{
+    author: "github-actions[bot]",
+    createdAt: "2026-08-15T10:00:00Z",
+    body: encodeState(value),
+  }];
+}
+const comments = stateComment(state);
 const finding = {
   id: "thread-2",
   priority: "P2",
@@ -74,4 +77,44 @@ test("automatic review still fails closed when the new head is not a direct chil
   assert.equal(result.action, "ESCALATE");
   assert.match(result.reason, /not bound to the reviewed PR head/);
   assert.equal(result.state.boundHead, shaA);
+});
+
+test("queued synchronize is idempotent after a blocking review already reconciled the new head", () => {
+  const reconciledState = {
+    version: 1,
+    prNumber: 49,
+    round: 2,
+    phase: "remediation_requested",
+    boundHead: shaB,
+    originalPaths: pull.changedPaths,
+    findingIds: ["thread-2"],
+  };
+  const result = planRemediation({
+    event: { name: "synchronize", before: shaA },
+    pull,
+    findings: [],
+    comments: stateComment(reconciledState),
+  });
+  assert.equal(result.action, "WAIT");
+  assert.match(result.reason, /already reconciled/);
+});
+
+test("a genuine newer synchronize after the reconciled head still fails closed", () => {
+  const reconciledState = {
+    version: 1,
+    prNumber: 49,
+    round: 2,
+    phase: "remediation_requested",
+    boundHead: shaB,
+    originalPaths: pull.changedPaths,
+    findingIds: ["thread-2"],
+  };
+  const result = planRemediation({
+    event: { name: "synchronize", before: shaA },
+    pull: { ...pull, headSha: shaC },
+    findings: [],
+    comments: stateComment(reconciledState),
+  });
+  assert.equal(result.action, "ESCALATE");
+  assert.match(result.reason, /outside the expected/);
 });
