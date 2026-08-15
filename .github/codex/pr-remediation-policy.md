@@ -28,4 +28,4 @@ Stop when validation repeatedly fails for unrelated infrastructure reasons. Do n
 
 Do not enable or invoke Atlas Repair/Pilot. Do not call Repair Execute, reserve Repair attempts, create Repair attempt tags, or change Repair configuration.
 
-After a successful push, do not merge or resolve review conversations. The repository workflow will request a fresh Codex review of the new head. Human merge control remains mandatory.
+After a successful push, do not merge or resolve review conversations. The push-triggered automatic Codex review will review the new head; do not post a separate `@codex review` command. Human merge control remains mandatory.
