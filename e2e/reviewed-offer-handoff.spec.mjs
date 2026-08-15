@@ -86,6 +86,23 @@ test("Today exposes no offer-draft handoff when no draft has been saved", async 
   ).toHaveCount(0);
 });
 
+test("Today hides the handoff when a saved draft belongs to another analysis", async ({ page }) => {
+  await fillAndAnalyze(page);
+  await page.evaluate((offer) => {
+    window.localStorage.setItem(
+      "atlas-editable-offer",
+      JSON.stringify({ ...offer, customerName: "Andere Kundin" }),
+    );
+  }, inboxOfferFixture);
+  await openInboxDecision(page);
+
+  await page.getByRole("button", { name: "Als geprüft vormerken" }).click();
+  await expect(page.getByRole("region", { name: "Aktueller Abschluss" })).toBeVisible();
+  await expect(
+    page.getByRole("link", { name: "Angebotsentwurf weiterbearbeiten" }),
+  ).toHaveCount(0);
+});
+
 test("saved offer handoff restores, scrolls to and focuses the draft", async ({ page }) => {
   await fillAndAnalyze(page);
   await page.getByRole("button", { name: "Angebotsentwurf erstellen" }).click();

@@ -9,7 +9,7 @@ import { DecisionOverviewList } from "@/components/today/DecisionOverviewList";
 import { TodayCompletionNotice } from "@/components/today/TodayCompletionNotice";
 import { TodayEmptyState } from "@/components/today/TodayEmptyState";
 import { TodayHeader } from "@/components/today/TodayHeader";
-import { loadOfferDraft } from "@/lib/storage/inbox-storage";
+import { loadInquiryAnalysis, loadOfferDraft } from "@/lib/storage/inbox-storage";
 import type {
   TodayDecisionPriorityExplanation,
   TodayDecisionPriorityFactors,
@@ -60,10 +60,25 @@ function filterCompletedDecisionIds(
 
 function availableCompletionAction(
   action: CompletionAction | undefined,
+  decision: TodayApprovalDecision,
 ): CompletionAction | null {
   if (!action) return null;
-  if (action.requiresSavedOfferDraft && !loadOfferDraft()) return null;
-  return action;
+  if (!action.requiresSavedOfferDraft) return action;
+
+  const savedAnalysis = loadInquiryAnalysis();
+  const savedDraft = loadOfferDraft();
+  if (!savedAnalysis || !savedDraft) return null;
+
+  const decisionCustomer = decision.context.find((item) => item.label === "Kunde")?.value;
+  const decisionService = decision.context.find((item) => item.label === "Leistung")?.value;
+  const analysisMatchesDecision =
+    savedAnalysis.recommendedTask.type === "offer" &&
+    savedAnalysis.recommendedTask.title === decision.title &&
+    savedAnalysis.customer.name === decisionCustomer &&
+    savedAnalysis.project.service === decisionService;
+  const draftMatchesAnalysis = savedDraft.customerName === savedAnalysis.customer.name;
+
+  return analysisMatchesDecision && draftMatchesAnalysis ? action : null;
 }
 
 export function TodayApprovalCenter({
@@ -147,7 +162,9 @@ export function TodayApprovalCenter({
 
       setSubmissionError(false);
       setCompletionMessage(priorityDecision.completionMessage);
-      setCompletionAction(availableCompletionAction(priorityDecision.completionAction));
+      setCompletionAction(
+        availableCompletionAction(priorityDecision.completionAction, priorityDecision),
+      );
       setFeedbackStatus("completed");
       setExpandedDetailsId(null);
       setEditHintDecisionId(null);
