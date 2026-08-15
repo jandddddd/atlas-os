@@ -129,7 +129,6 @@ export function planRemediation({ event, pull, findings, comments = [] }) {
   }
   if (previous?.boundHead === pull.headSha && previous.phase === "clean") {
     if (blocking.length === 0) return { action: "WAIT", reason: "This head is already clean." };
-    previous = null;
   } else if (previous?.phase === "clean" && previous.boundHead !== pull.headSha) {
     previous = null;
   }
@@ -156,7 +155,7 @@ export function planRemediation({ event, pull, findings, comments = [] }) {
   const unrelated = blocking.filter((finding) => finding.path && !allowedPaths.has(finding.path) && !TEST_OR_HELPER_PATH.test(finding.path));
   if (unrelated.length > 0) return escalation("A new P1/P2 finding is outside the original PR file scope.", previous);
 
-  const reviewedAfterPush = previous?.phase === "awaiting_review_after_push" || previous?.phase === "review_requested";
+  const reviewedAfterPush = previous?.phase === "awaiting_review_after_push" || previous?.phase === "review_requested" || (previous?.phase === "clean" && previous.boundHead === pull.headSha);
   const round = reviewedAfterPush ? previous.round + 1 : 1;
   if (round > MAX_ROUNDS) return escalation("P1/P2 findings remain after two remediation rounds.", previous);
 
