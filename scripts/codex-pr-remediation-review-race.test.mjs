@@ -79,7 +79,7 @@ test("automatic review still fails closed when the new head is not a direct chil
   assert.equal(result.state.boundHead, shaA);
 });
 
-test("queued synchronize is idempotent after a blocking review already reconciled the new head", () => {
+test("queued synchronize is idempotent after a blocking review already reconciled the event head", () => {
   const reconciledState = {
     version: 1,
     prNumber: 49,
@@ -90,7 +90,7 @@ test("queued synchronize is idempotent after a blocking review already reconcile
     findingIds: ["thread-2"],
   };
   const result = planRemediation({
-    event: { name: "synchronize", before: shaA },
+    event: { name: "synchronize", before: shaA, after: shaB },
     pull,
     findings: [],
     comments: stateComment(reconciledState),
@@ -99,7 +99,7 @@ test("queued synchronize is idempotent after a blocking review already reconcile
   assert.match(result.reason, /already reconciled/);
 });
 
-test("a genuine newer synchronize after the reconciled head still fails closed", () => {
+test("delayed A-to-B synchronize remains idempotent even after live head advances to C", () => {
   const reconciledState = {
     version: 1,
     prNumber: 49,
@@ -110,7 +110,49 @@ test("a genuine newer synchronize after the reconciled head still fails closed",
     findingIds: ["thread-2"],
   };
   const result = planRemediation({
-    event: { name: "synchronize", before: shaA },
+    event: { name: "synchronize", before: shaA, after: shaB },
+    pull: { ...pull, headSha: shaC },
+    findings: [],
+    comments: stateComment(reconciledState),
+  });
+  assert.equal(result.action, "WAIT");
+  assert.match(result.reason, /already reconciled/);
+});
+
+test("genuine B-to-C remediation transition advances to awaiting review", () => {
+  const reconciledState = {
+    version: 1,
+    prNumber: 49,
+    round: 2,
+    phase: "remediation_requested",
+    boundHead: shaB,
+    originalPaths: pull.changedPaths,
+    findingIds: ["thread-2"],
+  };
+  const result = planRemediation({
+    event: { name: "synchronize", before: shaB, after: shaC },
+    pull: { ...pull, headSha: shaC },
+    findings: [],
+    comments: stateComment(reconciledState),
+  });
+  assert.equal(result.action, "AWAIT_REVIEW");
+  assert.equal(result.state.phase, "awaiting_review_after_push");
+  assert.equal(result.state.boundHead, shaC);
+  assert.equal(result.state.round, 2);
+});
+
+test("unexpected A-to-C transition still fails closed when B is the bound head", () => {
+  const reconciledState = {
+    version: 1,
+    prNumber: 49,
+    round: 2,
+    phase: "remediation_requested",
+    boundHead: shaB,
+    originalPaths: pull.changedPaths,
+    findingIds: ["thread-2"],
+  };
+  const result = planRemediation({
+    event: { name: "synchronize", before: shaA, after: shaC },
     pull: { ...pull, headSha: shaC },
     findings: [],
     comments: stateComment(reconciledState),
