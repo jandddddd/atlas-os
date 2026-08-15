@@ -167,7 +167,10 @@ jobs:
             } else if (result.action === "AWAIT_REVIEW") {
               body = `${encodeState(result.state)}\nAwaiting automatic Codex review for exact head \`${result.state.boundHead}\` after bounded remediation round ${result.state.round}/2. The remediation push is the review trigger.`;
             } else if (result.action === "CLEAN") {
-              body = `${encodeState(result.state)}\nCodex review is clean for exact head \`${result.state.boundHead}\` after bounded remediation round ${result.state.round}/2. No automated remediation, review, push, or merge was requested.`;
+              const cleanSummary = result.state.findingIds.length === 0
+                ? `Codex review is clean for exact head \`${result.state.boundHead}\`. This is an initial clean audit; no remediation round has been consumed.`
+                : `Codex review is clean for exact head \`${result.state.boundHead}\` after bounded remediation round ${result.state.round}/2.`;
+              body = `${encodeState(result.state)}\n${cleanSummary} No automated remediation, review, push, or merge was requested.`;
             } else if (result.action === "ESCALATE") {
               const state = result.state
                 ? { ...result.state, phase: "escalated", boundHead: pull.head.sha }
