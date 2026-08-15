@@ -164,8 +164,8 @@ jobs:
               body = `${encodeState(result.state)}\n@codex address that feedback\n\nAddress only the currently open P1/P2 review feedback on this pull request. ` +
                 `This is bounded remediation round ${result.state.round}/2 for exact head \`${result.state.boundHead}\`. ` +
                 `Read and follow \`.github/codex/pr-remediation-policy.md\`. Validate before one normal push to this same PR branch; stop and report instead if any escalation condition applies.`;
-            } else if (result.action === "REQUEST_REVIEW") {
-              body = `${encodeState(result.state)}\n@codex review\n\nReview exact head \`${result.state.boundHead}\` after bounded remediation round ${result.state.round}/2.`;
+            } else if (result.action === "AWAIT_REVIEW") {
+              body = `${encodeState(result.state)}\nAwaiting automatic Codex review for exact head \`${result.state.boundHead}\` after bounded remediation round ${result.state.round}/2. The remediation push is the review trigger.`;
             } else if (result.action === "ESCALATE") {
               const state = result.state
                 ? { ...result.state, phase: "escalated", boundHead: pull.head.sha }

@@ -52,7 +52,7 @@ export function decodeState(body) {
     const state = JSON.parse(source.slice(start + STATE_MARKER.length, end));
     if (state?.version !== 1 || !Number.isInteger(state.round) || state.round < 1 || state.round > MAX_ROUNDS) return null;
     if (!Number.isInteger(state.prNumber) || state.prNumber < 1) return null;
-    if (!["remediation_requested", "review_requested", "escalated", "clean"].includes(state.phase)) return null;
+    if (!["remediation_requested", "review_requested", "awaiting_review_after_push", "escalated", "clean"].includes(state.phase)) return null;
     if (!/^[a-f0-9]{40}$/.test(state.boundHead)) return null;
     if (!Array.isArray(state.originalPaths) || !state.originalPaths.every((path) => typeof path === "string")) return null;
     if (!Array.isArray(state.findingIds) || !state.findingIds.every((id) => typeof id === "string")) return null;
@@ -99,11 +99,11 @@ export function planRemediation({ event, pull, findings, comments = [] }) {
       return escalation("The PR head changed outside the expected bound-head transition.", previous);
     }
     return {
-      action: "REQUEST_REVIEW",
+      action: "AWAIT_REVIEW",
       state: stateFor({
         pull,
         round: previous.round,
-        phase: "review_requested",
+        phase: "awaiting_review_after_push",
         originalPaths: previous.originalPaths,
         findingIds: previous.findingIds,
       }),
@@ -139,7 +139,8 @@ export function planRemediation({ event, pull, findings, comments = [] }) {
   const unrelated = blocking.filter((finding) => finding.path && !allowedPaths.has(finding.path) && !TEST_OR_HELPER_PATH.test(finding.path));
   if (unrelated.length > 0) return escalation("A new P1/P2 finding is outside the original PR file scope.", previous);
 
-  const round = previous?.phase === "review_requested" ? previous.round + 1 : 1;
+  const reviewedAfterPush = previous?.phase === "awaiting_review_after_push" || previous?.phase === "review_requested";
+  const round = reviewedAfterPush ? previous.round + 1 : 1;
   if (round > MAX_ROUNDS) return escalation("P1/P2 findings remain after two remediation rounds.", previous);
 
   return {
