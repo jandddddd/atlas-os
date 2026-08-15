@@ -9,6 +9,7 @@ import { DecisionOverviewList } from "@/components/today/DecisionOverviewList";
 import { TodayCompletionNotice } from "@/components/today/TodayCompletionNotice";
 import { TodayEmptyState } from "@/components/today/TodayEmptyState";
 import { TodayHeader } from "@/components/today/TodayHeader";
+import { loadOfferDraft } from "@/lib/storage/inbox-storage";
 import type {
   TodayDecisionPriorityExplanation,
   TodayDecisionPriorityFactors,
@@ -19,6 +20,7 @@ type FeedbackStatus = "completed" | "deferred" | null;
 type CompletionAction = {
   label: string;
   href: string;
+  requiresSavedOfferDraft?: boolean;
 };
 
 type TodayApprovalDecision = Omit<ApprovalCardProps, "primaryAction" | "secondaryActions" | "details" | "notice"> & TodayDecisionPriorityFactors & {
@@ -54,6 +56,14 @@ function filterCompletedDecisionIds(
   }
 
   return decisionIds.filter((decisionId) => decisionId !== "offer-mueller");
+}
+
+function availableCompletionAction(
+  action: CompletionAction | undefined,
+): CompletionAction | null {
+  if (!action) return null;
+  if (action.requiresSavedOfferDraft && !loadOfferDraft()) return null;
+  return action;
 }
 
 export function TodayApprovalCenter({
@@ -137,7 +147,7 @@ export function TodayApprovalCenter({
 
       setSubmissionError(false);
       setCompletionMessage(priorityDecision.completionMessage);
-      setCompletionAction(priorityDecision.completionAction ?? null);
+      setCompletionAction(availableCompletionAction(priorityDecision.completionAction));
       setFeedbackStatus("completed");
       setExpandedDetailsId(null);
       setEditHintDecisionId(null);
