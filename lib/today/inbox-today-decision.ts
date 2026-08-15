@@ -64,6 +64,7 @@ export function createInboxTodayDecision(
       ? {
           label: "Angebotsentwurf weiterbearbeiten",
           href: "/inbox#offer-draft",
+          requiresSavedOfferDraft: true,
         }
       : undefined,
     details: {
