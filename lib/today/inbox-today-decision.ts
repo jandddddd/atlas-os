@@ -1,6 +1,6 @@
 import type { AnalysisResult } from "@/components/inbox/types";
 import type { TodayApprovalDecisionInput } from "@/components/today/TodayApprovalCenter";
-import { createInboxAnalysisKey } from "@/lib/storage/inbox-storage";
+import { createInboxAnalysisKey } from "../storage/inbox-storage.ts";
 
 export const inboxTodayDecisionId = "inbox-recommended-task";
 
