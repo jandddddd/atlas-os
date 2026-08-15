@@ -53,7 +53,7 @@ export function OfferDraftView({
   }
 
   return (
-    <section className="rounded-2xl border bg-white p-6">
+    <section id="offer-draft" className="scroll-mt-6 rounded-2xl border bg-white p-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <span className="rounded-full bg-amber-100 px-3 py-1 text-sm font-medium text-amber-800">
