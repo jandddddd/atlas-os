@@ -57,6 +57,24 @@ async function openInboxDecision(page) {
   await expect(page.getByRole("heading", { name: inboxDecisionTitle })).toBeVisible();
 }
 
+async function generateOfferAndAssertPayload(page) {
+  const requestPromise = page.waitForRequest("**/api/generate-offer");
+  await page.getByRole("button", { name: "Angebotsentwurf erstellen" }).click();
+  const payload = (await requestPromise).postDataJSON();
+  expect(payload.analysis).toEqual(inboxAnalysisFixture);
+  expect(payload.analysis).not.toHaveProperty("workflowId");
+  await expect(
+    page.getByText("Angebotsentwurf Familie Schneider", { exact: true }),
+  ).toBeVisible();
+  const storedWorkflow = await page.evaluate(() => ({
+    analysis: JSON.parse(window.localStorage.getItem("atlas-inquiry-analysis")),
+    binding: JSON.parse(
+      window.localStorage.getItem("atlas-editable-offer-analysis-binding"),
+    ),
+  }));
+  expect(storedWorkflow.binding.workflowId).toBe(storedWorkflow.analysis.workflowId);
+}
+
 test.beforeEach(async ({ context, page }) => {
   await context.clearCookies();
   await page.route("**/api/analyze-inquiry", async (route) => {
@@ -106,7 +124,7 @@ test("Today hides a stale draft from another workflow even when analysis content
 
 test("handoff revalidates storage when the draft disappears after approval", async ({ page }) => {
   await fillAndAnalyze(page);
-  await page.getByRole("button", { name: "Angebotsentwurf erstellen" }).click();
+  await generateOfferAndAssertPayload(page);
   await openInboxDecision(page);
 
   await page.getByRole("button", { name: "Als geprüft vormerken" }).click();
@@ -121,8 +139,7 @@ test("handoff revalidates storage when the draft disappears after approval", asy
 
 test("saved offer handoff restores, scrolls to and focuses the draft", async ({ page }) => {
   await fillAndAnalyze(page);
-  await page.getByRole("button", { name: "Angebotsentwurf erstellen" }).click();
-  await expect(page.getByText("Angebotsentwurf Familie Schneider", { exact: true })).toBeVisible();
+  await generateOfferAndAssertPayload(page);
   await openInboxDecision(page);
 
   await page.getByRole("button", { name: "Als geprüft vormerken" }).click();

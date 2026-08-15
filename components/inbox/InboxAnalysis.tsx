@@ -160,6 +160,14 @@ export function InboxAnalysis() {
     if (!analysis || analysisSource !== "current" || !analysisInquiry) return;
 
     const currentWorkflowVersion = workflowVersion.current;
+    const offerAnalysis = {
+      customer: analysis.customer,
+      project: analysis.project,
+      workflow: analysis.workflow,
+      nextSteps: analysis.nextSteps,
+      missingInformation: analysis.missingInformation,
+      recommendedTask: analysis.recommendedTask,
+    };
 
     try {
       setOfferStatus("generating");
@@ -168,7 +176,7 @@ export function InboxAnalysis() {
       const response = await fetch("/api/generate-offer", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ inquiry: analysisInquiry, analysis }),
+        body: JSON.stringify({ inquiry: analysisInquiry, analysis: offerAnalysis }),
       });
       const data = await response.json();
 
