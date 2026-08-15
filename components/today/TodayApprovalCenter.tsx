@@ -9,7 +9,11 @@ import { DecisionOverviewList } from "@/components/today/DecisionOverviewList";
 import { TodayCompletionNotice } from "@/components/today/TodayCompletionNotice";
 import { TodayEmptyState } from "@/components/today/TodayEmptyState";
 import { TodayHeader } from "@/components/today/TodayHeader";
-import { loadInquiryAnalysis, loadOfferDraft } from "@/lib/storage/inbox-storage";
+import {
+  createInboxAnalysisKey,
+  loadInquiryAnalysis,
+  loadOfferDraftForAnalysis,
+} from "@/lib/storage/inbox-storage";
 import type {
   TodayDecisionPriorityExplanation,
   TodayDecisionPriorityFactors,
@@ -21,6 +25,7 @@ type CompletionAction = {
   label: string;
   href: string;
   requiresSavedOfferDraft?: boolean;
+  analysisKey?: string;
 };
 
 type TodayApprovalDecision = Omit<ApprovalCardProps, "primaryAction" | "secondaryActions" | "details" | "notice"> & TodayDecisionPriorityFactors & {
@@ -60,25 +65,17 @@ function filterCompletedDecisionIds(
 
 function availableCompletionAction(
   action: CompletionAction | undefined,
-  decision: TodayApprovalDecision,
 ): CompletionAction | null {
   if (!action) return null;
   if (!action.requiresSavedOfferDraft) return action;
+  if (!action.analysisKey) return null;
 
   const savedAnalysis = loadInquiryAnalysis();
-  const savedDraft = loadOfferDraft();
-  if (!savedAnalysis || !savedDraft) return null;
+  if (!savedAnalysis) return null;
+  if (createInboxAnalysisKey(savedAnalysis) !== action.analysisKey) return null;
+  if (!loadOfferDraftForAnalysis(savedAnalysis)) return null;
 
-  const decisionCustomer = decision.context.find((item) => item.label === "Kunde")?.value;
-  const decisionService = decision.context.find((item) => item.label === "Leistung")?.value;
-  const analysisMatchesDecision =
-    savedAnalysis.recommendedTask.type === "offer" &&
-    savedAnalysis.recommendedTask.title === decision.title &&
-    savedAnalysis.customer.name === decisionCustomer &&
-    savedAnalysis.project.service === decisionService;
-  const draftMatchesAnalysis = savedDraft.customerName === savedAnalysis.customer.name;
-
-  return analysisMatchesDecision && draftMatchesAnalysis ? action : null;
+  return action;
 }
 
 export function TodayApprovalCenter({
@@ -162,9 +159,7 @@ export function TodayApprovalCenter({
 
       setSubmissionError(false);
       setCompletionMessage(priorityDecision.completionMessage);
-      setCompletionAction(
-        availableCompletionAction(priorityDecision.completionAction, priorityDecision),
-      );
+      setCompletionAction(availableCompletionAction(priorityDecision.completionAction));
       setFeedbackStatus("completed");
       setExpandedDetailsId(null);
       setEditHintDecisionId(null);
@@ -290,6 +285,12 @@ export function TodayApprovalCenter({
               {completionAction ? (
                 <Link
                   href={completionAction.href}
+                  onClick={(event) => {
+                    if (!availableCompletionAction(completionAction)) {
+                      event.preventDefault();
+                      setCompletionAction(null);
+                    }
+                  }}
                   className="mt-4 inline-flex rounded-xl bg-neutral-950 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-neutral-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-neutral-950"
                 >
                   {completionAction.label}

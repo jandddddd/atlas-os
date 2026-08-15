@@ -6,6 +6,13 @@ import type {
 
 const INQUIRY_ANALYSIS_KEY = "atlas-inquiry-analysis";
 const OFFER_DRAFT_KEY = "atlas-editable-offer";
+const OFFER_DRAFT_STORAGE_VERSION = 2;
+
+type StoredOfferDraft = {
+  version: typeof OFFER_DRAFT_STORAGE_VERSION;
+  analysisKey: string;
+  offer: OfferDraft;
+};
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -70,27 +77,41 @@ function isOfferDraft(value: unknown): value is OfferDraft {
   );
 }
 
-function loadStoredValue<T>(
-  key: string,
-  isValid: (value: unknown) => value is T,
-): T | null {
+function isStoredOfferDraft(value: unknown): value is StoredOfferDraft {
+  return (
+    isRecord(value) &&
+    value.version === OFFER_DRAFT_STORAGE_VERSION &&
+    typeof value.analysisKey === "string" &&
+    isOfferDraft(value.offer)
+  );
+}
+
+function loadRawStoredValue(key: string): unknown | null {
   if (typeof window === "undefined") return null;
 
   try {
     const storedValue = window.localStorage.getItem(key);
     if (!storedValue) return null;
-
-    const parsedValue: unknown = JSON.parse(storedValue);
-    if (!isValid(parsedValue)) {
-      console.error(`Ungültige gespeicherte Atlas-Daten für "${key}".`);
-      return null;
-    }
-
-    return parsedValue;
+    return JSON.parse(storedValue) as unknown;
   } catch (error) {
     console.error(`Atlas-Daten für "${key}" konnten nicht geladen werden:`, error);
     return null;
   }
+}
+
+function loadStoredValue<T>(
+  key: string,
+  isValid: (value: unknown) => value is T,
+): T | null {
+  const parsedValue = loadRawStoredValue(key);
+  if (parsedValue === null) return null;
+
+  if (!isValid(parsedValue)) {
+    console.error(`Ungültige gespeicherte Atlas-Daten für "${key}".`);
+    return null;
+  }
+
+  return parsedValue;
 }
 
 function saveStoredValue(key: string, value: unknown) {
@@ -103,6 +124,18 @@ function saveStoredValue(key: string, value: unknown) {
   }
 }
 
+export function createInboxAnalysisKey(analysis: AnalysisResult): string {
+  return JSON.stringify({
+    version: 1,
+    customer: analysis.customer,
+    project: analysis.project,
+    workflow: analysis.workflow,
+    nextSteps: analysis.nextSteps,
+    missingInformation: analysis.missingInformation,
+    recommendedTask: analysis.recommendedTask,
+  });
+}
+
 export function loadInquiryAnalysis(): AnalysisResult | null {
   return loadStoredValue(INQUIRY_ANALYSIS_KEY, isInquiryAnalysis);
 }
@@ -112,11 +145,33 @@ export function saveInquiryAnalysis(analysis: AnalysisResult) {
 }
 
 export function loadOfferDraft(): OfferDraft | null {
-  return loadStoredValue(OFFER_DRAFT_KEY, isOfferDraft);
+  const storedValue = loadRawStoredValue(OFFER_DRAFT_KEY);
+  if (storedValue === null) return null;
+
+  if (isStoredOfferDraft(storedValue)) return storedValue.offer;
+  if (isOfferDraft(storedValue)) return storedValue;
+
+  console.error(`Ungültige gespeicherte Atlas-Daten für "${OFFER_DRAFT_KEY}".`);
+  return null;
 }
 
-export function saveOfferDraft(offer: OfferDraft) {
-  saveStoredValue(OFFER_DRAFT_KEY, offer);
+export function loadOfferDraftForAnalysis(
+  analysis: AnalysisResult,
+): OfferDraft | null {
+  const storedValue = loadRawStoredValue(OFFER_DRAFT_KEY);
+  if (!isStoredOfferDraft(storedValue)) return null;
+
+  return storedValue.analysisKey === createInboxAnalysisKey(analysis)
+    ? storedValue.offer
+    : null;
+}
+
+export function saveOfferDraft(offer: OfferDraft, analysis: AnalysisResult) {
+  saveStoredValue(OFFER_DRAFT_KEY, {
+    version: OFFER_DRAFT_STORAGE_VERSION,
+    analysisKey: createInboxAnalysisKey(analysis),
+    offer,
+  } satisfies StoredOfferDraft);
 }
 
 export function clearOfferDraft() {

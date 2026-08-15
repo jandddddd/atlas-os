@@ -15,7 +15,7 @@ import {
   clearOfferDraft,
   clearInboxWorkflow,
   loadInquiryAnalysis,
-  loadOfferDraft,
+  loadOfferDraftForAnalysis,
   saveInquiryAnalysis,
   saveOfferDraft,
 } from "@/lib/storage/inbox-storage";
@@ -57,7 +57,9 @@ export function InboxAnalysis() {
     let cancelled = false;
 
     const savedAnalysis = loadInquiryAnalysis();
-    const savedOffer = loadOfferDraft();
+    const savedOffer = savedAnalysis
+      ? loadOfferDraftForAnalysis(savedAnalysis)
+      : null;
 
     queueMicrotask(() => {
       if (cancelled) return;
@@ -177,7 +179,7 @@ export function InboxAnalysis() {
 
       setOffer(data.offer);
       setEditableOffer(data.offer);
-      saveOfferDraft(data.offer);
+      saveOfferDraft(data.offer, analysis);
       setOfferStatus("completed");
     } catch (error) {
       if (currentWorkflowVersion !== workflowVersion.current) return;
@@ -192,13 +194,13 @@ export function InboxAnalysis() {
   }
 
   function saveOffer() {
-    if (editableOffer) {
+    if (editableOffer && analysis) {
       const savedOffer = {
         ...editableOffer,
         positions: editableOffer.positions.map((position) => ({ ...position })),
       };
       setOffer(savedOffer);
-      saveOfferDraft(savedOffer);
+      saveOfferDraft(savedOffer, analysis);
       setLastSavedAt(
         new Date().toLocaleTimeString("de-DE", {
           hour: "2-digit",
@@ -315,43 +317,43 @@ export function InboxAnalysis() {
           onRestartAnalysis={() => void startAnalysis()}
         />
 
-      {offerStatus === "error" && (
-        <section className="rounded-xl border border-red-200 bg-red-50 p-6">
-          <p className="font-semibold text-red-900">
-            Angebotserstellung fehlgeschlagen
-          </p>
-          <p className="mt-1 text-sm text-red-700">{offerError}</p>
+        {offerStatus === "error" && (
+          <section className="rounded-xl border border-red-200 bg-red-50 p-6">
+            <p className="font-semibold text-red-900">
+              Angebotserstellung fehlgeschlagen
+            </p>
+            <p className="mt-1 text-sm text-red-700">{offerError}</p>
+            <button
+              type="button"
+              onClick={generateOffer}
+              className="mt-4 rounded-xl bg-red-900 px-5 py-2.5 text-sm font-medium text-white"
+            >
+              Erneut versuchen
+            </button>
+          </section>
+        )}
+
+        {offerStatus === "completed" && editableOffer && (
+          <OfferDraftView
+            editableOffer={editableOffer}
+            isEditing={isEditingOffer}
+            lastSavedAt={lastSavedAt}
+            onChange={setEditableOffer}
+            onStartEditing={() => setIsEditingOffer(true)}
+            onSave={saveOffer}
+            onDiscard={discardOfferChanges}
+          />
+        )}
+
+        <div className="flex justify-end">
           <button
             type="button"
-            onClick={generateOffer}
-            className="mt-4 rounded-xl bg-red-900 px-5 py-2.5 text-sm font-medium text-white"
+            onClick={resetInboxWorkflow}
+            className="text-sm text-neutral-500 transition hover:text-neutral-900"
           >
-            Erneut versuchen
+            Gespeicherten Vorgang zurücksetzen
           </button>
-        </section>
-      )}
-
-      {offerStatus === "completed" && editableOffer && (
-        <OfferDraftView
-          editableOffer={editableOffer}
-          isEditing={isEditingOffer}
-          lastSavedAt={lastSavedAt}
-          onChange={setEditableOffer}
-          onStartEditing={() => setIsEditingOffer(true)}
-          onSave={saveOffer}
-          onDiscard={discardOfferChanges}
-        />
-      )}
-
-      <div className="flex justify-end">
-        <button
-          type="button"
-          onClick={resetInboxWorkflow}
-          className="text-sm text-neutral-500 transition hover:text-neutral-900"
-        >
-          Gespeicherten Vorgang zurücksetzen
-        </button>
-      </div>
+        </div>
       </div>
     );
   }

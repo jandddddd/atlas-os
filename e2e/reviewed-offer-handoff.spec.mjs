@@ -39,6 +39,18 @@ const inboxOfferFixture = {
   status: "draft",
 };
 
+function analysisKey(analysis) {
+  return JSON.stringify({
+    version: 1,
+    customer: analysis.customer,
+    project: analysis.project,
+    workflow: analysis.workflow,
+    nextSteps: analysis.nextSteps,
+    missingInformation: analysis.missingInformation,
+    recommendedTask: analysis.recommendedTask,
+  });
+}
+
 async function fillAndAnalyze(page) {
   await page.goto("/inbox");
   await page.getByLabel("Kunde oder Kontakt").fill("Familie Berger");
@@ -86,14 +98,25 @@ test("Today exposes no offer-draft handoff when no draft has been saved", async 
   ).toHaveCount(0);
 });
 
-test("Today hides the handoff when a saved draft belongs to another analysis", async ({ page }) => {
+test("Today hides a stale draft bound to another analysis even for the same customer", async ({ page }) => {
   await fillAndAnalyze(page);
-  await page.evaluate((offer) => {
+  const staleAnalysis = {
+    ...inboxAnalysisFixture,
+    project: {
+      ...inboxAnalysisFixture.project,
+      service: "Fassade streichen",
+    },
+    recommendedTask: {
+      type: "offer",
+      title: "Angebotsentwurf Fassade vorbereiten",
+    },
+  };
+  await page.evaluate(({ offer, staleKey }) => {
     window.localStorage.setItem(
       "atlas-editable-offer",
-      JSON.stringify({ ...offer, customerName: "Andere Kundin" }),
+      JSON.stringify({ version: 2, analysisKey: staleKey, offer }),
     );
-  }, inboxOfferFixture);
+  }, { offer: inboxOfferFixture, staleKey: analysisKey(staleAnalysis) });
   await openInboxDecision(page);
 
   await page.getByRole("button", { name: "Als geprüft vormerken" }).click();
@@ -101,6 +124,21 @@ test("Today hides the handoff when a saved draft belongs to another analysis", a
   await expect(
     page.getByRole("link", { name: "Angebotsentwurf weiterbearbeiten" }),
   ).toHaveCount(0);
+});
+
+test("handoff revalidates storage when the draft disappears after approval", async ({ page }) => {
+  await fillAndAnalyze(page);
+  await page.getByRole("button", { name: "Angebotsentwurf erstellen" }).click();
+  await openInboxDecision(page);
+
+  await page.getByRole("button", { name: "Als geprüft vormerken" }).click();
+  const handoff = page.getByRole("link", { name: "Angebotsentwurf weiterbearbeiten" });
+  await expect(handoff).toBeVisible();
+  await page.evaluate(() => window.localStorage.removeItem("atlas-editable-offer"));
+  await handoff.click();
+
+  await expect(page).toHaveURL(/\/today$/);
+  await expect(handoff).toHaveCount(0);
 });
 
 test("saved offer handoff restores, scrolls to and focuses the draft", async ({ page }) => {

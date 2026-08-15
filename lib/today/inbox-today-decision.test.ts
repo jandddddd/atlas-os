@@ -1,13 +1,14 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { createInboxAnalysisKey } from "../storage/inbox-storage.ts";
 import {
   createInboxTodayDecision,
   inboxTodayDecisionId,
 } from "./inbox-today-decision.ts";
 
 test("creates an approval decision from a persisted inbox analysis", () => {
-  const decision = createInboxTodayDecision({
+  const analysis = {
     customer: { name: "Familie Schneider" },
     project: {
       trade: "Malerarbeiten",
@@ -15,17 +16,18 @@ test("creates an approval decision from a persisted inbox analysis", () => {
       estimatedArea: 75,
     },
     workflow: {
-      priority: "high",
+      priority: "high" as const,
       confidence: 0.82,
       nextAction: "Angebotsentwurf prüfen",
     },
     nextSteps: ["Bilder anfordern"],
     missingInformation: ["Bilder", "genaue Maße"],
     recommendedTask: {
-      type: "offer",
+      type: "offer" as const,
       title: "Angebotsentwurf Familie Schneider vorbereiten",
     },
-  });
+  };
+  const decision = createInboxTodayDecision(analysis);
 
   assert.equal(decision.id, inboxTodayDecisionId);
   assert.equal(decision.urgency, "high");
@@ -46,6 +48,7 @@ test("creates an approval decision from a persisted inbox analysis", () => {
     label: "Angebotsentwurf weiterbearbeiten",
     href: "/inbox#offer-draft",
     requiresSavedOfferDraft: true,
+    analysisKey: createInboxAnalysisKey(analysis),
   });
   assert.deepEqual(decision.reviewContext, {
     source: "Inbox · ungeprüfte KI-Analyse",

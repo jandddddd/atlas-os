@@ -1,5 +1,6 @@
 import type { AnalysisResult } from "@/components/inbox/types";
 import type { TodayApprovalDecisionInput } from "@/components/today/TodayApprovalCenter";
+import { createInboxAnalysisKey } from "@/lib/storage/inbox-storage";
 
 export const inboxTodayDecisionId = "inbox-recommended-task";
 
@@ -65,6 +66,7 @@ export function createInboxTodayDecision(
           label: "Angebotsentwurf weiterbearbeiten",
           href: "/inbox#offer-draft",
           requiresSavedOfferDraft: true,
+          analysisKey: createInboxAnalysisKey(analysis),
         }
       : undefined,
     details: {
