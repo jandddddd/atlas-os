@@ -42,6 +42,10 @@ test("creates an approval decision from a persisted inbox analysis", () => {
     decision.completionMessage,
     "Der vorbereitete nächste Schritt wurde als geprüft vorgemerkt.",
   );
+  assert.deepEqual(decision.completionAction, {
+    label: "Angebotsentwurf weiterbearbeiten",
+    href: "/inbox#offer-draft",
+  });
   assert.deepEqual(decision.reviewContext, {
     source: "Inbox · ungeprüfte KI-Analyse",
     inquiry: "Familie Schneider: Wohnzimmer streichen",
@@ -87,6 +91,7 @@ test("keeps a replacement analysis isolated from the previously stored inquiry",
     analysis: "Malerarbeiten. Keine Flächenangabe ist bekannt; Maße bleiben offen.",
     nextStep: "Besichtigung abstimmen",
   });
+  assert.equal(decision.completionAction, undefined);
   assert.doesNotMatch(JSON.stringify(decision), /Schneider|Wohnzimmer|75 m²/);
   assert.equal(decision.uncertainty?.description, "Fassadenmaße");
   assert.deepEqual(decision.details?.items, [
