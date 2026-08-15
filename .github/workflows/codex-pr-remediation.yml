@@ -148,7 +148,7 @@ jobs:
             }
             const event = context.eventName === "pull_request_review"
               ? { name: "review", reviewHeadSha: context.payload.review.commit_id, before: reviewBefore }
-              : { name: "synchronize", before: context.payload.before };
+              : { name: "synchronize", before: context.payload.before, after: context.payload.after };
             const result = planRemediation({
               event,
               pull: {
