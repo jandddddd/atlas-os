@@ -135,9 +135,20 @@ jobs:
               reviewCursor = page.pageInfo.hasNextPage ? page.pageInfo.endCursor : null;
             } while (reviewCursor);
             const findings = selectUnresolvedReviewFindings(reviewThreads, reviewCommentIds);
+
+            let reviewBefore = null;
+            if (context.eventName === "pull_request_review" && context.payload.review.commit_id === pull.head.sha) {
+              const { data: reviewedCommit } = await github.rest.repos.getCommit({
+                ...context.repo,
+                ref: pull.head.sha,
+              });
+              if (reviewedCommit.parents.length === 1) {
+                reviewBefore = reviewedCommit.parents[0].sha;
+              }
+            }
             const event = context.eventName === "pull_request_review"
-              ? { name: "review", reviewHeadSha: context.payload.review.commit_id }
-              : { name: "synchronize", before: context.payload.before };
+              ? { name: "review", reviewHeadSha: context.payload.review.commit_id, before: reviewBefore }
+              : { name: "synchronize", before: context.payload.before, after: context.payload.after };
             const result = planRemediation({
               event,
               pull: {
@@ -164,8 +175,13 @@ jobs:
               body = `${encodeState(result.state)}\n@codex address that feedback\n\nAddress only the currently open P1/P2 review feedback on this pull request. ` +
                 `This is bounded remediation round ${result.state.round}/2 for exact head \`${result.state.boundHead}\`. ` +
                 `Read and follow \`.github/codex/pr-remediation-policy.md\`. Validate before one normal push to this same PR branch; stop and report instead if any escalation condition applies.`;
-            } else if (result.action === "REQUEST_REVIEW") {
-              body = `${encodeState(result.state)}\n@codex review\n\nReview exact head \`${result.state.boundHead}\` after bounded remediation round ${result.state.round}/2.`;
+            } else if (result.action === "AWAIT_REVIEW") {
+              body = `${encodeState(result.state)}\nAwaiting automatic Codex review for exact head \`${result.state.boundHead}\` after bounded remediation round ${result.state.round}/2. The remediation push is the review trigger.`;
+            } else if (result.action === "CLEAN") {
+              const cleanSummary = result.state.findingIds.length === 0
+                ? `Codex review is clean for exact head \`${result.state.boundHead}\`. This is an initial clean audit; no remediation round has been consumed.`
+                : `Codex review is clean for exact head \`${result.state.boundHead}\` after bounded remediation round ${result.state.round}/2.`;
+              body = `${encodeState(result.state)}\n${cleanSummary} No automated remediation, review, push, or merge was requested.`;
             } else if (result.action === "ESCALATE") {
               const state = result.state
                 ? { ...result.state, phase: "escalated", boundHead: pull.head.sha }
@@ -176,7 +192,7 @@ jobs:
             core.setOutput("comment", body);
             core.info(`${result.action}: ${result.reason ?? "bounded transition accepted"}`);
 
-      - name: Publish Codex command or escalation
+      - name: Publish coordinator state, Codex command, or escalation
         if: steps.plan.outputs.comment != ''
         uses: actions/github-script@v8
         env:

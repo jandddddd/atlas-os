@@ -10,7 +10,7 @@ The coordinator joins the exact submitted review's comment IDs to authoritative,
 
 Codex author identity passes through one canonical, case-insensitive GitHub-login comparison that treats the platform's optional `[bot]` suffix consistently. The webhook reviewer, REST review comments, and GraphQL thread comments must all match that canonical identity before a finding can be dispatched.
 
-After Codex validates and pushes one normal commit to the same branch, the PR `synchronize` event must identify the previously bound SHA as its immediate `before` value. Only then does the coordinator post `@codex review` for the new full head SHA. A new review may start one more remediation round. If P1/P2 findings remain after round two, automation stops and posts a human-escalation comment.
+After Codex validates and pushes one normal commit to the same branch, the PR `synchronize` event must identify the previously bound SHA as its immediate `before` value. Only then does the coordinator record the new full head SHA as `awaiting_review_after_push`. It does not post `@codex review`: the push itself triggers the configured automatic Codex review. A clean automatic review is persisted as bot-owned `clean` audit state for that exact head without dispatching any command. A later author push can then begin a fresh eligible review transition. A review with new findings may start one more remediation round. If P1/P2 findings remain after round two, automation stops and posts a human-escalation comment.
 
 The workflow stores its small state record in a hidden, bot-owned PR-comment marker. It records the PR number, phase, full bound head, round number, original changed paths, and finding thread IDs. It creates no branch, tag, replacement PR, environment, secret, ruleset, or repository setting.
 
@@ -28,10 +28,10 @@ The `coordinate` job has a GitHub-evaluated `base.ref == main` condition before 
 
 During the workflow's own rollout PR, the trusted base may not contain the coordinator module yet. That bootstrap case exits successfully without dispatching anything; the workflow never falls back to importing the untrusted PR copy. Once merged, every run imports the module from the checked-out trusted base revision.
 
-Codex remediation is governed by the repository instructions and performs validation in its isolated PR task. Immediately before pushing, it must re-fetch the remote PR branch and confirm the head still matches its bound input SHA. A mismatch stops without push. Each pushed head receives a fresh review request; old findings cannot authorize work on a new head.
+Codex remediation is governed by the repository instructions and performs validation in its isolated PR task. Immediately before pushing, it must re-fetch the remote PR branch and confirm the head still matches its bound input SHA. A mismatch stops without push. Each pushed head waits for the automatic review triggered by that push; old findings cannot authorize work on a new head.
 
 Atlas Repair remains separate baseline infrastructure. This workflow does not reference Repair Plan or Repair Execute, does not reserve an attempt, does not create an attempt tag, and does not alter `.github/atlas-autopilot.yml`. `repair.enabled`, `repair.pilot_enabled`, and `repair.auto_merge` remain disabled.
 
 ## Human escalation
 
-An escalation comment explains the deterministic stop. The operator reviews the finding and decides how to proceed; automation does not resolve conversations or restart itself. A clean review simply returns control to the human merge decision.
+An escalation comment explains the deterministic stop. The operator reviews the finding and decides how to proceed; automation does not resolve conversations or restart itself. A clean review records its bound audit state and returns control to the human merge decision.

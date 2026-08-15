@@ -127,10 +127,11 @@ test("stale review fails closed", () => {
   assert.match(result.reason, /not bound/);
 });
 
-test("expected remediation push requests a fresh review for the new head", () => {
+test("expected remediation push waits for automatic review on the new head", () => {
   const state = { version: 1, prNumber: 49, round: 1, phase: "remediation_requested", boundHead: shaA, originalPaths: basePull.changedPaths, findingIds: ["thread-1"] };
   const result = planRemediation({ event: { name: "synchronize", before: shaA }, pull: { ...basePull, headSha: shaB }, findings: [], comments: [comment(state)] });
-  assert.equal(result.action, "REQUEST_REVIEW");
+  assert.equal(result.action, "AWAIT_REVIEW");
+  assert.equal(result.state.phase, "awaiting_review_after_push");
   assert.equal(result.state.boundHead, shaB);
   assert.equal(result.state.round, 1);
 });
@@ -141,22 +142,94 @@ test("unexpected head transition escalates", () => {
   assert.equal(result.action, "ESCALATE");
 });
 
+test("review after a failed synchronize state publication escalates without resetting the round", () => {
+  const state = { version: 1, prNumber: 49, round: 2, phase: "remediation_requested", boundHead: shaA, originalPaths: basePull.changedPaths, findingIds: ["thread-2"] };
+  const result = planRemediation({ event: { name: "review", reviewHeadSha: shaB }, pull: { ...basePull, headSha: shaB }, findings: [{ ...finding, id: "thread-3" }], comments: [comment(state)] });
+  assert.equal(result.action, "ESCALATE");
+  assert.match(result.reason, /not bound to the reviewed PR head/);
+  assert.equal(result.state.round, 2);
+  assert.equal(result.state.phase, "remediation_requested");
+  assert.equal(result.state.boundHead, shaA);
+});
+
+test("intervening synchronize while awaiting the bound review escalates immediately", () => {
+  const state = { version: 1, prNumber: 49, round: 1, phase: "awaiting_review_after_push", boundHead: shaB, originalPaths: basePull.changedPaths, findingIds: ["thread-1"] };
+  const result = planRemediation({ event: { name: "synchronize", before: shaB }, pull: { ...basePull, headSha: shaC }, findings: [], comments: [comment(state)] });
+  assert.equal(result.action, "ESCALATE");
+  assert.match(result.reason, /changed while awaiting review/);
+  assert.equal(result.state.round, 1);
+  assert.equal(result.state.phase, "awaiting_review_after_push");
+  assert.equal(result.state.boundHead, shaB);
+});
+
 test("second reviewed head gets the final allowed remediation round", () => {
-  const state = { version: 1, prNumber: 49, round: 1, phase: "review_requested", boundHead: shaA, originalPaths: basePull.changedPaths, findingIds: ["thread-1"] };
+  const state = { version: 1, prNumber: 49, round: 1, phase: "awaiting_review_after_push", boundHead: shaA, originalPaths: basePull.changedPaths, findingIds: ["thread-1"] };
   const result = planRemediation({ event: { name: "review", reviewHeadSha: shaA }, pull: basePull, findings: [{ ...finding, id: "thread-2" }], comments: [comment(state)] });
   assert.equal(result.action, "REQUEST_REMEDIATION");
   assert.equal(result.state.round, 2);
 });
 
+test("review of an unrecorded newer head escalates instead of advancing the round", () => {
+  const state = { version: 1, prNumber: 49, round: 1, phase: "awaiting_review_after_push", boundHead: shaA, originalPaths: basePull.changedPaths, findingIds: ["thread-1"] };
+  const result = planRemediation({ event: { name: "review", reviewHeadSha: shaB }, pull: { ...basePull, headSha: shaB }, findings: [{ ...finding, id: "thread-2" }], comments: [comment(state)] });
+  assert.equal(result.action, "ESCALATE");
+  assert.match(result.reason, /not bound to the reviewed PR head/);
+  assert.equal(result.state.round, 1);
+});
+
+test("same-head empty review preserves pending remediation state", () => {
+  const state = { version: 1, prNumber: 49, round: 1, phase: "remediation_requested", boundHead: shaA, originalPaths: basePull.changedPaths, findingIds: ["thread-1"] };
+  const result = planRemediation({
+    event: { name: "review", reviewHeadSha: shaA },
+    pull: basePull,
+    findings: [],
+    comments: [comment(state)],
+  });
+  assert.equal(result.action, "WAIT");
+  assert.match(result.reason, /already requested/);
+});
+
+test("clean automatic review on the pushed head completes the coordinator state", () => {
+  const state = { version: 1, prNumber: 49, round: 1, phase: "awaiting_review_after_push", boundHead: shaB, originalPaths: basePull.changedPaths, findingIds: ["thread-1"] };
+  const result = planRemediation({ event: { name: "review", reviewHeadSha: shaB }, pull: { ...basePull, headSha: shaB }, findings: [], comments: [comment(state)] });
+  assert.equal(result.action, "CLEAN");
+  assert.equal(result.state.phase, "clean");
+  assert.equal(result.state.boundHead, shaB);
+  assert.equal(result.state.round, 1);
+  assert.deepEqual(result.state.originalPaths, basePull.changedPaths);
+  assert.deepEqual(result.state.findingIds, ["thread-1"]);
+});
+
+test("later author push after persisted clean state starts a fresh eligible review transition", () => {
+  const state = { version: 1, prNumber: 49, round: 1, phase: "clean", boundHead: shaB, originalPaths: basePull.changedPaths, findingIds: ["thread-1"] };
+  const comments = [comment(state)];
+  const changedPaths = [...basePull.changedPaths, "components/offers/OfferEditor.tsx"];
+  const updatedPull = { ...basePull, headSha: shaC, changedPaths };
+  const synchronized = planRemediation({ event: { name: "synchronize", before: shaB }, pull: updatedPull, findings: [], comments });
+  assert.equal(synchronized.action, "WAIT");
+  const reviewed = planRemediation({
+    event: { name: "review", reviewHeadSha: shaC },
+    pull: updatedPull,
+    findings: [{ ...finding, id: "thread-fresh", path: "components/offers/OfferEditor.tsx" }],
+    comments,
+  });
+  assert.equal(reviewed.action, "REQUEST_REMEDIATION");
+  assert.equal(reviewed.state.phase, "remediation_requested");
+  assert.equal(reviewed.state.boundHead, shaC);
+  assert.equal(reviewed.state.round, 1);
+  assert.deepEqual(reviewed.state.originalPaths, changedPaths);
+  assert.deepEqual(reviewed.state.findingIds, ["thread-fresh"]);
+});
+
 test("findings after two rounds require human escalation", () => {
-  const state = { version: 1, prNumber: 49, round: 2, phase: "review_requested", boundHead: shaA, originalPaths: basePull.changedPaths, findingIds: ["thread-2"] };
+  const state = { version: 1, prNumber: 49, round: 2, phase: "awaiting_review_after_push", boundHead: shaA, originalPaths: basePull.changedPaths, findingIds: ["thread-2"] };
   const result = planRemediation({ event: { name: "review", reviewHeadSha: shaA }, pull: basePull, findings: [finding], comments: [comment(state)] });
   assert.equal(result.action, "ESCALATE");
   assert.match(result.reason, /two remediation rounds/);
 });
 
 test("new finding outside original scope escalates but test helpers remain eligible", () => {
-  const state = { version: 1, prNumber: 49, round: 1, phase: "review_requested", boundHead: shaA, originalPaths: basePull.changedPaths, findingIds: ["thread-1"] };
+  const state = { version: 1, prNumber: 49, round: 1, phase: "awaiting_review_after_push", boundHead: shaA, originalPaths: basePull.changedPaths, findingIds: ["thread-1"] };
   const comments = [comment(state)];
   const unrelated = planRemediation({ event: { name: "review", reviewHeadSha: shaA }, pull: basePull, findings: [{ ...finding, id: "thread-2", path: "app/api/admin/route.ts" }], comments });
   assert.equal(unrelated.action, "ESCALATE");
@@ -173,9 +246,18 @@ test("workflow has no merge, Repair Execute, secret, or contents-write path", ()
   const workflow = readFileSync(new URL("../.github/workflows/codex-pr-remediation.yml", import.meta.url), "utf8");
   assert.doesNotMatch(workflow, /pulls\.merge|enablePullRequestAutoMerge|git push|contents:\s*write|OPENAI_API_KEY|secrets\.|atlas-pr-repair-execute|repair-attempt/i);
   assert.match(workflow, /pull-requests:\s*write/);
-  assert.match(workflow, /@codex review/);
+  assert.doesNotMatch(workflow, /@codex review/);
+  assert.match(workflow, /AWAIT_REVIEW/);
   assert.match(workflow, /isResolved/);
   assert.match(workflow, /trusted-module\.outputs\.available == 'true'/);
+});
+
+test("workflow persists CLEAN audit state without dispatching Codex or automation commands", () => {
+  const workflow = readFileSync(new URL("../.github/workflows/codex-pr-remediation.yml", import.meta.url), "utf8");
+  const cleanBranch = workflow.slice(workflow.indexOf('result.action === "CLEAN"'), workflow.indexOf('result.action === "ESCALATE"'));
+  assert.match(cleanBranch, /encodeState\(result\.state\)/);
+  assert.match(cleanBranch, /exact head/);
+  assert.doesNotMatch(cleanBranch, /@codex|REQUEST_REMEDIATION|AWAIT_REVIEW|git push|pulls\.merge/i);
 });
 
 test("non-main pull requests are rejected before trusted checkout or coordinator import", () => {
@@ -191,8 +273,16 @@ test("non-main pull requests are rejected before trusted checkout or coordinator
 });
 
 test("state marker round-trips only a bounded valid state", () => {
-  const state = { version: 1, prNumber: 49, round: 2, phase: "review_requested", boundHead: shaA, originalPaths: [], findingIds: [] };
+  const state = { version: 1, prNumber: 49, round: 2, phase: "awaiting_review_after_push", boundHead: shaA, originalPaths: [], findingIds: [] };
   assert.deepEqual(decodeState(encodeState(state)), state);
   assert.equal(decodeState(encodeState({ ...state, round: 3 })), null);
   assert.equal(decodeState(encodeState({ ...state, originalPaths: null })), null);
+});
+
+test("legacy review-requested state remains readable for in-flight remediation", () => {
+  const state = { version: 1, prNumber: 49, round: 1, phase: "review_requested", boundHead: shaA, originalPaths: basePull.changedPaths, findingIds: ["thread-1"] };
+  assert.deepEqual(decodeState(encodeState(state)), state);
+  const result = planRemediation({ event: { name: "review", reviewHeadSha: shaA }, pull: basePull, findings: [{ ...finding, id: "thread-2" }], comments: [comment(state)] });
+  assert.equal(result.action, "REQUEST_REMEDIATION");
+  assert.equal(result.state.round, 2);
 });

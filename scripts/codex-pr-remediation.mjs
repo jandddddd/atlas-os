@@ -52,7 +52,7 @@ export function decodeState(body) {
     const state = JSON.parse(source.slice(start + STATE_MARKER.length, end));
     if (state?.version !== 1 || !Number.isInteger(state.round) || state.round < 1 || state.round > MAX_ROUNDS) return null;
     if (!Number.isInteger(state.prNumber) || state.prNumber < 1) return null;
-    if (!["remediation_requested", "review_requested", "escalated", "clean"].includes(state.phase)) return null;
+    if (!["remediation_requested", "review_requested", "awaiting_review_after_push", "escalated", "clean"].includes(state.phase)) return null;
     if (!/^[a-f0-9]{40}$/.test(state.boundHead)) return null;
     if (!Array.isArray(state.originalPaths) || !state.originalPaths.every((path) => typeof path === "string")) return null;
     if (!Array.isArray(state.findingIds) || !state.findingIds.every((id) => typeof id === "string")) return null;
@@ -91,19 +91,31 @@ export function planRemediation({ event, pull, findings, comments = [] }) {
     return escalation("Only same-repository pull requests from a non-main branch into main are eligible.");
   }
 
-  const previous = latestState(comments);
+  let previous = latestState(comments);
   if (previous && previous.prNumber !== pull.number) return escalation("Stored remediation state belongs to another pull request.");
   if (event.name === "synchronize") {
+    if (previous?.phase === "awaiting_review_after_push" || previous?.phase === "review_requested") {
+      if (event.after === previous.boundHead || pull.headSha === previous.boundHead) {
+        return { action: "WAIT", reason: "This synchronize event has already been recorded for the current head." };
+      }
+      return escalation("The PR head changed while awaiting review of the bound remediation head.", previous);
+    }
     if (!previous || previous.phase !== "remediation_requested") return { action: "WAIT", reason: "No remediation push is pending." };
-    if (event.before !== previous.boundHead || pull.headSha === previous.boundHead) {
+    if (event.after === previous.boundHead || (!event.after && pull.headSha === previous.boundHead)) {
+      return { action: "WAIT", reason: "This synchronize transition was already reconciled by a review for the event head." };
+    }
+    if (event.before !== previous.boundHead) {
       return escalation("The PR head changed outside the expected bound-head transition.", previous);
     }
+    if (event.after && pull.headSha !== event.after) {
+      return escalation("The PR head advanced beyond the expected remediation transition before it was recorded.", previous);
+    }
     return {
-      action: "REQUEST_REVIEW",
+      action: "AWAIT_REVIEW",
       state: stateFor({
         pull,
         round: previous.round,
-        phase: "review_requested",
+        phase: "awaiting_review_after_push",
         originalPaths: previous.originalPaths,
         findingIds: previous.findingIds,
       }),
@@ -112,11 +124,36 @@ export function planRemediation({ event, pull, findings, comments = [] }) {
 
   if (event.name !== "review") return { action: "WAIT", reason: "Unsupported event." };
   if (event.reviewHeadSha !== pull.headSha) return escalation("The review is not bound to the current PR head.", previous);
-  if (previous?.boundHead === pull.headSha && (previous.phase === "escalated" || previous.phase === "clean")) {
-    return { action: "WAIT", reason: `This head is already ${previous.phase}.` };
+
+  if (previous?.phase === "remediation_requested" && previous.boundHead !== pull.headSha && event.before === previous.boundHead) {
+    previous = stateFor({
+      pull,
+      round: previous.round,
+      phase: "awaiting_review_after_push",
+      originalPaths: previous.originalPaths,
+      findingIds: previous.findingIds,
+    });
+  }
+
+  if (previous && previous.phase !== "clean" && previous.boundHead !== pull.headSha) {
+    return escalation("Stored remediation state is not bound to the reviewed PR head.", previous);
   }
 
   const blocking = findings.filter((finding) => finding.priority === "P1" || finding.priority === "P2");
+
+  if (previous?.boundHead === pull.headSha && previous.phase === "escalated") {
+    return { action: "WAIT", reason: "This head is already escalated." };
+  }
+  if (previous?.boundHead === pull.headSha && previous.phase === "clean") {
+    if (blocking.length === 0) return { action: "WAIT", reason: "This head is already clean." };
+  } else if (previous?.phase === "clean" && previous.boundHead !== pull.headSha) {
+    previous = null;
+  }
+
+  if (previous?.phase === "remediation_requested" && previous.boundHead === pull.headSha) {
+    return { action: "WAIT", reason: "Remediation is already requested for this head." };
+  }
+
   if (blocking.length === 0) {
     return {
       action: "CLEAN",
@@ -130,16 +167,18 @@ export function planRemediation({ event, pull, findings, comments = [] }) {
     };
   }
 
-  if (previous?.phase === "remediation_requested" && previous.boundHead === pull.headSha) {
-    return { action: "WAIT", reason: "Remediation is already requested for this head." };
-  }
-
   const originalPaths = previous?.originalPaths ?? pull.changedPaths;
   const allowedPaths = new Set(originalPaths);
   const unrelated = blocking.filter((finding) => finding.path && !allowedPaths.has(finding.path) && !TEST_OR_HELPER_PATH.test(finding.path));
   if (unrelated.length > 0) return escalation("A new P1/P2 finding is outside the original PR file scope.", previous);
 
-  const round = previous?.phase === "review_requested" ? previous.round + 1 : 1;
+  const cleanCompletesRemediation = previous?.phase === "clean"
+    && previous.boundHead === pull.headSha
+    && previous.findingIds.length > 0;
+  const reviewedAfterPush = previous?.phase === "awaiting_review_after_push"
+    || previous?.phase === "review_requested"
+    || cleanCompletesRemediation;
+  const round = reviewedAfterPush ? previous.round + 1 : 1;
   if (round > MAX_ROUNDS) return escalation("P1/P2 findings remain after two remediation rounds.", previous);
 
   return {
