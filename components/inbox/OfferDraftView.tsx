@@ -71,7 +71,7 @@ export function OfferDraftView({
       ref={sectionRef}
       id="offer-draft"
       tabIndex={-1}
-      className="scroll-mt-6 rounded-2xl border bg-white p-6 outline-none"
+      className="scroll-mt-6 rounded-2xl border bg-white p-6 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-neutral-950"
     >
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
