@@ -155,7 +155,12 @@ export function planRemediation({ event, pull, findings, comments = [] }) {
   const unrelated = blocking.filter((finding) => finding.path && !allowedPaths.has(finding.path) && !TEST_OR_HELPER_PATH.test(finding.path));
   if (unrelated.length > 0) return escalation("A new P1/P2 finding is outside the original PR file scope.", previous);
 
-  const reviewedAfterPush = previous?.phase === "awaiting_review_after_push" || previous?.phase === "review_requested" || (previous?.phase === "clean" && previous.boundHead === pull.headSha);
+  const cleanCompletesRemediation = previous?.phase === "clean"
+    && previous.boundHead === pull.headSha
+    && previous.findingIds.length > 0;
+  const reviewedAfterPush = previous?.phase === "awaiting_review_after_push"
+    || previous?.phase === "review_requested"
+    || cleanCompletesRemediation;
   const round = reviewedAfterPush ? previous.round + 1 : 1;
   if (round > MAX_ROUNDS) return escalation("P1/P2 findings remain after two remediation rounds.", previous);
 
