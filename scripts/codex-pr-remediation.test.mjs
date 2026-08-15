@@ -177,6 +177,18 @@ test("review of an unrecorded newer head escalates instead of advancing the roun
   assert.equal(result.state.round, 1);
 });
 
+test("same-head empty review preserves pending remediation state", () => {
+  const state = { version: 1, prNumber: 49, round: 1, phase: "remediation_requested", boundHead: shaA, originalPaths: basePull.changedPaths, findingIds: ["thread-1"] };
+  const result = planRemediation({
+    event: { name: "review", reviewHeadSha: shaA },
+    pull: basePull,
+    findings: [],
+    comments: [comment(state)],
+  });
+  assert.equal(result.action, "WAIT");
+  assert.match(result.reason, /already requested/);
+});
+
 test("clean automatic review on the pushed head completes the coordinator state", () => {
   const state = { version: 1, prNumber: 49, round: 1, phase: "awaiting_review_after_push", boundHead: shaB, originalPaths: basePull.changedPaths, findingIds: ["thread-1"] };
   const result = planRemediation({ event: { name: "review", reviewHeadSha: shaB }, pull: { ...basePull, headSha: shaB }, findings: [], comments: [comment(state)] });

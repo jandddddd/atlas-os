@@ -123,6 +123,10 @@ export function planRemediation({ event, pull, findings, comments = [] }) {
   }
   if (previous?.phase === "clean" && previous.boundHead !== pull.headSha) previous = null;
 
+  if (previous?.phase === "remediation_requested" && previous.boundHead === pull.headSha) {
+    return { action: "WAIT", reason: "Remediation is already requested for this head." };
+  }
+
   const blocking = findings.filter((finding) => finding.priority === "P1" || finding.priority === "P2");
   if (blocking.length === 0) {
     return {
@@ -135,10 +139,6 @@ export function planRemediation({ event, pull, findings, comments = [] }) {
         findingIds: previous?.findingIds ?? [],
       }),
     };
-  }
-
-  if (previous?.phase === "remediation_requested" && previous.boundHead === pull.headSha) {
-    return { action: "WAIT", reason: "Remediation is already requested for this head." };
   }
 
   const originalPaths = previous?.originalPaths ?? pull.changedPaths;
