@@ -184,6 +184,22 @@ test("clean automatic review on the pushed head completes the coordinator state"
   assert.equal(result.state.phase, "clean");
   assert.equal(result.state.boundHead, shaB);
   assert.equal(result.state.round, 1);
+  assert.deepEqual(result.state.originalPaths, basePull.changedPaths);
+  assert.deepEqual(result.state.findingIds, ["thread-1"]);
+});
+
+test("later author push after persisted clean state starts a fresh eligible review transition", () => {
+  const state = { version: 1, prNumber: 49, round: 1, phase: "clean", boundHead: shaB, originalPaths: basePull.changedPaths, findingIds: ["thread-1"] };
+  const comments = [comment(state)];
+  const synchronized = planRemediation({ event: { name: "synchronize", before: shaB }, pull: { ...basePull, headSha: shaC }, findings: [], comments });
+  assert.equal(synchronized.action, "WAIT");
+  const reviewed = planRemediation({ event: { name: "review", reviewHeadSha: shaC }, pull: { ...basePull, headSha: shaC }, findings: [{ ...finding, id: "thread-fresh" }], comments });
+  assert.equal(reviewed.action, "REQUEST_REMEDIATION");
+  assert.equal(reviewed.state.phase, "remediation_requested");
+  assert.equal(reviewed.state.boundHead, shaC);
+  assert.equal(reviewed.state.round, 1);
+  assert.deepEqual(reviewed.state.originalPaths, basePull.changedPaths);
+  assert.deepEqual(reviewed.state.findingIds, ["thread-fresh"]);
 });
 
 test("findings after two rounds require human escalation", () => {
@@ -215,6 +231,14 @@ test("workflow has no merge, Repair Execute, secret, or contents-write path", ()
   assert.match(workflow, /AWAIT_REVIEW/);
   assert.match(workflow, /isResolved/);
   assert.match(workflow, /trusted-module\.outputs\.available == 'true'/);
+});
+
+test("workflow persists CLEAN audit state without dispatching Codex or automation commands", () => {
+  const workflow = readFileSync(new URL("../.github/workflows/codex-pr-remediation.yml", import.meta.url), "utf8");
+  const cleanBranch = workflow.slice(workflow.indexOf('result.action === "CLEAN"'), workflow.indexOf('result.action === "ESCALATE"'));
+  assert.match(cleanBranch, /encodeState\(result\.state\)/);
+  assert.match(cleanBranch, /exact head/);
+  assert.doesNotMatch(cleanBranch, /@codex|REQUEST_REMEDIATION|AWAIT_REVIEW|git push|pulls\.merge/i);
 });
 
 test("non-main pull requests are rejected before trusted checkout or coordinator import", () => {

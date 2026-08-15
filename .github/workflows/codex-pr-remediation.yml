@@ -166,6 +166,8 @@ jobs:
                 `Read and follow \`.github/codex/pr-remediation-policy.md\`. Validate before one normal push to this same PR branch; stop and report instead if any escalation condition applies.`;
             } else if (result.action === "AWAIT_REVIEW") {
               body = `${encodeState(result.state)}\nAwaiting automatic Codex review for exact head \`${result.state.boundHead}\` after bounded remediation round ${result.state.round}/2. The remediation push is the review trigger.`;
+            } else if (result.action === "CLEAN") {
+              body = `${encodeState(result.state)}\nCodex review is clean for exact head \`${result.state.boundHead}\` after bounded remediation round ${result.state.round}/2. No automated remediation, review, push, or merge was requested.`;
             } else if (result.action === "ESCALATE") {
               const state = result.state
                 ? { ...result.state, phase: "escalated", boundHead: pull.head.sha }
@@ -176,7 +178,7 @@ jobs:
             core.setOutput("comment", body);
             core.info(`${result.action}: ${result.reason ?? "bounded transition accepted"}`);
 
-      - name: Publish Codex command or escalation
+      - name: Publish coordinator state, Codex command, or escalation
         if: steps.plan.outputs.comment != ''
         uses: actions/github-script@v8
         env:
