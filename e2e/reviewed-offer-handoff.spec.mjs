@@ -112,9 +112,10 @@ test("Today hides a stale draft bound to another analysis even for the same cust
     },
   };
   await page.evaluate(({ offer, staleKey }) => {
+    window.localStorage.setItem("atlas-editable-offer", JSON.stringify(offer));
     window.localStorage.setItem(
-      "atlas-editable-offer",
-      JSON.stringify({ version: 2, analysisKey: staleKey, offer }),
+      "atlas-editable-offer-analysis-binding",
+      JSON.stringify({ version: 1, analysisKey: staleKey }),
     );
   }, { offer: inboxOfferFixture, staleKey: analysisKey(staleAnalysis) });
   await openInboxDecision(page);

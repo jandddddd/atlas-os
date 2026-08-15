@@ -15,7 +15,7 @@ import {
   clearOfferDraft,
   clearInboxWorkflow,
   loadInquiryAnalysis,
-  loadOfferDraftForAnalysis,
+  loadOfferDraft,
   saveInquiryAnalysis,
   saveOfferDraft,
 } from "@/lib/storage/inbox-storage";
@@ -57,9 +57,7 @@ export function InboxAnalysis() {
     let cancelled = false;
 
     const savedAnalysis = loadInquiryAnalysis();
-    const savedOffer = savedAnalysis
-      ? loadOfferDraftForAnalysis(savedAnalysis)
-      : null;
+    const savedOffer = loadOfferDraft();
 
     queueMicrotask(() => {
       if (cancelled) return;

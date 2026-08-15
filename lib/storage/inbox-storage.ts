@@ -6,12 +6,12 @@ import type {
 
 const INQUIRY_ANALYSIS_KEY = "atlas-inquiry-analysis";
 const OFFER_DRAFT_KEY = "atlas-editable-offer";
-const OFFER_DRAFT_STORAGE_VERSION = 2;
+const OFFER_DRAFT_BINDING_KEY = "atlas-editable-offer-analysis-binding";
+const OFFER_DRAFT_BINDING_VERSION = 1;
 
-type StoredOfferDraft = {
-  version: typeof OFFER_DRAFT_STORAGE_VERSION;
+type StoredOfferDraftBinding = {
+  version: typeof OFFER_DRAFT_BINDING_VERSION;
   analysisKey: string;
-  offer: OfferDraft;
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -77,12 +77,11 @@ function isOfferDraft(value: unknown): value is OfferDraft {
   );
 }
 
-function isStoredOfferDraft(value: unknown): value is StoredOfferDraft {
+function isStoredOfferDraftBinding(value: unknown): value is StoredOfferDraftBinding {
   return (
     isRecord(value) &&
-    value.version === OFFER_DRAFT_STORAGE_VERSION &&
-    typeof value.analysisKey === "string" &&
-    isOfferDraft(value.offer)
+    value.version === OFFER_DRAFT_BINDING_VERSION &&
+    typeof value.analysisKey === "string"
   );
 }
 
@@ -145,33 +144,28 @@ export function saveInquiryAnalysis(analysis: AnalysisResult) {
 }
 
 export function loadOfferDraft(): OfferDraft | null {
-  const storedValue = loadRawStoredValue(OFFER_DRAFT_KEY);
-  if (storedValue === null) return null;
-
-  if (isStoredOfferDraft(storedValue)) return storedValue.offer;
-  if (isOfferDraft(storedValue)) return storedValue;
-
-  console.error(`Ungültige gespeicherte Atlas-Daten für "${OFFER_DRAFT_KEY}".`);
-  return null;
+  return loadStoredValue(OFFER_DRAFT_KEY, isOfferDraft);
 }
 
 export function loadOfferDraftForAnalysis(
   analysis: AnalysisResult,
 ): OfferDraft | null {
-  const storedValue = loadRawStoredValue(OFFER_DRAFT_KEY);
-  if (!isStoredOfferDraft(storedValue)) return null;
+  const offer = loadOfferDraft();
+  const binding = loadStoredValue(
+    OFFER_DRAFT_BINDING_KEY,
+    isStoredOfferDraftBinding,
+  );
+  if (!offer || !binding) return null;
 
-  return storedValue.analysisKey === createInboxAnalysisKey(analysis)
-    ? storedValue.offer
-    : null;
+  return binding.analysisKey === createInboxAnalysisKey(analysis) ? offer : null;
 }
 
 export function saveOfferDraft(offer: OfferDraft, analysis: AnalysisResult) {
-  saveStoredValue(OFFER_DRAFT_KEY, {
-    version: OFFER_DRAFT_STORAGE_VERSION,
+  saveStoredValue(OFFER_DRAFT_KEY, offer);
+  saveStoredValue(OFFER_DRAFT_BINDING_KEY, {
+    version: OFFER_DRAFT_BINDING_VERSION,
     analysisKey: createInboxAnalysisKey(analysis),
-    offer,
-  } satisfies StoredOfferDraft);
+  } satisfies StoredOfferDraftBinding);
 }
 
 export function clearOfferDraft() {
@@ -179,6 +173,7 @@ export function clearOfferDraft() {
 
   try {
     window.localStorage.removeItem(OFFER_DRAFT_KEY);
+    window.localStorage.removeItem(OFFER_DRAFT_BINDING_KEY);
   } catch (error) {
     console.error(
       "Gespeicherter Atlas-Angebotsentwurf konnte nicht gelöscht werden:",
@@ -193,6 +188,7 @@ export function clearInboxWorkflow() {
   try {
     window.localStorage.removeItem(INQUIRY_ANALYSIS_KEY);
     window.localStorage.removeItem(OFFER_DRAFT_KEY);
+    window.localStorage.removeItem(OFFER_DRAFT_BINDING_KEY);
   } catch (error) {
     console.error("Gespeicherter Atlas-Vorgang konnte nicht gelöscht werden:", error);
   }
