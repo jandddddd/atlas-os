@@ -121,16 +121,23 @@ export function planRemediation({ event, pull, findings, comments = [] }) {
   if (previous && previous.phase !== "clean" && previous.boundHead !== pull.headSha) {
     return escalation("Stored remediation state is not bound to the reviewed PR head.", previous);
   }
-  if (previous?.boundHead === pull.headSha && (previous.phase === "escalated" || previous.phase === "clean")) {
-    return { action: "WAIT", reason: `This head is already ${previous.phase}.` };
+
+  const blocking = findings.filter((finding) => finding.priority === "P1" || finding.priority === "P2");
+
+  if (previous?.boundHead === pull.headSha && previous.phase === "escalated") {
+    return { action: "WAIT", reason: "This head is already escalated." };
   }
-  if (previous?.phase === "clean" && previous.boundHead !== pull.headSha) previous = null;
+  if (previous?.boundHead === pull.headSha && previous.phase === "clean") {
+    if (blocking.length === 0) return { action: "WAIT", reason: "This head is already clean." };
+    previous = null;
+  } else if (previous?.phase === "clean" && previous.boundHead !== pull.headSha) {
+    previous = null;
+  }
 
   if (previous?.phase === "remediation_requested" && previous.boundHead === pull.headSha) {
     return { action: "WAIT", reason: "Remediation is already requested for this head." };
   }
 
-  const blocking = findings.filter((finding) => finding.priority === "P1" || finding.priority === "P2");
   if (blocking.length === 0) {
     return {
       action: "CLEAN",
