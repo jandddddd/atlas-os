@@ -22,6 +22,7 @@ type TodayApprovalDecision = Omit<ApprovalCardProps, "primaryAction" | "secondar
   overviewContext: string;
   overviewMeta: string;
   primaryActionLabel: string;
+  primaryActionPendingLabel?: string;
   editHref?: string;
   completionMessage: string;
   details: {
@@ -270,7 +271,8 @@ export function TodayApprovalCenter({
             }
             primaryAction={{
               label: priorityDecision.primaryActionLabel,
-              pendingLabel: "Wird freigegeben …",
+              pendingLabel:
+                priorityDecision.primaryActionPendingLabel ?? "Wird freigegeben …",
               onSelect: approvePriorityDecision,
               isDisabled: isSubmittingPriorityDecision,
             }}

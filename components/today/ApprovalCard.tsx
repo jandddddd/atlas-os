@@ -22,6 +22,12 @@ export type ApprovalCardProps = {
   title: string;
   context: ApprovalCardContextItem[];
   summary: string;
+  reviewContext?: {
+    source: string;
+    inquiry: string;
+    analysis: string;
+    nextStep: string;
+  };
   priority: TodayDecisionPriorityExplanation;
   uncertainty?: {
     title: string;
@@ -113,6 +119,7 @@ export function ApprovalCard({
   title,
   context,
   summary,
+  reviewContext,
   priority,
   uncertainty,
   consequence,
@@ -162,6 +169,42 @@ export function ApprovalCard({
               </div>
             ))}
           </dl>
+
+          {reviewContext ? (
+            <section
+              aria-labelledby="inbox-review-context"
+              className="rounded-2xl border border-emerald-200 bg-emerald-50/70 p-5 sm:p-6"
+            >
+              <div className="flex flex-col gap-1 sm:flex-row sm:items-baseline sm:justify-between">
+                <h4
+                  id="inbox-review-context"
+                  className="text-base font-semibold text-neutral-950"
+                >
+                  Prüfgrundlage aus der Inbox
+                </h4>
+                <p className="text-sm text-neutral-600">Ursprung: {reviewContext.source}</p>
+              </div>
+              <dl className="mt-4 grid gap-4 text-sm sm:grid-cols-2">
+                <div className="space-y-1">
+                  <dt className="font-medium text-neutral-500">
+                    KI-Zusammenfassung der Anfrage (ungeprüft)
+                  </dt>
+                  <dd className="leading-6 text-neutral-800">{reviewContext.inquiry}</dd>
+                </div>
+                <div className="space-y-1">
+                  <dt className="font-medium text-neutral-500">Einordnung der Analyse</dt>
+                  <dd className="leading-6 text-neutral-800">{reviewContext.analysis}</dd>
+                </div>
+                <div className="space-y-1 sm:col-span-2">
+                  <dt className="font-medium text-neutral-500">Nächster menschlicher Schritt</dt>
+                  <dd className="leading-6 text-neutral-800">{reviewContext.nextStep}</dd>
+                </div>
+              </dl>
+              <p className="mt-4 border-t border-emerald-200 pt-4 text-sm leading-6 text-neutral-600">
+                Dieser Schritt ist vorbereitet, aber noch nicht freigegeben oder final.
+              </p>
+            </section>
+          ) : null}
 
           <div className="grid gap-5 lg:grid-cols-[1.1fr_0.9fr] lg:gap-7">
             <div className="space-y-5">

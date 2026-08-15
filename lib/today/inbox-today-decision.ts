@@ -9,6 +9,14 @@ const priorityByWorkflowPriority = {
   high: "high",
 } as const;
 
+function describeAnalyzedProject(analysis: AnalysisResult): string {
+  const areaDescription = analysis.project.estimatedArea === null
+    ? "Keine Flächenangabe ist bekannt; Maße bleiben offen."
+    : `Genannte Flächenangabe laut Analyse: ${analysis.project.estimatedArea} m². Sie ist keine automatisch abgeleitete Wand- oder Deckenfläche.`;
+
+  return `${analysis.project.trade}. ${areaDescription}`;
+}
+
 export function createInboxTodayDecision(
   analysis: AnalysisResult,
 ): TodayApprovalDecisionInput {
@@ -27,10 +35,16 @@ export function createInboxTodayDecision(
     context: [
       { label: "Kunde", value: analysis.customer.name },
       { label: "Leistung", value: analysis.project.service },
-      { label: "Status", value: "aus der Inbox vorbereitet" },
+      { label: "Status", value: "menschliche Prüfung offen" },
     ],
     summary:
-      "Atlas hat diesen nächsten Schritt aus der Kundenanfrage vorbereitet. Bitte prüfe ihn, bevor du ihn freigibst.",
+      "Atlas hat diesen nächsten Schritt aus der Kundenanfrage vorbereitet. Bitte prüfe, ob er als geprüft vorgemerkt werden soll.",
+    reviewContext: {
+      source: "Inbox · ungeprüfte KI-Analyse",
+      inquiry: `${analysis.customer.name}: ${analysis.project.service}`,
+      analysis: describeAnalyzedProject(analysis),
+      nextStep: analysis.workflow.nextAction,
+    },
     uncertainty:
       missingInformation.length > 0
         ? {
@@ -41,16 +55,16 @@ export function createInboxTodayDecision(
           }
         : undefined,
     consequence:
-      "Mit der Freigabe wird der vorbereitete nächste Schritt als geprüft vorgemerkt.",
-    primaryActionLabel: "Schritt freigeben",
+      "Mit dieser Vormerkung wird nichts versendet oder final freigegeben.",
+    primaryActionLabel: "Als geprüft vormerken",
+    primaryActionPendingLabel: "Wird vorgemerkt …",
     editHref: "/inbox",
-    completionMessage: "Der vorbereitete nächste Schritt wurde freigegeben.",
+    completionMessage: "Der vorbereitete nächste Schritt wurde als geprüft vorgemerkt.",
     details: {
-      title: "Grundlage aus der Inbox",
-      items: [
-        `Empfohlener Schritt: ${analysis.workflow.nextAction}`,
-        ...analysis.nextSteps,
-      ],
+      title: "Weitere Schritte aus der Analyse",
+      items: analysis.nextSteps.length > 0
+        ? analysis.nextSteps
+        : ["Keine weiteren Schritte aus der Analyse vorhanden."],
     },
   };
 }
