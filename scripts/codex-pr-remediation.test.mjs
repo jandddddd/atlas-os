@@ -191,14 +191,21 @@ test("clean automatic review on the pushed head completes the coordinator state"
 test("later author push after persisted clean state starts a fresh eligible review transition", () => {
   const state = { version: 1, prNumber: 49, round: 1, phase: "clean", boundHead: shaB, originalPaths: basePull.changedPaths, findingIds: ["thread-1"] };
   const comments = [comment(state)];
-  const synchronized = planRemediation({ event: { name: "synchronize", before: shaB }, pull: { ...basePull, headSha: shaC }, findings: [], comments });
+  const changedPaths = [...basePull.changedPaths, "components/offers/OfferEditor.tsx"];
+  const updatedPull = { ...basePull, headSha: shaC, changedPaths };
+  const synchronized = planRemediation({ event: { name: "synchronize", before: shaB }, pull: updatedPull, findings: [], comments });
   assert.equal(synchronized.action, "WAIT");
-  const reviewed = planRemediation({ event: { name: "review", reviewHeadSha: shaC }, pull: { ...basePull, headSha: shaC }, findings: [{ ...finding, id: "thread-fresh" }], comments });
+  const reviewed = planRemediation({
+    event: { name: "review", reviewHeadSha: shaC },
+    pull: updatedPull,
+    findings: [{ ...finding, id: "thread-fresh", path: "components/offers/OfferEditor.tsx" }],
+    comments,
+  });
   assert.equal(reviewed.action, "REQUEST_REMEDIATION");
   assert.equal(reviewed.state.phase, "remediation_requested");
   assert.equal(reviewed.state.boundHead, shaC);
   assert.equal(reviewed.state.round, 1);
-  assert.deepEqual(reviewed.state.originalPaths, basePull.changedPaths);
+  assert.deepEqual(reviewed.state.originalPaths, changedPaths);
   assert.deepEqual(reviewed.state.findingIds, ["thread-fresh"]);
 });
 

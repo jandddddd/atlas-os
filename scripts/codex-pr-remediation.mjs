@@ -91,7 +91,7 @@ export function planRemediation({ event, pull, findings, comments = [] }) {
     return escalation("Only same-repository pull requests from a non-main branch into main are eligible.");
   }
 
-  const previous = latestState(comments);
+  let previous = latestState(comments);
   if (previous && previous.prNumber !== pull.number) return escalation("Stored remediation state belongs to another pull request.");
   if (event.name === "synchronize") {
     if (previous?.phase === "awaiting_review_after_push" || previous?.phase === "review_requested") {
@@ -121,6 +121,7 @@ export function planRemediation({ event, pull, findings, comments = [] }) {
   if (previous?.boundHead === pull.headSha && (previous.phase === "escalated" || previous.phase === "clean")) {
     return { action: "WAIT", reason: `This head is already ${previous.phase}.` };
   }
+  if (previous?.phase === "clean" && previous.boundHead !== pull.headSha) previous = null;
 
   const blocking = findings.filter((finding) => finding.priority === "P1" || finding.priority === "P2");
   if (blocking.length === 0) {
