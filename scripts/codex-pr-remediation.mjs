@@ -95,6 +95,9 @@ export function planRemediation({ event, pull, findings, comments = [] }) {
   if (previous && previous.prNumber !== pull.number) return escalation("Stored remediation state belongs to another pull request.");
   if (event.name === "synchronize") {
     if (previous?.phase === "awaiting_review_after_push" || previous?.phase === "review_requested") {
+      if (pull.headSha === previous.boundHead) {
+        return { action: "WAIT", reason: "This synchronize event has already been recorded for the current head." };
+      }
       return escalation("The PR head changed while awaiting review of the bound remediation head.", previous);
     }
     if (!previous || previous.phase !== "remediation_requested") return { action: "WAIT", reason: "No remediation push is pending." };
