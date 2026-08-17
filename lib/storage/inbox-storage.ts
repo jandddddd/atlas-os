@@ -14,6 +14,7 @@ const OFFER_WORKSPACE_VERSION = 1;
 export type OfferWorkspaceStatus = "review-pending" | "reviewed";
 export type OfferWorkspaceStatusFilter = "all" | OfferWorkspaceStatus;
 export type OfferWorkspaceInformationFilter = "all" | "missing" | "complete";
+export type OfferWorkspaceSort = "newest" | "oldest" | "customer";
 
 export type OfferWorkspaceEntry = {
   id: string;
@@ -255,6 +256,24 @@ export function filterOfferWorkspaceEntries(
       entry.offer.title,
       entry.offer.projectSummary,
     ].some((value) => value.toLocaleLowerCase("de-DE").includes(normalizedQuery));
+  });
+}
+
+export function sortOfferWorkspaceEntries(
+  entries: OfferWorkspaceEntry[],
+  sort: OfferWorkspaceSort,
+): OfferWorkspaceEntry[] {
+  return [...entries].sort((left, right) => {
+    if (sort === "customer") {
+      return left.offer.customerName.localeCompare(
+        right.offer.customerName,
+        "de",
+        { sensitivity: "base" },
+      );
+    }
+
+    const direction = sort === "newest" ? -1 : 1;
+    return direction * (Date.parse(left.updatedAt) - Date.parse(right.updatedAt));
   });
 }
 

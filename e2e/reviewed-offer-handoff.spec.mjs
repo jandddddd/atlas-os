@@ -248,6 +248,13 @@ test("offer workspace searches and filters archived drafts", async ({ page }) =>
 
   await expect(page.getByText("2 Angaben offen", { exact: true })).toBeVisible();
   await expect(page.getByText("Angaben vollständig", { exact: true })).toBeVisible();
+  await expect(page.getByRole("article").first()).toContainText("Gewerbepark Süd");
+
+  await page.getByLabel("Sortierung").selectOption("oldest");
+  await expect(page.getByRole("article").first()).toContainText("Familie Müller");
+
+  await page.getByLabel("Sortierung").selectOption("customer");
+  await expect(page.getByRole("article").first()).toContainText("Familie Müller");
 
   await page.getByLabel("Angebote durchsuchen").fill("müller");
   await expect(page.getByRole("article")).toContainText("Familie Müller");

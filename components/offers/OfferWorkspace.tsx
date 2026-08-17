@@ -8,9 +8,11 @@ import {
   filterOfferWorkspaceEntries,
   loadInquiryAnalysis,
   loadOfferWorkspace,
+  sortOfferWorkspaceEntries,
   type OfferWorkspaceEntry,
   type OfferWorkspaceInformationFilter,
   type OfferWorkspaceStatusFilter,
+  type OfferWorkspaceSort,
 } from "@/lib/storage/inbox-storage";
 
 const dateFormatter = new Intl.DateTimeFormat("de-DE", {
@@ -33,6 +35,7 @@ export function OfferWorkspace() {
   const [statusFilter, setStatusFilter] = useState<OfferWorkspaceStatusFilter>("all");
   const [informationFilter, setInformationFilter] =
     useState<OfferWorkspaceInformationFilter>("all");
+  const [sort, setSort] = useState<OfferWorkspaceSort>("newest");
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => {
@@ -71,11 +74,9 @@ export function OfferWorkspace() {
     );
   }
 
-  const filteredOffers = filterOfferWorkspaceEntries(
-    offers,
-    query,
-    statusFilter,
-    informationFilter,
+  const filteredOffers = sortOfferWorkspaceEntries(
+    filterOfferWorkspaceEntries(offers, query, statusFilter, informationFilter),
+    sort,
   );
 
   return (
@@ -97,8 +98,8 @@ export function OfferWorkspace() {
         </Link>
       </div>
 
-      <div className="mt-6 grid gap-4 rounded-2xl border bg-white p-5 md:grid-cols-[minmax(0,1fr)_200px_220px]">
-        <label className="text-sm font-medium text-neutral-700">
+      <div className="mt-6 grid gap-4 rounded-2xl border bg-white p-5 md:grid-cols-3">
+        <label className="text-sm font-medium text-neutral-700 md:col-span-3">
           Angebote durchsuchen
           <input
             type="search"
@@ -107,6 +108,27 @@ export function OfferWorkspace() {
             placeholder="Kunde, Titel oder Inhalt"
             className="mt-2 w-full rounded-xl border px-4 py-3 font-normal text-neutral-950 outline-none transition focus:border-neutral-500 focus:ring-2 focus:ring-neutral-200"
           />
+        </label>
+        <label className="text-sm font-medium text-neutral-700">
+          Sortierung
+          <select
+            value={sort}
+            onChange={(event) => {
+              const nextSort = event.target.value;
+              if (
+                nextSort === "newest" ||
+                nextSort === "oldest" ||
+                nextSort === "customer"
+              ) {
+                setSort(nextSort);
+              }
+            }}
+            className="mt-2 w-full rounded-xl border bg-white px-4 py-3 font-normal text-neutral-950 outline-none transition focus:border-neutral-500 focus:ring-2 focus:ring-neutral-200"
+          >
+            <option value="newest">Zuletzt aktualisiert</option>
+            <option value="oldest">Älteste zuerst</option>
+            <option value="customer">Kunde A–Z</option>
+          </select>
         </label>
         <label className="text-sm font-medium text-neutral-700">
           Angaben
@@ -164,6 +186,7 @@ export function OfferWorkspace() {
               setQuery("");
               setStatusFilter("all");
               setInformationFilter("all");
+              setSort("newest");
             }}
             className="mt-5 rounded-xl border px-4 py-2 text-sm font-medium transition hover:bg-neutral-50"
           >
