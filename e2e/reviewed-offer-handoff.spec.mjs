@@ -246,6 +246,9 @@ test("offer workspace searches and filters archived drafts", async ({ page }) =>
   }, inboxOfferFixture);
   await page.reload();
 
+  await expect(page.getByText("2 Angaben offen", { exact: true })).toBeVisible();
+  await expect(page.getByText("Angaben vollständig", { exact: true })).toBeVisible();
+
   await page.getByLabel("Angebote durchsuchen").fill("müller");
   await expect(page.getByRole("article")).toContainText("Familie Müller");
   await expect(page.getByText("Gewerbepark Süd", { exact: true })).toHaveCount(0);

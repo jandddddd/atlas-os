@@ -14,7 +14,7 @@ wird niemals automatisch freigegeben oder versendet.
 - Der bestehende Einzelentwurf unter `atlas-editable-offer` und seine Bindung
   bleiben unverändert erhalten.
 - Die Angebotsübersicht zeigt mehrere Vorgänge mit Kunde, Titel,
-  Aktualisierungszeitpunkt und Prüfstatus.
+  Aktualisierungszeitpunkt, Prüfstatus und der Anzahl noch fehlender Angaben.
 - Eine erfolgreiche menschliche Vormerkung in Today setzt den zugehörigen
   Angebotsvorgang auf `Geprüft`.
 - Nur der aktuell in der Inbox geladene Vorgang kann von der Übersicht direkt
