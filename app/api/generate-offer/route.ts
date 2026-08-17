@@ -1,6 +1,8 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { NextResponse } from "next/server";
 
+import { parseOfferResponse } from "@/lib/inbox/inquiry-response";
+
 const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY,
 });
@@ -208,7 +210,7 @@ Erstelle daraus jetzt einen fachlichen Angebotsentwurf.
       );
     }
 
-    const offer = JSON.parse(textBlock.text);
+    const offer = parseOfferResponse(textBlock.text);
 
     return NextResponse.json({
       offer,
