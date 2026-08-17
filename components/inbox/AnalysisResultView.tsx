@@ -1,23 +1,36 @@
 import Link from "next/link";
-import { ArrowRight, CheckCircle2, Clock3, FileText, Sparkles } from "lucide-react";
+import {
+  ArrowRight,
+  CheckCircle2,
+  Clock3,
+  FileText,
+  MessageSquareText,
+  Sparkles,
+} from "lucide-react";
 
 import type { AnalysisResult, OfferStatus } from "./types";
 
 type AnalysisResultViewProps = {
   analysis: AnalysisResult;
   isOfferGenerationBlocked: boolean;
+  isClarificationBlocked: boolean;
+  hasClarificationDraft: boolean;
   isTodayHandoffAvailable: boolean;
   offerStatus: OfferStatus;
   onGenerateOffer: () => void;
+  onPrepareClarification: () => void;
   onRestartAnalysis: () => void;
 };
 
 export function AnalysisResultView({
   analysis,
   isOfferGenerationBlocked,
+  isClarificationBlocked,
+  hasClarificationDraft,
   isTodayHandoffAvailable,
   offerStatus,
   onGenerateOffer,
+  onPrepareClarification,
   onRestartAnalysis,
 }: AnalysisResultViewProps) {
   return (
@@ -102,6 +115,21 @@ export function AnalysisResultView({
               <li key={information}>• {information}</li>
             ))}
           </ul>
+
+          <button
+            type="button"
+            onClick={onPrepareClarification}
+            aria-describedby={
+              isClarificationBlocked && !hasClarificationDraft
+                ? "restored-analysis-offer-warning"
+                : undefined
+            }
+            disabled={isClarificationBlocked && !hasClarificationDraft}
+            className="mt-4 inline-flex items-center gap-2 rounded-xl border border-neutral-300 bg-white px-4 py-2.5 text-sm font-medium text-neutral-800 transition hover:bg-neutral-100 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <MessageSquareText className="h-4 w-4" />
+            {hasClarificationDraft ? "Rückfrage ansehen" : "Rückfrage vorbereiten"}
+          </button>
         </div>
       )}
 
