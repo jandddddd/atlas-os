@@ -13,6 +13,7 @@ const OFFER_WORKSPACE_VERSION = 1;
 
 export type OfferWorkspaceStatus = "review-pending" | "reviewed";
 export type OfferWorkspaceStatusFilter = "all" | OfferWorkspaceStatus;
+export type OfferWorkspaceInformationFilter = "all" | "missing" | "complete";
 
 export type OfferWorkspaceEntry = {
   id: string;
@@ -238,11 +239,15 @@ export function filterOfferWorkspaceEntries(
   entries: OfferWorkspaceEntry[],
   query: string,
   status: OfferWorkspaceStatusFilter,
+  information: OfferWorkspaceInformationFilter = "all",
 ): OfferWorkspaceEntry[] {
   const normalizedQuery = query.trim().toLocaleLowerCase("de-DE");
 
   return entries.filter((entry) => {
     if (status !== "all" && entry.status !== status) return false;
+    const hasMissingInformation = entry.offer.missingInformation.length > 0;
+    if (information === "missing" && !hasMissingInformation) return false;
+    if (information === "complete" && hasMissingInformation) return false;
     if (!normalizedQuery) return true;
 
     return [

@@ -232,7 +232,12 @@ test("offer workspace searches and filters archived drafts", async ({ page }) =>
         {
           id: "reviewed-workflow",
           workflowId: "reviewed-workflow",
-          offer: { ...offer, customerName: "Gewerbepark Süd", title: "Fassadenanstrich" },
+          offer: {
+            ...offer,
+            customerName: "Gewerbepark Süd",
+            title: "Fassadenanstrich",
+            missingInformation: [],
+          },
           status: "reviewed",
           updatedAt: "2026-08-17T13:00:00.000Z",
         },
@@ -250,6 +255,15 @@ test("offer workspace searches and filters archived drafts", async ({ page }) =>
   await expect(page.getByRole("article")).toContainText("Gewerbepark Süd");
   await expect(page.getByText("Familie Müller", { exact: true })).toHaveCount(0);
   await expect(page.getByText("1 Vorgang", { exact: true })).toBeVisible();
+
+  await page.getByLabel("Prüfstatus").selectOption("all");
+  await page.getByLabel("Angaben").selectOption("missing");
+  await expect(page.getByRole("article")).toContainText("Familie Müller");
+  await expect(page.getByText("Gewerbepark Süd", { exact: true })).toHaveCount(0);
+
+  await page.getByLabel("Angaben").selectOption("complete");
+  await expect(page.getByRole("article")).toContainText("Gewerbepark Süd");
+  await expect(page.getByText("Familie Müller", { exact: true })).toHaveCount(0);
 
   await page.getByLabel("Angebote durchsuchen").fill("nicht vorhanden");
   await expect(page.getByRole("heading", { name: "Keine passenden Angebote" })).toBeVisible();

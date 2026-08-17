@@ -9,6 +9,7 @@ import {
   loadInquiryAnalysis,
   loadOfferWorkspace,
   type OfferWorkspaceEntry,
+  type OfferWorkspaceInformationFilter,
   type OfferWorkspaceStatusFilter,
 } from "@/lib/storage/inbox-storage";
 
@@ -30,6 +31,8 @@ export function OfferWorkspace() {
   const [currentWorkflowId, setCurrentWorkflowId] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<OfferWorkspaceStatusFilter>("all");
+  const [informationFilter, setInformationFilter] =
+    useState<OfferWorkspaceInformationFilter>("all");
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => {
@@ -68,7 +71,12 @@ export function OfferWorkspace() {
     );
   }
 
-  const filteredOffers = filterOfferWorkspaceEntries(offers, query, statusFilter);
+  const filteredOffers = filterOfferWorkspaceEntries(
+    offers,
+    query,
+    statusFilter,
+    informationFilter,
+  );
 
   return (
     <section aria-labelledby="offer-list-heading" className="mt-10">
@@ -89,7 +97,7 @@ export function OfferWorkspace() {
         </Link>
       </div>
 
-      <div className="mt-6 grid gap-4 rounded-2xl border bg-white p-5 sm:grid-cols-[minmax(0,1fr)_220px]">
+      <div className="mt-6 grid gap-4 rounded-2xl border bg-white p-5 md:grid-cols-[minmax(0,1fr)_200px_220px]">
         <label className="text-sm font-medium text-neutral-700">
           Angebote durchsuchen
           <input
@@ -99,6 +107,27 @@ export function OfferWorkspace() {
             placeholder="Kunde, Titel oder Inhalt"
             className="mt-2 w-full rounded-xl border px-4 py-3 font-normal text-neutral-950 outline-none transition focus:border-neutral-500 focus:ring-2 focus:ring-neutral-200"
           />
+        </label>
+        <label className="text-sm font-medium text-neutral-700">
+          Angaben
+          <select
+            value={informationFilter}
+            onChange={(event) => {
+              const nextFilter = event.target.value;
+              if (
+                nextFilter === "all" ||
+                nextFilter === "missing" ||
+                nextFilter === "complete"
+              ) {
+                setInformationFilter(nextFilter);
+              }
+            }}
+            className="mt-2 w-full rounded-xl border bg-white px-4 py-3 font-normal text-neutral-950 outline-none transition focus:border-neutral-500 focus:ring-2 focus:ring-neutral-200"
+          >
+            <option value="all">Alle Angaben</option>
+            <option value="missing">Angaben fehlen</option>
+            <option value="complete">Keine Angaben offen</option>
+          </select>
         </label>
         <label className="text-sm font-medium text-neutral-700">
           Prüfstatus
@@ -134,6 +163,7 @@ export function OfferWorkspace() {
             onClick={() => {
               setQuery("");
               setStatusFilter("all");
+              setInformationFilter("all");
             }}
             className="mt-5 rounded-xl border px-4 py-2 text-sm font-medium transition hover:bg-neutral-50"
           >
