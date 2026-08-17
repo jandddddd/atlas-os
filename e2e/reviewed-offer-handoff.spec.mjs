@@ -257,6 +257,89 @@ test("offer workspace searches and filters archived drafts", async ({ page }) =>
   await expect(page.getByRole("article")).toHaveCount(2);
 });
 
+test("historical offer editing persists the exact archive entry and reopens review", async ({ page }) => {
+  await page.goto("/offers/historical-workflow");
+  await page.evaluate((offer) => {
+    window.localStorage.setItem("atlas-offer-workspace", JSON.stringify({
+      version: 1,
+      offers: [
+        {
+          id: "historical-workflow",
+          workflowId: "historical-workflow",
+          offer,
+          status: "reviewed",
+          updatedAt: "2026-08-17T12:00:00.000Z",
+        },
+        {
+          id: "other-workflow",
+          workflowId: "other-workflow",
+          offer: { ...offer, title: "Unveränderter Entwurf" },
+          status: "reviewed",
+          updatedAt: "2026-08-17T13:00:00.000Z",
+        },
+      ],
+    }));
+  }, inboxOfferFixture);
+  await page.reload();
+
+  await page.getByRole("button", { name: "Entwurf bearbeiten" }).click();
+  await page.getByLabel("Angebotstitel").fill("Historisch überarbeitet");
+  await page.getByRole("button", { name: "Änderungen übernehmen" }).click();
+
+  await expect(page.getByRole("heading", { name: "Historisch überarbeitet" })).toBeVisible();
+  await expect(page.getByText("Prüfung offen", { exact: true })).toBeVisible();
+  const storedOffers = await page.evaluate(() => JSON.parse(window.localStorage.getItem("atlas-offer-workspace")).offers);
+  expect(storedOffers[0].id).toBe("historical-workflow");
+  expect(storedOffers[0].offer.title).toBe("Historisch überarbeitet");
+  expect(storedOffers[0].status).toBe("review-pending");
+  expect(storedOffers[1].offer.title).toBe("Unveränderter Entwurf");
+});
+
+test("historical editing stays bound when its workflow becomes active before save", async ({ page }) => {
+  await page.goto("/offers/historical-workflow");
+  await page.evaluate((offer) => {
+    window.localStorage.setItem("atlas-offer-workspace", JSON.stringify({
+      version: 1,
+      offers: [{
+        id: "historical-workflow",
+        workflowId: "historical-workflow",
+        offer,
+        status: "reviewed",
+        updatedAt: "2026-08-17T12:00:00.000Z",
+      }],
+    }));
+  }, inboxOfferFixture);
+  await page.reload();
+
+  await page.getByRole("button", { name: "Entwurf bearbeiten" }).click();
+  await page.getByLabel("Angebotstitel").fill("Jetzt aktiver Entwurf");
+  await page.evaluate(({ analysis, offer }) => {
+    const workflowId = "historical-workflow";
+    window.localStorage.setItem(
+      "atlas-inquiry-analysis",
+      JSON.stringify({ ...analysis, workflowId }),
+    );
+    window.localStorage.setItem("atlas-editable-offer", JSON.stringify(offer));
+    window.localStorage.setItem(
+      "atlas-editable-offer-analysis-binding",
+      JSON.stringify({ version: 1, workflowId }),
+    );
+  }, { analysis: inboxAnalysisFixture, offer: inboxOfferFixture });
+  await page.getByRole("button", { name: "Änderungen übernehmen" }).click();
+
+  await expect(page.getByRole("link", { name: "In der Inbox bearbeiten" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Entwurf bearbeiten" })).toHaveCount(0);
+  const storedState = await page.evaluate(() => ({
+    activeOffer: JSON.parse(window.localStorage.getItem("atlas-editable-offer")),
+    binding: JSON.parse(window.localStorage.getItem("atlas-editable-offer-analysis-binding")),
+    offers: JSON.parse(window.localStorage.getItem("atlas-offer-workspace")).offers,
+  }));
+  expect(storedState.activeOffer.title).toBe("Jetzt aktiver Entwurf");
+  expect(storedState.binding).toEqual({ version: 1, workflowId: "historical-workflow" });
+  expect(storedState.offers[0].offer.title).toBe("Jetzt aktiver Entwurf");
+  expect(storedState.offers[0].status).toBe("review-pending");
+});
+
 test("offer detail handles an unknown workspace id safely", async ({ page }) => {
   await page.goto("/offers/unknown-workflow");
 

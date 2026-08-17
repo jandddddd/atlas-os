@@ -19,8 +19,9 @@ wird niemals automatisch freigegeben oder versendet.
   Angebotsvorgang auf `Geprüft`.
 - Nur der aktuell in der Inbox geladene Vorgang kann von der Übersicht direkt
   zur vorhandenen Bearbeitungsansicht geöffnet werden.
-- Jeder archivierte Vorgang besitzt eine lesbare Detailansicht unter seiner
-  eindeutigen Workflow-ID. Historische Entwürfe werden dort nicht verändert.
+- Jeder archivierte Vorgang besitzt eine Detailansicht unter seiner eindeutigen
+  Workflow-ID. Historische Entwürfe können dort überarbeitet werden; jede
+  Änderung setzt ihren Prüfstatus wieder auf `Prüfung offen`.
 - Die Übersicht kann nach Kunde, Titel oder Projektinhalt durchsucht und nach
   offenem beziehungsweise geprüftem Status gefiltert werden.
 
@@ -35,4 +36,3 @@ Datenformate bleiben rückwärtskompatibel.
 - Preise, Kalkulationen oder Versand
 - automatische fachliche Freigaben
 - serverseitige oder geräteübergreifende Synchronisierung
-- eigenständige Bearbeitung historischer Vorgänge

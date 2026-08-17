@@ -253,6 +253,49 @@ export function filterOfferWorkspaceEntries(
   });
 }
 
+export function reviseOfferWorkspaceEntry(
+  entries: OfferWorkspaceEntry[],
+  id: string,
+  offer: OfferDraft,
+  updatedAt: string,
+): OfferWorkspaceEntry[] {
+  const matchingEntry = findOfferWorkspaceEntry(entries, id);
+  if (!matchingEntry) return entries;
+
+  return [
+    {
+      ...matchingEntry,
+      offer,
+      status: "review-pending",
+      updatedAt,
+    },
+    ...entries.filter((entry) => entry.id !== id),
+  ];
+}
+
+export function saveArchivedOfferDraft(
+  id: string,
+  offer: OfferDraft,
+): OfferWorkspaceEntry | null {
+  const activeAnalysis = loadInquiryAnalysis();
+  if (activeAnalysis?.workflowId === id) {
+    saveOfferDraft(offer, activeAnalysis);
+    return findOfferWorkspaceEntry(loadOfferWorkspace(), id);
+  }
+
+  const entries = loadOfferWorkspace();
+  const revisedEntries = reviseOfferWorkspaceEntry(
+    entries,
+    id,
+    offer,
+    new Date().toISOString(),
+  );
+  if (revisedEntries === entries) return null;
+
+  saveOfferWorkspace(revisedEntries);
+  return findOfferWorkspaceEntry(revisedEntries, id);
+}
+
 export function upsertOfferWorkspaceEntry(
   entries: OfferWorkspaceEntry[],
   offer: OfferDraft,
