@@ -12,6 +12,7 @@ const OFFER_WORKSPACE_KEY = "atlas-offer-workspace";
 const OFFER_WORKSPACE_VERSION = 1;
 
 export type OfferWorkspaceStatus = "review-pending" | "reviewed";
+export type OfferWorkspaceStatusFilter = "all" | OfferWorkspaceStatus;
 
 export type OfferWorkspaceEntry = {
   id: string;
@@ -231,6 +232,25 @@ export function findOfferWorkspaceEntry(
   id: string,
 ): OfferWorkspaceEntry | null {
   return entries.find((entry) => entry.id === id) ?? null;
+}
+
+export function filterOfferWorkspaceEntries(
+  entries: OfferWorkspaceEntry[],
+  query: string,
+  status: OfferWorkspaceStatusFilter,
+): OfferWorkspaceEntry[] {
+  const normalizedQuery = query.trim().toLocaleLowerCase("de-DE");
+
+  return entries.filter((entry) => {
+    if (status !== "all" && entry.status !== status) return false;
+    if (!normalizedQuery) return true;
+
+    return [
+      entry.offer.customerName,
+      entry.offer.title,
+      entry.offer.projectSummary,
+    ].some((value) => value.toLocaleLowerCase("de-DE").includes(normalizedQuery));
+  });
 }
 
 export function upsertOfferWorkspaceEntry(

@@ -216,6 +216,47 @@ test("offer workspace opens a historical draft by its workflow id", async ({ pag
   await expect(page.getByRole("link", { name: "In der Inbox bearbeiten" })).toHaveCount(0);
 });
 
+test("offer workspace searches and filters archived drafts", async ({ page }) => {
+  await page.goto("/offers");
+  await page.evaluate((offer) => {
+    window.localStorage.setItem("atlas-offer-workspace", JSON.stringify({
+      version: 1,
+      offers: [
+        {
+          id: "pending-workflow",
+          workflowId: "pending-workflow",
+          offer: { ...offer, customerName: "Familie Müller" },
+          status: "review-pending",
+          updatedAt: "2026-08-17T12:00:00.000Z",
+        },
+        {
+          id: "reviewed-workflow",
+          workflowId: "reviewed-workflow",
+          offer: { ...offer, customerName: "Gewerbepark Süd", title: "Fassadenanstrich" },
+          status: "reviewed",
+          updatedAt: "2026-08-17T13:00:00.000Z",
+        },
+      ],
+    }));
+  }, inboxOfferFixture);
+  await page.reload();
+
+  await page.getByLabel("Angebote durchsuchen").fill("müller");
+  await expect(page.getByRole("article")).toContainText("Familie Müller");
+  await expect(page.getByText("Gewerbepark Süd", { exact: true })).toHaveCount(0);
+
+  await page.getByLabel("Angebote durchsuchen").fill("");
+  await page.getByLabel("Prüfstatus").selectOption("reviewed");
+  await expect(page.getByRole("article")).toContainText("Gewerbepark Süd");
+  await expect(page.getByText("Familie Müller", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("1 Vorgang", { exact: true })).toBeVisible();
+
+  await page.getByLabel("Angebote durchsuchen").fill("nicht vorhanden");
+  await expect(page.getByRole("heading", { name: "Keine passenden Angebote" })).toBeVisible();
+  await page.getByRole("button", { name: "Filter zurücksetzen" }).click();
+  await expect(page.getByRole("article")).toHaveCount(2);
+});
+
 test("offer detail handles an unknown workspace id safely", async ({ page }) => {
   await page.goto("/offers/unknown-workflow");
 

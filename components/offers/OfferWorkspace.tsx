@@ -5,9 +5,11 @@ import { useEffect, useState } from "react";
 import { FileText, Inbox } from "lucide-react";
 
 import {
+  filterOfferWorkspaceEntries,
   loadInquiryAnalysis,
   loadOfferWorkspace,
   type OfferWorkspaceEntry,
+  type OfferWorkspaceStatusFilter,
 } from "@/lib/storage/inbox-storage";
 
 const dateFormatter = new Intl.DateTimeFormat("de-DE", {
@@ -26,6 +28,8 @@ const statusLabels = {
 export function OfferWorkspace() {
   const [offers, setOffers] = useState<OfferWorkspaceEntry[] | null>(null);
   const [currentWorkflowId, setCurrentWorkflowId] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState<OfferWorkspaceStatusFilter>("all");
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => {
@@ -64,12 +68,14 @@ export function OfferWorkspace() {
     );
   }
 
+  const filteredOffers = filterOfferWorkspaceEntries(offers, query, statusFilter);
+
   return (
     <section aria-labelledby="offer-list-heading" className="mt-10">
       <div className="flex items-end justify-between gap-4">
         <div>
           <p className="text-sm font-medium uppercase tracking-[0.16em] text-neutral-500">
-            {offers.length} {offers.length === 1 ? "Vorgang" : "Vorgänge"}
+            {filteredOffers.length} {filteredOffers.length === 1 ? "Vorgang" : "Vorgänge"}
           </p>
           <h2 id="offer-list-heading" className="mt-1 text-2xl font-semibold">
             Angebotsentwürfe
@@ -83,71 +89,124 @@ export function OfferWorkspace() {
         </Link>
       </div>
 
-      <div className="mt-5 grid gap-4">
-        {offers.map((entry) => {
-          const isCurrentWorkflow = entry.workflowId === currentWorkflowId;
+      <div className="mt-6 grid gap-4 rounded-2xl border bg-white p-5 sm:grid-cols-[minmax(0,1fr)_220px]">
+        <label className="text-sm font-medium text-neutral-700">
+          Angebote durchsuchen
+          <input
+            type="search"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="Kunde, Titel oder Inhalt"
+            className="mt-2 w-full rounded-xl border px-4 py-3 font-normal text-neutral-950 outline-none transition focus:border-neutral-500 focus:ring-2 focus:ring-neutral-200"
+          />
+        </label>
+        <label className="text-sm font-medium text-neutral-700">
+          Prüfstatus
+          <select
+            value={statusFilter}
+            onChange={(event) => {
+              const nextStatus = event.target.value;
+              if (
+                nextStatus === "all" ||
+                nextStatus === "review-pending" ||
+                nextStatus === "reviewed"
+              ) {
+                setStatusFilter(nextStatus);
+              }
+            }}
+            className="mt-2 w-full rounded-xl border bg-white px-4 py-3 font-normal text-neutral-950 outline-none transition focus:border-neutral-500 focus:ring-2 focus:ring-neutral-200"
+          >
+            <option value="all">Alle Status</option>
+            <option value="review-pending">Prüfung offen</option>
+            <option value="reviewed">Geprüft</option>
+          </select>
+        </label>
+      </div>
 
-          return (
-            <article
-              key={entry.id}
-              className="rounded-2xl border bg-white p-6 shadow-sm"
-            >
-              <div className="flex flex-wrap items-start justify-between gap-5">
-                <div className="flex min-w-0 gap-4">
-                  <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-neutral-100">
-                    <FileText className="h-5 w-5 text-neutral-700" />
-                  </span>
-                  <div className="min-w-0">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span
-                        className={entry.status === "reviewed"
-                          ? "rounded-full bg-emerald-100 px-3 py-1 text-xs font-medium text-emerald-800"
-                          : "rounded-full bg-amber-100 px-3 py-1 text-xs font-medium text-amber-800"}
-                      >
-                        {statusLabels[entry.status]}
-                      </span>
-                      {isCurrentWorkflow ? (
-                        <span className="text-xs font-medium text-neutral-500">
-                          Aktueller Inbox-Vorgang
+      {filteredOffers.length === 0 ? (
+        <div className="mt-5 rounded-2xl border border-dashed bg-white p-8 text-center">
+          <h3 className="text-lg font-semibold">Keine passenden Angebote</h3>
+          <p className="mt-2 text-sm text-neutral-600">
+            Passe Suche oder Prüfstatus an, um andere Vorgänge anzuzeigen.
+          </p>
+          <button
+            type="button"
+            onClick={() => {
+              setQuery("");
+              setStatusFilter("all");
+            }}
+            className="mt-5 rounded-xl border px-4 py-2 text-sm font-medium transition hover:bg-neutral-50"
+          >
+            Filter zurücksetzen
+          </button>
+        </div>
+      ) : (
+        <div className="mt-5 grid gap-4">
+          {filteredOffers.map((entry) => {
+            const isCurrentWorkflow = entry.workflowId === currentWorkflowId;
+
+            return (
+              <article
+                key={entry.id}
+                className="rounded-2xl border bg-white p-6 shadow-sm"
+              >
+                <div className="flex flex-wrap items-start justify-between gap-5">
+                  <div className="flex min-w-0 gap-4">
+                    <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-neutral-100">
+                      <FileText className="h-5 w-5 text-neutral-700" />
+                    </span>
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span
+                          className={entry.status === "reviewed"
+                            ? "rounded-full bg-emerald-100 px-3 py-1 text-xs font-medium text-emerald-800"
+                            : "rounded-full bg-amber-100 px-3 py-1 text-xs font-medium text-amber-800"}
+                        >
+                          {statusLabels[entry.status]}
                         </span>
-                      ) : null}
+                        {isCurrentWorkflow ? (
+                          <span className="text-xs font-medium text-neutral-500">
+                            Aktueller Inbox-Vorgang
+                          </span>
+                        ) : null}
+                      </div>
+                      <h3 className="mt-3 truncate text-xl font-semibold">
+                        {entry.offer.title}
+                      </h3>
+                      <p className="mt-1 text-sm text-neutral-600">
+                        {entry.offer.customerName}
+                      </p>
+                      <p className="mt-3 line-clamp-2 text-sm leading-6 text-neutral-600">
+                        {entry.offer.projectSummary}
+                      </p>
                     </div>
-                    <h3 className="mt-3 truncate text-xl font-semibold">
-                      {entry.offer.title}
-                    </h3>
-                    <p className="mt-1 text-sm text-neutral-600">
-                      {entry.offer.customerName}
+                  </div>
+
+                  <div className="shrink-0 text-right">
+                    <p className="text-xs text-neutral-500">
+                      Aktualisiert {dateFormatter.format(new Date(entry.updatedAt))}
                     </p>
-                    <p className="mt-3 line-clamp-2 text-sm leading-6 text-neutral-600">
-                      {entry.offer.projectSummary}
-                    </p>
+                    <Link
+                      href={`/offers/${encodeURIComponent(entry.id)}`}
+                      className="mt-4 inline-flex rounded-xl border px-4 py-2 text-sm font-medium transition hover:bg-neutral-50"
+                    >
+                      Details ansehen
+                    </Link>
+                    {isCurrentWorkflow ? (
+                      <Link
+                        href="/inbox#offer-draft"
+                        className="mt-3 block text-sm font-medium text-neutral-700 underline-offset-4 hover:underline"
+                      >
+                        In der Inbox bearbeiten
+                      </Link>
+                    ) : null}
                   </div>
                 </div>
-
-                <div className="shrink-0 text-right">
-                  <p className="text-xs text-neutral-500">
-                    Aktualisiert {dateFormatter.format(new Date(entry.updatedAt))}
-                  </p>
-                  <Link
-                    href={`/offers/${encodeURIComponent(entry.id)}`}
-                    className="mt-4 inline-flex rounded-xl border px-4 py-2 text-sm font-medium transition hover:bg-neutral-50"
-                  >
-                    Details ansehen
-                  </Link>
-                  {isCurrentWorkflow ? (
-                    <Link
-                      href="/inbox#offer-draft"
-                      className="mt-3 block text-sm font-medium text-neutral-700 underline-offset-4 hover:underline"
-                    >
-                      In der Inbox bearbeiten
-                    </Link>
-                  ) : null}
-                </div>
-              </div>
-            </article>
-          );
-        })}
-      </div>
+              </article>
+            );
+          })}
+        </div>
+      )}
     </section>
   );
 }
