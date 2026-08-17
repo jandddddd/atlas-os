@@ -3,6 +3,7 @@ import test from "node:test";
 
 import type { OfferDraft } from "../../components/inbox/types.ts";
 import {
+  filterOfferWorkspaceEntries,
   findOfferWorkspaceEntry,
   reviewOfferWorkspaceEntry,
   upsertOfferWorkspaceEntry,
@@ -103,4 +104,28 @@ test("finds a historical offer only by its exact workspace id", () => {
 
   assert.equal(findOfferWorkspaceEntry(entries, "workflow-1"), entries[0]);
   assert.equal(findOfferWorkspaceEntry(entries, "workflow-2"), null);
+});
+
+test("filters offer workflows by normalized search text and status", () => {
+  const entries: OfferWorkspaceEntry[] = [
+    {
+      id: "workflow-1",
+      workflowId: "workflow-1",
+      offer: { ...offer, customerName: "Familie Müller" },
+      status: "review-pending",
+      updatedAt: "2026-08-17T10:00:00.000Z",
+    },
+    {
+      id: "workflow-2",
+      workflowId: "workflow-2",
+      offer: { ...offer, title: "Fassadenanstrich Gewerbehalle" },
+      status: "reviewed",
+      updatedAt: "2026-08-17T11:00:00.000Z",
+    },
+  ];
+
+  assert.deepEqual(filterOfferWorkspaceEntries(entries, "  MÜLLER ", "all"), [entries[0]]);
+  assert.deepEqual(filterOfferWorkspaceEntries(entries, "fassade", "reviewed"), [entries[1]]);
+  assert.deepEqual(filterOfferWorkspaceEntries(entries, "fassade", "review-pending"), []);
+  assert.deepEqual(filterOfferWorkspaceEntries(entries, "", "all"), entries);
 });

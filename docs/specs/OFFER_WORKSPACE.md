@@ -21,6 +21,8 @@ wird niemals automatisch freigegeben oder versendet.
   zur vorhandenen Bearbeitungsansicht geöffnet werden.
 - Jeder archivierte Vorgang besitzt eine lesbare Detailansicht unter seiner
   eindeutigen Workflow-ID. Historische Entwürfe werden dort nicht verändert.
+- Die Übersicht kann nach Kunde, Titel oder Projektinhalt durchsucht und nach
+  offenem beziehungsweise geprüftem Status gefiltert werden.
 
 ## Persistenzvertrag
 
