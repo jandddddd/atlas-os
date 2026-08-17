@@ -162,3 +162,85 @@ test("saved offer handoff restores, scrolls to and focuses the draft", async ({ 
     return style.outlineStyle !== "none" && style.outlineWidth !== "0px";
   })).toBe(true);
 });
+
+test("offer workspace keeps the draft and reflects its Today review status", async ({ page }) => {
+  await fillAndAnalyze(page);
+  await page.getByRole("button", { name: "Angebotsentwurf erstellen" }).click();
+  await expect(
+    page.getByText("Angebotsentwurf Familie Schneider", { exact: true }),
+  ).toBeVisible();
+
+  await page.goto("/offers");
+  const offer = page.getByRole("article");
+  await expect(page.getByRole("heading", { name: "Angebote" })).toBeVisible();
+  await expect(offer).toContainText("Angebotsentwurf Familie Schneider");
+  await expect(offer).toContainText("Prüfung offen");
+  await expect(offer.getByRole("link", { name: "In der Inbox bearbeiten" })).toHaveAttribute(
+    "href",
+    "/inbox#offer-draft",
+  );
+
+  await page.goto("/today");
+  await page.getByRole("button", { name: inboxDecisionTitle }).click();
+  await expect(page.getByRole("heading", { name: inboxDecisionTitle })).toBeVisible();
+  await page.getByRole("button", { name: "Als geprüft vormerken" }).click();
+  await expect(page.getByRole("region", { name: "Aktueller Abschluss" })).toBeVisible();
+
+  await page.goto("/offers");
+  await expect(page.getByRole("article")).toContainText("Geprüft");
+});
+
+test("offer workspace opens a historical draft by its workflow id", async ({ page }) => {
+  await page.goto("/offers");
+  await page.evaluate((offer) => {
+    window.localStorage.setItem("atlas-offer-workspace", JSON.stringify({
+      version: 1,
+      offers: [
+        {
+          id: "historical-workflow",
+          workflowId: "historical-workflow",
+          offer,
+          status: "reviewed",
+          updatedAt: "2026-08-17T12:00:00.000Z",
+        },
+      ],
+    }));
+  }, inboxOfferFixture);
+  await page.reload();
+
+  await page.getByRole("link", { name: "Details ansehen" }).click();
+  await expect(page).toHaveURL(/\/offers\/historical-workflow$/);
+  await expect(page.getByRole("heading", { name: "Angebotsentwurf Familie Schneider" })).toBeVisible();
+  await expect(page.getByText("Geprüft", { exact: true })).toBeVisible();
+  await expect(page.getByText("Malerarbeiten in den angefragten Räumen", { exact: true })).toBeVisible();
+  await expect(page.getByRole("link", { name: "In der Inbox bearbeiten" })).toHaveCount(0);
+});
+
+test("offer detail handles an unknown workspace id safely", async ({ page }) => {
+  await page.goto("/offers/unknown-workflow");
+
+  await expect(page.getByRole("heading", { name: "Angebot nicht gefunden" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Zur Angebotsübersicht" })).toHaveAttribute("href", "/offers");
+});
+
+test("offer workspace migrates the valid bound draft from before Sprint 4a", async ({ page }) => {
+  await page.goto("/offers");
+  await page.evaluate(({ analysis, offer }) => {
+    const workflowId = "legacy-bound-workflow";
+    window.localStorage.setItem(
+      "atlas-inquiry-analysis",
+      JSON.stringify({ ...analysis, workflowId }),
+    );
+    window.localStorage.setItem("atlas-editable-offer", JSON.stringify(offer));
+    window.localStorage.setItem(
+      "atlas-editable-offer-analysis-binding",
+      JSON.stringify({ version: 1, workflowId }),
+    );
+    window.localStorage.removeItem("atlas-offer-workspace");
+  }, { analysis: inboxAnalysisFixture, offer: inboxOfferFixture });
+
+  await page.reload();
+  const migratedOffer = page.getByRole("article");
+  await expect(migratedOffer).toContainText("Angebotsentwurf Familie Schneider");
+  await expect(migratedOffer).toContainText("Prüfung offen");
+});

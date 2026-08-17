@@ -12,6 +12,7 @@ import { TodayHeader } from "@/components/today/TodayHeader";
 import {
   loadInquiryAnalysis,
   loadOfferDraftForAnalysis,
+  markOfferWorkspaceReviewed,
 } from "@/lib/storage/inbox-storage";
 import type {
   TodayDecisionPriorityExplanation,
@@ -157,7 +158,13 @@ export function TodayApprovalCenter({
 
       setSubmissionError(false);
       setCompletionMessage(priorityDecision.completionMessage);
-      setCompletionAction(availableCompletionAction(priorityDecision.completionAction));
+      const nextCompletionAction = availableCompletionAction(
+        priorityDecision.completionAction,
+      );
+      setCompletionAction(nextCompletionAction);
+      if (nextCompletionAction?.workflowId) {
+        markOfferWorkspaceReviewed(nextCompletionAction.workflowId);
+      }
       setFeedbackStatus("completed");
       setExpandedDetailsId(null);
       setEditHintDecisionId(null);
