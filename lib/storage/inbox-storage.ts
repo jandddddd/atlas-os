@@ -1,5 +1,6 @@
 import type {
   AnalysisResult,
+  ClarificationDraft,
   OfferDraft,
   OfferPosition,
 } from "@/components/inbox/types";
@@ -10,6 +11,9 @@ const OFFER_DRAFT_BINDING_KEY = "atlas-editable-offer-analysis-binding";
 const OFFER_DRAFT_BINDING_VERSION = 1;
 const OFFER_WORKSPACE_KEY = "atlas-offer-workspace";
 const OFFER_WORKSPACE_VERSION = 1;
+const CLARIFICATION_DRAFT_KEY = "atlas-clarification-draft";
+const CLARIFICATION_DRAFT_BINDING_KEY = "atlas-clarification-draft-analysis-binding";
+const CLARIFICATION_DRAFT_BINDING_VERSION = 1;
 
 export type OfferWorkspaceStatus = "review-pending" | "reviewed";
 export type OfferWorkspaceStatusFilter = "all" | OfferWorkspaceStatus;
@@ -31,6 +35,11 @@ type StoredOfferWorkspace = {
 
 type StoredOfferDraftBinding = {
   version: typeof OFFER_DRAFT_BINDING_VERSION;
+  workflowId: string;
+};
+
+type StoredClarificationDraftBinding = {
+  version: typeof CLARIFICATION_DRAFT_BINDING_VERSION;
   workflowId: string;
 };
 
@@ -102,6 +111,27 @@ function isStoredOfferDraftBinding(value: unknown): value is StoredOfferDraftBin
   return (
     isRecord(value) &&
     value.version === OFFER_DRAFT_BINDING_VERSION &&
+    typeof value.workflowId === "string"
+  );
+}
+
+export function isClarificationDraft(value: unknown): value is ClarificationDraft {
+  return (
+    isRecord(value) &&
+    typeof value.customerName === "string" &&
+    typeof value.subject === "string" &&
+    typeof value.message === "string" &&
+    isStringArray(value.missingInformation) &&
+    value.status === "draft"
+  );
+}
+
+function isStoredClarificationDraftBinding(
+  value: unknown,
+): value is StoredClarificationDraftBinding {
+  return (
+    isRecord(value) &&
+    value.version === CLARIFICATION_DRAFT_BINDING_VERSION &&
     typeof value.workflowId === "string"
   );
 }
@@ -200,6 +230,55 @@ export function loadOfferDraftForAnalysis(
   if (!offer || !binding) return null;
 
   return binding.workflowId === analysis.workflowId ? offer : null;
+}
+
+function loadClarificationDraft(): ClarificationDraft | null {
+  return loadStoredValue(CLARIFICATION_DRAFT_KEY, isClarificationDraft);
+}
+
+export function loadClarificationDraftForAnalysis(
+  analysis: AnalysisResult,
+): ClarificationDraft | null {
+  if (!analysis.workflowId) return null;
+
+  const draft = loadClarificationDraft();
+  const binding = loadStoredValue(
+    CLARIFICATION_DRAFT_BINDING_KEY,
+    isStoredClarificationDraftBinding,
+  );
+  if (!draft || !binding) return null;
+
+  return binding.workflowId === analysis.workflowId ? draft : null;
+}
+
+export function saveClarificationDraft(
+  draft: ClarificationDraft,
+  analysis: AnalysisResult,
+) {
+  saveStoredValue(CLARIFICATION_DRAFT_KEY, draft);
+
+  if (analysis.workflowId) {
+    saveStoredValue(CLARIFICATION_DRAFT_BINDING_KEY, {
+      version: CLARIFICATION_DRAFT_BINDING_VERSION,
+      workflowId: analysis.workflowId,
+    } satisfies StoredClarificationDraftBinding);
+  } else {
+    clearStoredValue(CLARIFICATION_DRAFT_BINDING_KEY);
+  }
+}
+
+export function clearClarificationDraft() {
+  if (typeof window === "undefined") return;
+
+  try {
+    window.localStorage.removeItem(CLARIFICATION_DRAFT_KEY);
+    window.localStorage.removeItem(CLARIFICATION_DRAFT_BINDING_KEY);
+  } catch (error) {
+    console.error(
+      "Gespeicherter Atlas-Rückfrageentwurf konnte nicht gelöscht werden:",
+      error,
+    );
+  }
 }
 
 export function loadOfferWorkspace(): OfferWorkspaceEntry[] {
@@ -418,6 +497,8 @@ export function clearInboxWorkflow() {
     window.localStorage.removeItem(INQUIRY_ANALYSIS_KEY);
     window.localStorage.removeItem(OFFER_DRAFT_KEY);
     window.localStorage.removeItem(OFFER_DRAFT_BINDING_KEY);
+    window.localStorage.removeItem(CLARIFICATION_DRAFT_KEY);
+    window.localStorage.removeItem(CLARIFICATION_DRAFT_BINDING_KEY);
   } catch (error) {
     console.error("Gespeicherter Atlas-Vorgang konnte nicht gelöscht werden:", error);
   }

@@ -41,3 +41,11 @@ export type OfferDraft = {
 };
 
 export type OfferStatus = "idle" | "generating" | "completed" | "error";
+
+export type ClarificationDraft = {
+  customerName: string;
+  subject: string;
+  message: string;
+  missingInformation: string[];
+  status: "draft";
+};

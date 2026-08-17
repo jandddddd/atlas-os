@@ -9,16 +9,26 @@ import {
 } from "@/app/inbox/actions";
 
 import { AnalysisResultView } from "./AnalysisResultView";
+import { ClarificationDraftView } from "./ClarificationDraftView";
 import { OfferDraftView } from "./OfferDraftView";
-import type { AnalysisResult, OfferDraft, OfferStatus } from "./types";
+import type {
+  AnalysisResult,
+  ClarificationDraft,
+  OfferDraft,
+  OfferStatus,
+} from "./types";
 import {
+  clearClarificationDraft,
   clearOfferDraft,
   clearInboxWorkflow,
+  loadClarificationDraftForAnalysis,
   loadInquiryAnalysis,
   loadOfferDraft,
+  saveClarificationDraft,
   saveInquiryAnalysis,
   saveOfferDraft,
 } from "@/lib/storage/inbox-storage";
+import { createClarificationDraft } from "@/lib/inbox/clarification-draft";
 import {
   composeInquiry,
   validateInquiryIntake,
@@ -52,12 +62,24 @@ export function InboxAnalysis() {
   const [editableOffer, setEditableOffer] = useState<OfferDraft | null>(null);
   const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
   const [resetError, setResetError] = useState("");
+  const [isEditingClarification, setIsEditingClarification] = useState(false);
+  const [clarification, setClarification] = useState<ClarificationDraft | null>(
+    null,
+  );
+  const [editableClarification, setEditableClarification] =
+    useState<ClarificationDraft | null>(null);
+  const [clarificationLastSavedAt, setClarificationLastSavedAt] = useState<
+    string | null
+  >(null);
 
   useEffect(() => {
     let cancelled = false;
 
     const savedAnalysis = loadInquiryAnalysis();
     const savedOffer = loadOfferDraft();
+    const savedClarification = savedAnalysis
+      ? loadClarificationDraftForAnalysis(savedAnalysis)
+      : null;
 
     queueMicrotask(() => {
       if (cancelled) return;
@@ -72,6 +94,11 @@ export function InboxAnalysis() {
         setOffer(savedOffer);
         setEditableOffer(savedOffer);
         setOfferStatus("completed");
+      }
+
+      if (savedClarification) {
+        setClarification(savedClarification);
+        setEditableClarification(savedClarification);
       }
     });
 
@@ -144,6 +171,11 @@ export function InboxAnalysis() {
       setEditableOffer(null);
       setLastSavedAt(null);
       clearOfferDraft();
+      setIsEditingClarification(false);
+      setClarification(null);
+      setEditableClarification(null);
+      setClarificationLastSavedAt(null);
+      clearClarificationDraft();
       saveInquiryAnalysis(analyzedWorkflow);
       setStatus("completed");
     } catch (error) {
@@ -245,6 +277,10 @@ export function InboxAnalysis() {
       setLastSavedAt(null);
       setAnalysisSource("none");
       setAnalysisInquiry(null);
+      setIsEditingClarification(false);
+      setClarification(null);
+      setEditableClarification(null);
+      setClarificationLastSavedAt(null);
     }
   }
 
@@ -256,6 +292,54 @@ export function InboxAnalysis() {
       });
     }
     setIsEditingOffer(false);
+  }
+
+  function prepareClarification() {
+    if (!analysis || analysisSource !== "current") return;
+
+    const draft = createClarificationDraft({
+      customerName: analysis.customer.name,
+      service: analysis.project.service,
+      missingInformation: analysis.missingInformation,
+    });
+
+    setClarification(draft);
+    setEditableClarification(draft);
+    setClarificationLastSavedAt(null);
+    setIsEditingClarification(false);
+    saveClarificationDraft(draft, analysis);
+  }
+
+  function handleClarificationCta() {
+    if (clarification) {
+      const section = document.getElementById("clarification-draft");
+      section?.scrollIntoView({ block: "start" });
+      section?.focus({ preventScroll: true });
+      return;
+    }
+
+    prepareClarification();
+  }
+
+  function saveClarification() {
+    if (editableClarification && analysis) {
+      setClarification(editableClarification);
+      saveClarificationDraft(editableClarification, analysis);
+      setClarificationLastSavedAt(
+        new Date().toLocaleTimeString("de-DE", {
+          hour: "2-digit",
+          minute: "2-digit",
+        }),
+      );
+    }
+    setIsEditingClarification(false);
+  }
+
+  function discardClarificationChanges() {
+    if (clarification) {
+      setEditableClarification({ ...clarification });
+    }
+    setIsEditingClarification(false);
   }
 
   function renderWorkflow() {
@@ -322,11 +406,26 @@ export function InboxAnalysis() {
         <AnalysisResultView
           analysis={analysis}
           isOfferGenerationBlocked={analysisSource !== "current"}
+          isClarificationBlocked={analysisSource !== "current"}
+          hasClarificationDraft={clarification !== null}
           isTodayHandoffAvailable={analysisSource === "current" && !isEditingOffer}
           offerStatus={offerStatus}
           onGenerateOffer={generateOffer}
+          onPrepareClarification={handleClarificationCta}
           onRestartAnalysis={() => void startAnalysis()}
         />
+
+        {clarification && editableClarification && (
+          <ClarificationDraftView
+            editableDraft={editableClarification}
+            isEditing={isEditingClarification}
+            lastSavedAt={clarificationLastSavedAt}
+            onChange={setEditableClarification}
+            onStartEditing={() => setIsEditingClarification(true)}
+            onSave={saveClarification}
+            onDiscard={discardClarificationChanges}
+          />
+        )}
 
         {offerStatus === "error" && (
           <section className="rounded-xl border border-red-200 bg-red-50 p-6">
