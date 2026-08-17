@@ -23,7 +23,9 @@ wird niemals automatisch freigegeben oder versendet.
   Workflow-ID. Historische Entwürfe können dort überarbeitet werden; jede
   Änderung setzt ihren Prüfstatus wieder auf `Prüfung offen`.
 - Die Übersicht kann nach Kunde, Titel oder Projektinhalt durchsucht und nach
-  offenem beziehungsweise geprüftem Status gefiltert werden.
+  offenem beziehungsweise geprüftem Status gefiltert werden. Ein zusätzlicher
+  Filter trennt Vorgänge mit fehlenden Angaben von bereits vollständigen
+  Arbeitsständen.
 
 ## Persistenzvertrag
 

@@ -129,6 +129,19 @@ test("filters offer workflows by normalized search text and status", () => {
   assert.deepEqual(filterOfferWorkspaceEntries(entries, "fassade", "reviewed"), [entries[1]]);
   assert.deepEqual(filterOfferWorkspaceEntries(entries, "fassade", "review-pending"), []);
   assert.deepEqual(filterOfferWorkspaceEntries(entries, "", "all"), entries);
+  assert.deepEqual(filterOfferWorkspaceEntries(entries, "", "all", "missing"), entries);
+  const completeEntry = {
+    ...entries[1],
+    offer: { ...entries[1].offer, missingInformation: [] },
+  };
+  assert.deepEqual(
+    filterOfferWorkspaceEntries([entries[0], completeEntry], "", "all", "complete"),
+    [completeEntry],
+  );
+  assert.deepEqual(
+    filterOfferWorkspaceEntries([entries[0], completeEntry], "", "reviewed", "missing"),
+    [],
+  );
 });
 
 test("revises only the selected archived offer and reopens its review", () => {
