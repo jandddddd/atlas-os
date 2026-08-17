@@ -8,6 +8,9 @@ type OfferDraftViewProps = {
   editableOffer: OfferDraft;
   isEditing: boolean;
   lastSavedAt: string | null;
+  canEdit?: boolean;
+  statusLabel?: string;
+  statusTone?: "pending" | "reviewed";
   onChange: (offer: OfferDraft) => void;
   onStartEditing: () => void;
   onSave: () => void;
@@ -18,6 +21,9 @@ export function OfferDraftView({
   editableOffer,
   isEditing,
   lastSavedAt,
+  canEdit = true,
+  statusLabel = "Entwurf",
+  statusTone = "pending",
   onChange,
   onStartEditing,
   onSave,
@@ -75,8 +81,12 @@ export function OfferDraftView({
     >
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <span className="rounded-full bg-amber-100 px-3 py-1 text-sm font-medium text-amber-800">
-            Entwurf
+          <span
+            className={statusTone === "reviewed"
+              ? "rounded-full bg-emerald-100 px-3 py-1 text-sm font-medium text-emerald-800"
+              : "rounded-full bg-amber-100 px-3 py-1 text-sm font-medium text-amber-800"}
+          >
+            {statusLabel}
           </span>
 
           <div>
@@ -97,7 +107,7 @@ export function OfferDraftView({
                   Änderungen verwerfen
                 </button>
               </div>
-            ) : (
+            ) : canEdit ? (
               <button
                 type="button"
                 onClick={onStartEditing}
@@ -105,7 +115,7 @@ export function OfferDraftView({
               >
                 Entwurf bearbeiten
               </button>
-            )}
+            ) : null}
 
             {lastSavedAt && !isEditing && (
               <p className="mt-3 text-sm text-emerald-700">
@@ -117,6 +127,7 @@ export function OfferDraftView({
           {isEditing ? (
             <div className="mt-4 space-y-3">
               <input
+                aria-label="Angebotstitel"
                 value={editableOffer.title}
                 onChange={(event) =>
                   onChange({ ...editableOffer, title: event.target.value })
@@ -124,6 +135,7 @@ export function OfferDraftView({
                 className="w-full rounded-lg border px-3 py-2 text-2xl font-bold"
               />
               <textarea
+                aria-label="Projektbeschreibung"
                 value={editableOffer.projectSummary}
                 onChange={(event) =>
                   onChange({

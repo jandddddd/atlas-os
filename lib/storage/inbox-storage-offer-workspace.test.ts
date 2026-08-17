@@ -6,6 +6,7 @@ import {
   filterOfferWorkspaceEntries,
   findOfferWorkspaceEntry,
   reviewOfferWorkspaceEntry,
+  reviseOfferWorkspaceEntry,
   upsertOfferWorkspaceEntry,
   type OfferWorkspaceEntry,
 } from "./inbox-storage.ts";
@@ -128,4 +129,38 @@ test("filters offer workflows by normalized search text and status", () => {
   assert.deepEqual(filterOfferWorkspaceEntries(entries, "fassade", "reviewed"), [entries[1]]);
   assert.deepEqual(filterOfferWorkspaceEntries(entries, "fassade", "review-pending"), []);
   assert.deepEqual(filterOfferWorkspaceEntries(entries, "", "all"), entries);
+});
+
+test("revises only the selected archived offer and reopens its review", () => {
+  const first: OfferWorkspaceEntry = {
+    id: "workflow-1",
+    workflowId: "workflow-1",
+    offer,
+    status: "reviewed",
+    updatedAt: "2026-08-17T10:00:00.000Z",
+  };
+  const second: OfferWorkspaceEntry = {
+    id: "workflow-2",
+    workflowId: "workflow-2",
+    offer: { ...offer, title: "Anderer Entwurf" },
+    status: "reviewed",
+    updatedAt: "2026-08-17T11:00:00.000Z",
+  };
+  const revisedOffer = { ...offer, title: "Überarbeiteter Entwurf" };
+  const revised = reviseOfferWorkspaceEntry(
+    [first, second],
+    "workflow-1",
+    revisedOffer,
+    "2026-08-17T12:00:00.000Z",
+  );
+
+  assert.equal(revised[0].offer, revisedOffer);
+  assert.equal(revised[0].status, "review-pending");
+  assert.equal(revised[0].updatedAt, "2026-08-17T12:00:00.000Z");
+  assert.equal(revised[1], second);
+  const unchanged = [first];
+  assert.strictEqual(
+    reviseOfferWorkspaceEntry(unchanged, "missing", revisedOffer, "2026-08-17T12:00:00.000Z"),
+    unchanged,
+  );
 });
