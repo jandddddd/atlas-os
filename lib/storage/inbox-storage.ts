@@ -53,7 +53,7 @@ function isOfferPosition(value: unknown): value is OfferPosition {
   );
 }
 
-function isInquiryAnalysis(value: unknown): value is AnalysisResult {
+export function isInquiryAnalysis(value: unknown): value is AnalysisResult {
   if (!isRecord(value)) return false;
 
   const { customer, project, workflow, recommendedTask } = value;
@@ -83,7 +83,7 @@ function isInquiryAnalysis(value: unknown): value is AnalysisResult {
   );
 }
 
-function isOfferDraft(value: unknown): value is OfferDraft {
+export function isOfferDraft(value: unknown): value is OfferDraft {
   return (
     isRecord(value) &&
     typeof value.customerName === "string" &&

@@ -1,6 +1,8 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { NextResponse } from "next/server";
 
+import { parseAnalysisResponse } from "@/lib/inbox/inquiry-response";
+
 const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY,
 });
@@ -86,13 +88,7 @@ Regeln:
       throw new Error("Claude hat keine Textantwort geliefert.");
     }
 
-    const cleanedText = textBlock.text
-  .trim()
-  .replace(/^```json\s*/i, "")
-  .replace(/^```\s*/, "")
-  .replace(/\s*```$/, "");
-
-const analysis = JSON.parse(cleanedText);
+    const analysis = parseAnalysisResponse(textBlock.text);
 
     return NextResponse.json({ analysis });
   } catch (error) {
