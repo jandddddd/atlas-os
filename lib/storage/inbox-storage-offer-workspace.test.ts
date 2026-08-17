@@ -7,6 +7,7 @@ import {
   findOfferWorkspaceEntry,
   reviewOfferWorkspaceEntry,
   reviseOfferWorkspaceEntry,
+  sortOfferWorkspaceEntries,
   upsertOfferWorkspaceEntry,
   type OfferWorkspaceEntry,
 } from "./inbox-storage.ts";
@@ -176,4 +177,27 @@ test("revises only the selected archived offer and reopens its review", () => {
     reviseOfferWorkspaceEntry(unchanged, "missing", revisedOffer, "2026-08-17T12:00:00.000Z"),
     unchanged,
   );
+});
+
+test("sorts offer workflows without mutating their stored order", () => {
+  const older: OfferWorkspaceEntry = {
+    id: "older",
+    workflowId: "older",
+    offer: { ...offer, customerName: "Zimmerei Abel" },
+    status: "review-pending",
+    updatedAt: "2026-08-16T10:00:00.000Z",
+  };
+  const newer: OfferWorkspaceEntry = {
+    id: "newer",
+    workflowId: "newer",
+    offer: { ...offer, customerName: "Änderung GmbH" },
+    status: "reviewed",
+    updatedAt: "2026-08-17T10:00:00.000Z",
+  };
+  const entries = [older, newer];
+
+  assert.deepEqual(sortOfferWorkspaceEntries(entries, "newest"), [newer, older]);
+  assert.deepEqual(sortOfferWorkspaceEntries(entries, "oldest"), [older, newer]);
+  assert.deepEqual(sortOfferWorkspaceEntries(entries, "customer"), [newer, older]);
+  assert.deepEqual(entries, [older, newer]);
 });
