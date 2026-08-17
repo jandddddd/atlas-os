@@ -3,6 +3,7 @@ import test from "node:test";
 
 import type { OfferDraft } from "../../components/inbox/types.ts";
 import {
+  findOfferWorkspaceEntry,
   reviewOfferWorkspaceEntry,
   upsertOfferWorkspaceEntry,
   type OfferWorkspaceEntry,
@@ -90,4 +91,16 @@ test("marks only the matching offer workflow as reviewed", () => {
     ),
     reviewed,
   );
+});
+
+test("finds a historical offer only by its exact workspace id", () => {
+  const entries = upsertOfferWorkspaceEntry(
+    [],
+    offer,
+    "workflow-1",
+    "2026-08-17T10:00:00.000Z",
+  );
+
+  assert.equal(findOfferWorkspaceEntry(entries, "workflow-1"), entries[0]);
+  assert.equal(findOfferWorkspaceEntry(entries, "workflow-2"), null);
 });

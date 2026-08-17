@@ -175,7 +175,7 @@ test("offer workspace keeps the draft and reflects its Today review status", asy
   await expect(page.getByRole("heading", { name: "Angebote" })).toBeVisible();
   await expect(offer).toContainText("Angebotsentwurf Familie Schneider");
   await expect(offer).toContainText("Prüfung offen");
-  await expect(offer.getByRole("link", { name: "Entwurf öffnen" })).toHaveAttribute(
+  await expect(offer.getByRole("link", { name: "In der Inbox bearbeiten" })).toHaveAttribute(
     "href",
     "/inbox#offer-draft",
   );
@@ -188,6 +188,39 @@ test("offer workspace keeps the draft and reflects its Today review status", asy
 
   await page.goto("/offers");
   await expect(page.getByRole("article")).toContainText("Geprüft");
+});
+
+test("offer workspace opens a historical draft by its workflow id", async ({ page }) => {
+  await page.goto("/offers");
+  await page.evaluate((offer) => {
+    window.localStorage.setItem("atlas-offer-workspace", JSON.stringify({
+      version: 1,
+      offers: [
+        {
+          id: "historical-workflow",
+          workflowId: "historical-workflow",
+          offer,
+          status: "reviewed",
+          updatedAt: "2026-08-17T12:00:00.000Z",
+        },
+      ],
+    }));
+  }, inboxOfferFixture);
+  await page.reload();
+
+  await page.getByRole("link", { name: "Details ansehen" }).click();
+  await expect(page).toHaveURL(/\/offers\/historical-workflow$/);
+  await expect(page.getByRole("heading", { name: "Angebotsentwurf Familie Schneider" })).toBeVisible();
+  await expect(page.getByText("Geprüft", { exact: true })).toBeVisible();
+  await expect(page.getByText("Malerarbeiten in den angefragten Räumen", { exact: true })).toBeVisible();
+  await expect(page.getByRole("link", { name: "In der Inbox bearbeiten" })).toHaveCount(0);
+});
+
+test("offer detail handles an unknown workspace id safely", async ({ page }) => {
+  await page.goto("/offers/unknown-workflow");
+
+  await expect(page.getByRole("heading", { name: "Angebot nicht gefunden" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Zur Angebotsübersicht" })).toHaveAttribute("href", "/offers");
 });
 
 test("offer workspace migrates the valid bound draft from before Sprint 4a", async ({ page }) => {

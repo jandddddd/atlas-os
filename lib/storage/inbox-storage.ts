@@ -226,6 +226,13 @@ export function loadOfferWorkspace(): OfferWorkspaceEntry[] {
   return migratedEntries;
 }
 
+export function findOfferWorkspaceEntry(
+  entries: OfferWorkspaceEntry[],
+  id: string,
+): OfferWorkspaceEntry | null {
+  return entries.find((entry) => entry.id === id) ?? null;
+}
+
 export function upsertOfferWorkspaceEntry(
   entries: OfferWorkspaceEntry[],
   offer: OfferDraft,

@@ -128,18 +128,20 @@ export function OfferWorkspace() {
                   <p className="text-xs text-neutral-500">
                     Aktualisiert {dateFormatter.format(new Date(entry.updatedAt))}
                   </p>
+                  <Link
+                    href={`/offers/${encodeURIComponent(entry.id)}`}
+                    className="mt-4 inline-flex rounded-xl border px-4 py-2 text-sm font-medium transition hover:bg-neutral-50"
+                  >
+                    Details ansehen
+                  </Link>
                   {isCurrentWorkflow ? (
                     <Link
                       href="/inbox#offer-draft"
-                      className="mt-4 inline-flex rounded-xl border px-4 py-2 text-sm font-medium transition hover:bg-neutral-50"
+                      className="mt-3 block text-sm font-medium text-neutral-700 underline-offset-4 hover:underline"
                     >
-                      Entwurf öffnen
+                      In der Inbox bearbeiten
                     </Link>
-                  ) : (
-                    <p className="mt-4 text-xs text-neutral-500">
-                      Detailansicht folgt im nächsten Sprint-Schnitt.
-                    </p>
-                  )}
+                  ) : null}
                 </div>
               </div>
             </article>
