@@ -194,6 +194,18 @@ export function OfferWorkspace() {
                         >
                           {statusLabels[entry.status]}
                         </span>
+                        {entry.offer.missingInformation.length > 0 ? (
+                          <span className="rounded-full bg-sky-100 px-3 py-1 text-xs font-medium text-sky-800">
+                            {entry.offer.missingInformation.length}{" "}
+                            {entry.offer.missingInformation.length === 1
+                              ? "Angabe offen"
+                              : "Angaben offen"}
+                          </span>
+                        ) : (
+                          <span className="rounded-full bg-neutral-100 px-3 py-1 text-xs font-medium text-neutral-700">
+                            Angaben vollständig
+                          </span>
+                        )}
                         {isCurrentWorkflow ? (
                           <span className="text-xs font-medium text-neutral-500">
                             Aktueller Inbox-Vorgang
