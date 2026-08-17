@@ -162,3 +162,52 @@ test("saved offer handoff restores, scrolls to and focuses the draft", async ({ 
     return style.outlineStyle !== "none" && style.outlineWidth !== "0px";
   })).toBe(true);
 });
+
+test("offer workspace keeps the draft and reflects its Today review status", async ({ page }) => {
+  await fillAndAnalyze(page);
+  await page.getByRole("button", { name: "Angebotsentwurf erstellen" }).click();
+  await expect(
+    page.getByText("Angebotsentwurf Familie Schneider", { exact: true }),
+  ).toBeVisible();
+
+  await page.goto("/offers");
+  const offer = page.getByRole("article");
+  await expect(page.getByRole("heading", { name: "Angebote" })).toBeVisible();
+  await expect(offer).toContainText("Angebotsentwurf Familie Schneider");
+  await expect(offer).toContainText("Prüfung offen");
+  await expect(offer.getByRole("link", { name: "Entwurf öffnen" })).toHaveAttribute(
+    "href",
+    "/inbox#offer-draft",
+  );
+
+  await page.goto("/today");
+  await page.getByRole("button", { name: inboxDecisionTitle }).click();
+  await expect(page.getByRole("heading", { name: inboxDecisionTitle })).toBeVisible();
+  await page.getByRole("button", { name: "Als geprüft vormerken" }).click();
+  await expect(page.getByRole("region", { name: "Aktueller Abschluss" })).toBeVisible();
+
+  await page.goto("/offers");
+  await expect(page.getByRole("article")).toContainText("Geprüft");
+});
+
+test("offer workspace migrates the valid bound draft from before Sprint 4a", async ({ page }) => {
+  await page.goto("/offers");
+  await page.evaluate(({ analysis, offer }) => {
+    const workflowId = "legacy-bound-workflow";
+    window.localStorage.setItem(
+      "atlas-inquiry-analysis",
+      JSON.stringify({ ...analysis, workflowId }),
+    );
+    window.localStorage.setItem("atlas-editable-offer", JSON.stringify(offer));
+    window.localStorage.setItem(
+      "atlas-editable-offer-analysis-binding",
+      JSON.stringify({ version: 1, workflowId }),
+    );
+    window.localStorage.removeItem("atlas-offer-workspace");
+  }, { analysis: inboxAnalysisFixture, offer: inboxOfferFixture });
+
+  await page.reload();
+  const migratedOffer = page.getByRole("article");
+  await expect(migratedOffer).toContainText("Angebotsentwurf Familie Schneider");
+  await expect(migratedOffer).toContainText("Prüfung offen");
+});

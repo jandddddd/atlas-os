@@ -8,6 +8,23 @@ const INQUIRY_ANALYSIS_KEY = "atlas-inquiry-analysis";
 const OFFER_DRAFT_KEY = "atlas-editable-offer";
 const OFFER_DRAFT_BINDING_KEY = "atlas-editable-offer-analysis-binding";
 const OFFER_DRAFT_BINDING_VERSION = 1;
+const OFFER_WORKSPACE_KEY = "atlas-offer-workspace";
+const OFFER_WORKSPACE_VERSION = 1;
+
+export type OfferWorkspaceStatus = "review-pending" | "reviewed";
+
+export type OfferWorkspaceEntry = {
+  id: string;
+  workflowId: string;
+  offer: OfferDraft;
+  status: OfferWorkspaceStatus;
+  updatedAt: string;
+};
+
+type StoredOfferWorkspace = {
+  version: typeof OFFER_WORKSPACE_VERSION;
+  offers: OfferWorkspaceEntry[];
+};
 
 type StoredOfferDraftBinding = {
   version: typeof OFFER_DRAFT_BINDING_VERSION;
@@ -86,6 +103,32 @@ function isStoredOfferDraftBinding(value: unknown): value is StoredOfferDraftBin
   );
 }
 
+function isOfferWorkspaceStatus(value: unknown): value is OfferWorkspaceStatus {
+  return value === "review-pending" || value === "reviewed";
+}
+
+function isOfferWorkspaceEntry(value: unknown): value is OfferWorkspaceEntry {
+  return (
+    isRecord(value) &&
+    typeof value.id === "string" &&
+    typeof value.workflowId === "string" &&
+    value.id === value.workflowId &&
+    isOfferDraft(value.offer) &&
+    isOfferWorkspaceStatus(value.status) &&
+    typeof value.updatedAt === "string" &&
+    !Number.isNaN(Date.parse(value.updatedAt))
+  );
+}
+
+function isStoredOfferWorkspace(value: unknown): value is StoredOfferWorkspace {
+  return (
+    isRecord(value) &&
+    value.version === OFFER_WORKSPACE_VERSION &&
+    Array.isArray(value.offers) &&
+    value.offers.every(isOfferWorkspaceEntry)
+  );
+}
+
 function loadRawStoredValue(key: string): unknown | null {
   if (typeof window === "undefined") return null;
 
@@ -156,6 +199,89 @@ export function loadOfferDraftForAnalysis(
   return binding.workflowId === analysis.workflowId ? offer : null;
 }
 
+export function loadOfferWorkspace(): OfferWorkspaceEntry[] {
+  const storedWorkspace = loadRawStoredValue(OFFER_WORKSPACE_KEY);
+  if (storedWorkspace !== null) {
+    if (!isStoredOfferWorkspace(storedWorkspace)) {
+      console.error(`Ungültige gespeicherte Atlas-Daten für "${OFFER_WORKSPACE_KEY}".`);
+      return [];
+    }
+
+    return storedWorkspace.offers;
+  }
+
+  const savedAnalysis = loadInquiryAnalysis();
+  const savedOffer = savedAnalysis
+    ? loadOfferDraftForAnalysis(savedAnalysis)
+    : null;
+  if (!savedAnalysis?.workflowId || !savedOffer) return [];
+
+  const migratedEntries = upsertOfferWorkspaceEntry(
+    [],
+    savedOffer,
+    savedAnalysis.workflowId,
+    new Date().toISOString(),
+  );
+  saveOfferWorkspace(migratedEntries);
+  return migratedEntries;
+}
+
+export function upsertOfferWorkspaceEntry(
+  entries: OfferWorkspaceEntry[],
+  offer: OfferDraft,
+  workflowId: string,
+  updatedAt: string,
+): OfferWorkspaceEntry[] {
+  const nextEntry: OfferWorkspaceEntry = {
+    id: workflowId,
+    workflowId,
+    offer,
+    status: "review-pending",
+    updatedAt,
+  };
+
+  return [
+    nextEntry,
+    ...entries.filter((entry) => entry.workflowId !== workflowId),
+  ];
+}
+
+function saveOfferWorkspace(entries: OfferWorkspaceEntry[]) {
+  saveStoredValue(OFFER_WORKSPACE_KEY, {
+    version: OFFER_WORKSPACE_VERSION,
+    offers: entries,
+  } satisfies StoredOfferWorkspace);
+}
+
+export function reviewOfferWorkspaceEntry(
+  entries: OfferWorkspaceEntry[],
+  workflowId: string,
+  updatedAt: string,
+): OfferWorkspaceEntry[] {
+  const matchingEntry = entries.find((entry) => entry.workflowId === workflowId);
+  if (!matchingEntry) return entries;
+
+  return [
+    {
+      ...matchingEntry,
+      status: "reviewed",
+      updatedAt,
+    },
+    ...entries.filter((entry) => entry.workflowId !== workflowId),
+  ];
+}
+
+export function markOfferWorkspaceReviewed(workflowId: string) {
+  const entries = loadOfferWorkspace();
+  const reviewedEntries = reviewOfferWorkspaceEntry(
+    entries,
+    workflowId,
+    new Date().toISOString(),
+  );
+  if (reviewedEntries === entries) return;
+  saveOfferWorkspace(reviewedEntries);
+}
+
 export function saveOfferDraft(offer: OfferDraft, analysis: AnalysisResult) {
   saveStoredValue(OFFER_DRAFT_KEY, offer);
 
@@ -164,6 +290,14 @@ export function saveOfferDraft(offer: OfferDraft, analysis: AnalysisResult) {
       version: OFFER_DRAFT_BINDING_VERSION,
       workflowId: analysis.workflowId,
     } satisfies StoredOfferDraftBinding);
+    saveOfferWorkspace(
+      upsertOfferWorkspaceEntry(
+        loadOfferWorkspace(),
+        offer,
+        analysis.workflowId,
+        new Date().toISOString(),
+      ),
+    );
   } else {
     clearStoredValue(OFFER_DRAFT_BINDING_KEY);
   }

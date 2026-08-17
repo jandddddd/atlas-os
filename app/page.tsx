@@ -22,6 +22,7 @@ return (
       description="Atlas erstellt Angebotsentwürfe aus eingehenden Kundenanfragen."
       icon={FileText}
       statusText="3 Anfragen warten auf Prüfung"
+      href="/offers"
     />
 
     <FeatureCard
