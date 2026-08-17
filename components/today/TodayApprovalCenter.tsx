@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useMemo, useRef, useState } from "react";
 
 import { submitTodayDecision } from "@/app/today/actions";
@@ -8,6 +9,10 @@ import { DecisionOverviewList } from "@/components/today/DecisionOverviewList";
 import { TodayCompletionNotice } from "@/components/today/TodayCompletionNotice";
 import { TodayEmptyState } from "@/components/today/TodayEmptyState";
 import { TodayHeader } from "@/components/today/TodayHeader";
+import {
+  loadInquiryAnalysis,
+  loadOfferDraftForAnalysis,
+} from "@/lib/storage/inbox-storage";
 import type {
   TodayDecisionPriorityExplanation,
   TodayDecisionPriorityFactors,
@@ -15,6 +20,12 @@ import type {
 
 type CompletionStatus = "offer-approved" | "change-requested" | null;
 type FeedbackStatus = "completed" | "deferred" | null;
+type CompletionAction = {
+  label: string;
+  href: string;
+  requiresSavedOfferDraft?: boolean;
+  workflowId?: string;
+};
 
 type TodayApprovalDecision = Omit<ApprovalCardProps, "primaryAction" | "secondaryActions" | "details" | "notice"> & TodayDecisionPriorityFactors & {
   id: string;
@@ -25,6 +36,7 @@ type TodayApprovalDecision = Omit<ApprovalCardProps, "primaryAction" | "secondar
   primaryActionPendingLabel?: string;
   editHref?: string;
   completionMessage: string;
+  completionAction?: CompletionAction;
   details: {
     title: string;
     items: string[];
@@ -48,6 +60,20 @@ function filterCompletedDecisionIds(
   }
 
   return decisionIds.filter((decisionId) => decisionId !== "offer-mueller");
+}
+
+function availableCompletionAction(
+  action: CompletionAction | undefined,
+): CompletionAction | null {
+  if (!action) return null;
+  if (!action.requiresSavedOfferDraft) return action;
+  if (!action.workflowId) return null;
+
+  const savedAnalysis = loadInquiryAnalysis();
+  if (!savedAnalysis || savedAnalysis.workflowId !== action.workflowId) return null;
+  if (!loadOfferDraftForAnalysis(savedAnalysis)) return null;
+
+  return action;
 }
 
 export function TodayApprovalCenter({
@@ -75,6 +101,7 @@ export function TodayApprovalCenter({
     ),
   );
   const [completionMessage, setCompletionMessage] = useState<string | null>(null);
+  const [completionAction, setCompletionAction] = useState<CompletionAction | null>(null);
   const [feedbackStatus, setFeedbackStatus] = useState<FeedbackStatus>(null);
   const [expandedDetailsId, setExpandedDetailsId] = useState<string | null>(null);
   const [editHintDecisionId, setEditHintDecisionId] = useState<string | null>(null);
@@ -130,6 +157,7 @@ export function TodayApprovalCenter({
 
       setSubmissionError(false);
       setCompletionMessage(priorityDecision.completionMessage);
+      setCompletionAction(availableCompletionAction(priorityDecision.completionAction));
       setFeedbackStatus("completed");
       setExpandedDetailsId(null);
       setEditHintDecisionId(null);
@@ -164,6 +192,7 @@ export function TodayApprovalCenter({
       setCompletionMessage(
         "Die Entscheidung wurde für später eingeordnet. Atlas zeigt dir jetzt den nächsten Punkt.",
       );
+      setCompletionAction(null);
       setFeedbackStatus("deferred");
       setExpandedDetailsId(null);
       setEditHintDecisionId(null);
@@ -204,6 +233,7 @@ export function TodayApprovalCenter({
       }
 
       setCompletionMessage(null);
+      setCompletionAction(null);
       setFeedbackStatus(null);
       setExpandedDetailsId(null);
       setEditHintDecisionId(null);
@@ -250,6 +280,20 @@ export function TodayApprovalCenter({
                 {feedbackStatus === "deferred" ? "Zurückgestellt" : "Erledigt"}
               </p>
               <p className="mt-1.5 text-base leading-7 text-neutral-700">{completionMessage}</p>
+              {completionAction ? (
+                <Link
+                  href={completionAction.href}
+                  onClick={(event) => {
+                    if (!availableCompletionAction(completionAction)) {
+                      event.preventDefault();
+                      setCompletionAction(null);
+                    }
+                  }}
+                  className="mt-4 inline-flex rounded-xl bg-neutral-950 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-neutral-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-neutral-950"
+                >
+                  {completionAction.label}
+                </Link>
+              ) : null}
             </div>
           </div>
         </section>

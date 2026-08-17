@@ -123,13 +123,18 @@ export function InboxAnalysis() {
         );
       }
 
-      if (!(await persistInboxTodayDecision(data.analysis))) {
+      const analyzedWorkflow: AnalysisResult = {
+        ...data.analysis,
+        workflowId: crypto.randomUUID(),
+      };
+
+      if (!(await persistInboxTodayDecision(analyzedWorkflow))) {
         throw new Error(
           "Die vorbereitete Entscheidung konnte nicht gespeichert werden.",
         );
       }
 
-      setAnalysis(data.analysis);
+      setAnalysis(analyzedWorkflow);
       setAnalysisSource("current");
       setAnalysisInquiry(inquiry);
       setIsEditingOffer(false);
@@ -139,7 +144,7 @@ export function InboxAnalysis() {
       setEditableOffer(null);
       setLastSavedAt(null);
       clearOfferDraft();
-      saveInquiryAnalysis(data.analysis);
+      saveInquiryAnalysis(analyzedWorkflow);
       setStatus("completed");
     } catch (error) {
       setAnalysisError(
@@ -155,6 +160,14 @@ export function InboxAnalysis() {
     if (!analysis || analysisSource !== "current" || !analysisInquiry) return;
 
     const currentWorkflowVersion = workflowVersion.current;
+    const offerAnalysis = {
+      customer: analysis.customer,
+      project: analysis.project,
+      workflow: analysis.workflow,
+      nextSteps: analysis.nextSteps,
+      missingInformation: analysis.missingInformation,
+      recommendedTask: analysis.recommendedTask,
+    };
 
     try {
       setOfferStatus("generating");
@@ -163,7 +176,7 @@ export function InboxAnalysis() {
       const response = await fetch("/api/generate-offer", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ inquiry: analysisInquiry, analysis }),
+        body: JSON.stringify({ inquiry: analysisInquiry, analysis: offerAnalysis }),
       });
       const data = await response.json();
 
@@ -177,7 +190,7 @@ export function InboxAnalysis() {
 
       setOffer(data.offer);
       setEditableOffer(data.offer);
-      saveOfferDraft(data.offer);
+      saveOfferDraft(data.offer, analysis);
       setOfferStatus("completed");
     } catch (error) {
       if (currentWorkflowVersion !== workflowVersion.current) return;
@@ -192,13 +205,13 @@ export function InboxAnalysis() {
   }
 
   function saveOffer() {
-    if (editableOffer) {
+    if (editableOffer && analysis) {
       const savedOffer = {
         ...editableOffer,
         positions: editableOffer.positions.map((position) => ({ ...position })),
       };
       setOffer(savedOffer);
-      saveOfferDraft(savedOffer);
+      saveOfferDraft(savedOffer, analysis);
       setLastSavedAt(
         new Date().toLocaleTimeString("de-DE", {
           hour: "2-digit",
@@ -315,43 +328,43 @@ export function InboxAnalysis() {
           onRestartAnalysis={() => void startAnalysis()}
         />
 
-      {offerStatus === "error" && (
-        <section className="rounded-xl border border-red-200 bg-red-50 p-6">
-          <p className="font-semibold text-red-900">
-            Angebotserstellung fehlgeschlagen
-          </p>
-          <p className="mt-1 text-sm text-red-700">{offerError}</p>
+        {offerStatus === "error" && (
+          <section className="rounded-xl border border-red-200 bg-red-50 p-6">
+            <p className="font-semibold text-red-900">
+              Angebotserstellung fehlgeschlagen
+            </p>
+            <p className="mt-1 text-sm text-red-700">{offerError}</p>
+            <button
+              type="button"
+              onClick={generateOffer}
+              className="mt-4 rounded-xl bg-red-900 px-5 py-2.5 text-sm font-medium text-white"
+            >
+              Erneut versuchen
+            </button>
+          </section>
+        )}
+
+        {offerStatus === "completed" && editableOffer && (
+          <OfferDraftView
+            editableOffer={editableOffer}
+            isEditing={isEditingOffer}
+            lastSavedAt={lastSavedAt}
+            onChange={setEditableOffer}
+            onStartEditing={() => setIsEditingOffer(true)}
+            onSave={saveOffer}
+            onDiscard={discardOfferChanges}
+          />
+        )}
+
+        <div className="flex justify-end">
           <button
             type="button"
-            onClick={generateOffer}
-            className="mt-4 rounded-xl bg-red-900 px-5 py-2.5 text-sm font-medium text-white"
+            onClick={resetInboxWorkflow}
+            className="text-sm text-neutral-500 transition hover:text-neutral-900"
           >
-            Erneut versuchen
+            Gespeicherten Vorgang zurücksetzen
           </button>
-        </section>
-      )}
-
-      {offerStatus === "completed" && editableOffer && (
-        <OfferDraftView
-          editableOffer={editableOffer}
-          isEditing={isEditingOffer}
-          lastSavedAt={lastSavedAt}
-          onChange={setEditableOffer}
-          onStartEditing={() => setIsEditingOffer(true)}
-          onSave={saveOffer}
-          onDiscard={discardOfferChanges}
-        />
-      )}
-
-      <div className="flex justify-end">
-        <button
-          type="button"
-          onClick={resetInboxWorkflow}
-          className="text-sm text-neutral-500 transition hover:text-neutral-900"
-        >
-          Gespeicherten Vorgang zurücksetzen
-        </button>
-      </div>
+        </div>
       </div>
     );
   }

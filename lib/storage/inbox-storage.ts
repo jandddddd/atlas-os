@@ -6,6 +6,13 @@ import type {
 
 const INQUIRY_ANALYSIS_KEY = "atlas-inquiry-analysis";
 const OFFER_DRAFT_KEY = "atlas-editable-offer";
+const OFFER_DRAFT_BINDING_KEY = "atlas-editable-offer-analysis-binding";
+const OFFER_DRAFT_BINDING_VERSION = 1;
+
+type StoredOfferDraftBinding = {
+  version: typeof OFFER_DRAFT_BINDING_VERSION;
+  workflowId: string;
+};
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -32,6 +39,7 @@ function isInquiryAnalysis(value: unknown): value is AnalysisResult {
   const { customer, project, workflow, recommendedTask } = value;
 
   return (
+    (value.workflowId === undefined || typeof value.workflowId === "string") &&
     isRecord(customer) &&
     typeof customer.name === "string" &&
     isRecord(project) &&
@@ -70,27 +78,40 @@ function isOfferDraft(value: unknown): value is OfferDraft {
   );
 }
 
-function loadStoredValue<T>(
-  key: string,
-  isValid: (value: unknown) => value is T,
-): T | null {
+function isStoredOfferDraftBinding(value: unknown): value is StoredOfferDraftBinding {
+  return (
+    isRecord(value) &&
+    value.version === OFFER_DRAFT_BINDING_VERSION &&
+    typeof value.workflowId === "string"
+  );
+}
+
+function loadRawStoredValue(key: string): unknown | null {
   if (typeof window === "undefined") return null;
 
   try {
     const storedValue = window.localStorage.getItem(key);
     if (!storedValue) return null;
-
-    const parsedValue: unknown = JSON.parse(storedValue);
-    if (!isValid(parsedValue)) {
-      console.error(`Ungültige gespeicherte Atlas-Daten für "${key}".`);
-      return null;
-    }
-
-    return parsedValue;
+    return JSON.parse(storedValue) as unknown;
   } catch (error) {
     console.error(`Atlas-Daten für "${key}" konnten nicht geladen werden:`, error);
     return null;
   }
+}
+
+function loadStoredValue<T>(
+  key: string,
+  isValid: (value: unknown) => value is T,
+): T | null {
+  const parsedValue = loadRawStoredValue(key);
+  if (parsedValue === null) return null;
+
+  if (!isValid(parsedValue)) {
+    console.error(`Ungültige gespeicherte Atlas-Daten für "${key}".`);
+    return null;
+  }
+
+  return parsedValue;
 }
 
 function saveStoredValue(key: string, value: unknown) {
@@ -101,6 +122,11 @@ function saveStoredValue(key: string, value: unknown) {
   } catch (error) {
     console.error(`Atlas-Daten für "${key}" konnten nicht gespeichert werden:`, error);
   }
+}
+
+function clearStoredValue(key: string) {
+  if (typeof window === "undefined") return;
+  window.localStorage.removeItem(key);
 }
 
 export function loadInquiryAnalysis(): AnalysisResult | null {
@@ -115,8 +141,32 @@ export function loadOfferDraft(): OfferDraft | null {
   return loadStoredValue(OFFER_DRAFT_KEY, isOfferDraft);
 }
 
-export function saveOfferDraft(offer: OfferDraft) {
+export function loadOfferDraftForAnalysis(
+  analysis: AnalysisResult,
+): OfferDraft | null {
+  if (!analysis.workflowId) return null;
+
+  const offer = loadOfferDraft();
+  const binding = loadStoredValue(
+    OFFER_DRAFT_BINDING_KEY,
+    isStoredOfferDraftBinding,
+  );
+  if (!offer || !binding) return null;
+
+  return binding.workflowId === analysis.workflowId ? offer : null;
+}
+
+export function saveOfferDraft(offer: OfferDraft, analysis: AnalysisResult) {
   saveStoredValue(OFFER_DRAFT_KEY, offer);
+
+  if (analysis.workflowId) {
+    saveStoredValue(OFFER_DRAFT_BINDING_KEY, {
+      version: OFFER_DRAFT_BINDING_VERSION,
+      workflowId: analysis.workflowId,
+    } satisfies StoredOfferDraftBinding);
+  } else {
+    clearStoredValue(OFFER_DRAFT_BINDING_KEY);
+  }
 }
 
 export function clearOfferDraft() {
@@ -124,6 +174,7 @@ export function clearOfferDraft() {
 
   try {
     window.localStorage.removeItem(OFFER_DRAFT_KEY);
+    window.localStorage.removeItem(OFFER_DRAFT_BINDING_KEY);
   } catch (error) {
     console.error(
       "Gespeicherter Atlas-Angebotsentwurf konnte nicht gelöscht werden:",
@@ -138,6 +189,7 @@ export function clearInboxWorkflow() {
   try {
     window.localStorage.removeItem(INQUIRY_ANALYSIS_KEY);
     window.localStorage.removeItem(OFFER_DRAFT_KEY);
+    window.localStorage.removeItem(OFFER_DRAFT_BINDING_KEY);
   } catch (error) {
     console.error("Gespeicherter Atlas-Vorgang konnte nicht gelöscht werden:", error);
   }

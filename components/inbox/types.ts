@@ -1,4 +1,5 @@
 export type AnalysisResult = {
+  workflowId?: string;
   customer: {
     name: string;
   };
