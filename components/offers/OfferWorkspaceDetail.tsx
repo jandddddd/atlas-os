@@ -13,6 +13,11 @@ import {
   saveArchivedOfferDraft,
   type OfferWorkspaceEntry,
 } from "@/lib/storage/inbox-storage";
+import {
+  createProjectDraftFromOffer,
+  findProjectBySourceOffer,
+  loadProjectWorkspace,
+} from "@/lib/projects/project-storage";
 
 const statusLabels = {
   "review-pending": "Prüfung offen",
@@ -29,6 +34,8 @@ export function OfferWorkspaceDetail({ offerId }: OfferWorkspaceDetailProps) {
   const [isCurrentWorkflow, setIsCurrentWorkflow] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
+  const [hasProjectDraft, setHasProjectDraft] = useState(false);
+  const [projectPreparationError, setProjectPreparationError] = useState<string | null>(null);
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => {
@@ -36,6 +43,7 @@ export function OfferWorkspaceDetail({ offerId }: OfferWorkspaceDetailProps) {
       setEntry(loadedEntry);
       setEditableOffer(loadedEntry?.offer ?? null);
       setIsCurrentWorkflow(loadInquiryAnalysis()?.workflowId === offerId);
+      setHasProjectDraft(findProjectBySourceOffer(loadProjectWorkspace(), offerId) !== null);
     });
 
     return () => window.cancelAnimationFrame(frame);
@@ -87,6 +95,17 @@ export function OfferWorkspaceDetail({ offerId }: OfferWorkspaceDetailProps) {
     );
   }
 
+  function prepareProject() {
+    if (!entry || entry.status !== "reviewed") return;
+    const project = createProjectDraftFromOffer(entry);
+    setHasProjectDraft(project !== null);
+    setProjectPreparationError(
+      project === null
+        ? "Das Angebot hat sich zwischenzeitlich geändert. Lade die Seite neu und prüfe den aktuellen Stand."
+        : null,
+    );
+  }
+
   return (
     <>
       <div className="flex flex-wrap items-center justify-between gap-4">
@@ -118,6 +137,29 @@ export function OfferWorkspaceDetail({ offerId }: OfferWorkspaceDetailProps) {
           }}
         />
       </div>
+
+      <section aria-labelledby="project-preparation-heading" className="mt-6 rounded-2xl border bg-white p-6 shadow-sm">
+        <h2 id="project-preparation-heading" className="text-xl font-semibold">Projekt vorbereiten</h2>
+        <p className="mt-2 max-w-3xl text-sm leading-6 text-neutral-600">
+          Übernimm die geprüften Angebotsangaben in einen Projektentwurf. Dieser Schritt bestätigt weder die Angebotsannahme noch einen Auftrag.
+        </p>
+        {hasProjectDraft ? (
+          <Link href="/projects" className="mt-5 inline-flex rounded-xl bg-neutral-950 px-4 py-2 text-sm font-medium text-white transition hover:bg-neutral-700">
+            Projektentwurf ansehen
+          </Link>
+        ) : entry.status === "reviewed" ? (
+          <button type="button" onClick={prepareProject} className="mt-5 rounded-xl bg-neutral-950 px-4 py-2 text-sm font-medium text-white transition hover:bg-neutral-700">
+            Projektentwurf vorbereiten
+          </button>
+        ) : (
+          <p className="mt-4 text-sm font-medium text-amber-800">Vor der Projektvorbereitung muss der Angebotsentwurf geprüft sein.</p>
+        )}
+        {projectPreparationError ? (
+          <p role="alert" className="mt-4 text-sm font-medium text-red-700">
+            {projectPreparationError}
+          </p>
+        ) : null}
+      </section>
     </>
   );
 }

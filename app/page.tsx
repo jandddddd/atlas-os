@@ -2,6 +2,7 @@ import { Header } from "@/components/layout/Header";
 import { Hero } from "@/components/layout/Hero";
 import { 
   CalendarDays,
+  ClipboardList,
   FileText,
   FolderOpen,
   PackageSearch,
@@ -23,6 +24,14 @@ return (
       icon={FileText}
       statusText="3 Anfragen warten auf Prüfung"
       href="/offers"
+    />
+
+    <FeatureCard
+      title="Projekte"
+      description="Projektentwürfe und Baustellen mit ihrem fachlichen Ursprung im Blick."
+      icon={ClipboardList}
+      statusText="Geprüfte Angebote ausdrücklich als Projekt vorbereiten"
+      href="/projects"
     />
 
     <FeatureCard
