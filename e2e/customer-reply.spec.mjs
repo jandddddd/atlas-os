@@ -198,6 +198,47 @@ test("bei einem Analysefehler bleibt der ClarificationDraft unverändert erhalte
   await expect(page.getByLabel("Rückfrageentwurf")).toBeVisible();
 });
 
+test("das Panel kann während einer laufenden Auswertung nicht über den äußeren Toggle geschlossen werden, und der eingegebene Text bleibt bei einem Fehler erhalten", async ({ page }) => {
+  await fillAndAnalyze(page);
+
+  let releaseReplyResponse;
+  await page.route("**/api/analyze-inquiry", async (route) => {
+    await new Promise((resolve) => {
+      releaseReplyResponse = resolve;
+    });
+    await route.fulfill({
+      status: 500,
+      contentType: "application/json",
+      body: JSON.stringify({ error: "Auswertung vorübergehend nicht möglich." }),
+    });
+  });
+
+  const toggleButton = page.getByRole("button", { name: "Kundenantwort ergänzen" });
+  const panel = await openReplyPanel(page);
+  const replyText = "Der Wunschtermin ist Ende des Monats.";
+  await panel.getByLabel("Antwort des Kunden").fill(replyText);
+  await panel.getByRole("button", { name: "Antwort auswerten" }).click();
+  await expect(
+    panel.getByRole("button", { name: "Antwort wird ausgewertet …" }),
+  ).toBeDisabled();
+
+  await expect(toggleButton).toBeDisabled();
+  await toggleButton.click({ force: true }).catch(() => {});
+
+  // A disabled native toggle cannot unmount the panel, so the entered text
+  // must still be there even after the forced click attempt.
+  await expect(panel).toBeVisible();
+  await expect(panel.getByLabel("Antwort des Kunden")).toHaveValue(replyText);
+
+  releaseReplyResponse();
+  await expect(panel.getByText("Auswertung vorübergehend nicht möglich.")).toBeVisible();
+  await expect(panel.getByLabel("Antwort des Kunden")).toHaveValue(replyText);
+
+  await expect(toggleButton).toBeEnabled();
+  await panel.getByRole("button", { name: "Abbrechen" }).click();
+  await expect(panel).toHaveCount(0);
+});
+
 test("ein vorhandener OfferDraft bleibt inhaltlich unverändert und zeigt einen Review-Hinweis", async ({ page }) => {
   await fillAndAnalyze(page);
   await page.getByRole("button", { name: "Angebotsentwurf erstellen" }).click();

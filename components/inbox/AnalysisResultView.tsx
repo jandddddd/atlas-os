@@ -189,7 +189,7 @@ export function AnalysisResultView({
           type="button"
           onClick={onToggleCustomerReply}
           aria-expanded={isCustomerReplyPanelOpen}
-          disabled={isCustomerReplyBlocked}
+          disabled={isCustomerReplyBlocked || isCustomerReplySubmitting}
           className="inline-flex items-center gap-2 rounded-xl border border-emerald-300 bg-white px-6 py-3 font-medium transition hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-50"
         >
           <Reply className="h-4 w-4" />
