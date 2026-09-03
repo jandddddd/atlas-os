@@ -5,6 +5,7 @@ import {
   Clock3,
   FileText,
   MessageSquareText,
+  Reply,
   Sparkles,
 } from "lucide-react";
 
@@ -15,10 +16,14 @@ type AnalysisResultViewProps = {
   isOfferGenerationBlocked: boolean;
   isClarificationBlocked: boolean;
   hasClarificationDraft: boolean;
+  isCustomerReplyBlocked: boolean;
+  isCustomerReplyPanelOpen: boolean;
+  isCustomerReplySubmitting: boolean;
   isTodayHandoffAvailable: boolean;
   offerStatus: OfferStatus;
   onGenerateOffer: () => void;
   onPrepareClarification: () => void;
+  onToggleCustomerReply: () => void;
   onRestartAnalysis: () => void;
 };
 
@@ -27,10 +32,14 @@ export function AnalysisResultView({
   isOfferGenerationBlocked,
   isClarificationBlocked,
   hasClarificationDraft,
+  isCustomerReplyBlocked,
+  isCustomerReplyPanelOpen,
+  isCustomerReplySubmitting,
   isTodayHandoffAvailable,
   offerStatus,
   onGenerateOffer,
   onPrepareClarification,
+  onToggleCustomerReply,
   onRestartAnalysis,
 }: AnalysisResultViewProps) {
   return (
@@ -155,7 +164,9 @@ export function AnalysisResultView({
               : undefined
           }
           disabled={
-            isOfferGenerationBlocked || offerStatus === "generating"
+            isOfferGenerationBlocked ||
+            offerStatus === "generating" ||
+            isCustomerReplySubmitting
           }
           className="inline-flex items-center gap-2 rounded-xl bg-neutral-900 px-6 py-3 font-medium text-white transition hover:bg-neutral-700 disabled:cursor-not-allowed disabled:opacity-50"
         >
@@ -168,9 +179,21 @@ export function AnalysisResultView({
         <button
           type="button"
           onClick={onRestartAnalysis}
-          className="rounded-xl border border-emerald-300 bg-white px-6 py-3 font-medium transition hover:bg-emerald-100"
+          disabled={isCustomerReplySubmitting}
+          className="rounded-xl border border-emerald-300 bg-white px-6 py-3 font-medium transition hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-50"
         >
           Analyse erneut starten
+        </button>
+
+        <button
+          type="button"
+          onClick={onToggleCustomerReply}
+          aria-expanded={isCustomerReplyPanelOpen}
+          disabled={isCustomerReplyBlocked || isCustomerReplySubmitting}
+          className="inline-flex items-center gap-2 rounded-xl border border-emerald-300 bg-white px-6 py-3 font-medium transition hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          <Reply className="h-4 w-4" />
+          Kundenantwort ergänzen
         </button>
 
         {isTodayHandoffAvailable ? (

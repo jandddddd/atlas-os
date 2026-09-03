@@ -1,14 +1,38 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import type { TodayApprovalDecision } from "../../components/today/TodayApprovalCenter.ts";
 import {
   clearTodayDecisionStateForDecision,
   emptyTodayDecisionState,
+  findStaleTodayDecisionCommandError,
   parseTodayDecisionState,
   recordTodayDecisionAction,
   serializeTodayDecisionState,
   setTodayDecisionManualPriority,
 } from "./today-decision-state.ts";
+
+function buildDecision(
+  overrides: Partial<TodayApprovalDecision> & Pick<TodayApprovalDecision, "id">,
+): TodayApprovalDecision {
+  return {
+    decisionType: "Vorgang",
+    title: "Testentscheidung",
+    context: [],
+    summary: "Testzusammenfassung.",
+    priority: { score: 0, reasons: [] },
+    consequence: "Keine Auswirkung im Test.",
+    urgency: "medium",
+    economicImpact: "medium",
+    overviewTitle: "Testentscheidung",
+    overviewContext: "Testkontext",
+    overviewMeta: "Test · offen",
+    primaryActionLabel: "Vormerken",
+    completionMessage: "Erledigt.",
+    details: { title: "Details", items: [] },
+    ...overrides,
+  };
+}
 
 test("migrates a version 2 order to only its manual override", () => {
   assert.deepEqual(
@@ -86,6 +110,93 @@ test("clears the manual override when its decision is completed or deferred", ()
       decisionId: "supplier-selection",
       action: "later",
     }).manualPriorityDecisionId,
+    null,
+  );
+});
+
+test("accepts an approve command that matches the current decision's revision", () => {
+  const currentDecisions = [
+    buildDecision({ id: "inbox-recommended-task", decisionRevision: "revision-a" }),
+  ];
+
+  assert.equal(
+    findStaleTodayDecisionCommandError(currentDecisions, {
+      decisionId: "inbox-recommended-task",
+      action: "approve",
+      decisionRevision: "revision-a",
+    }),
+    null,
+  );
+});
+
+test("rejects a stale approve command whose revision no longer matches", () => {
+  const currentDecisions = [
+    buildDecision({ id: "inbox-recommended-task", decisionRevision: "revision-b" }),
+  ];
+
+  assert.equal(
+    findStaleTodayDecisionCommandError(currentDecisions, {
+      decisionId: "inbox-recommended-task",
+      action: "approve",
+      decisionRevision: "revision-a",
+    }),
+    "decision-replaced",
+  );
+});
+
+test("rejects an approve command that omits the revision token entirely for a revisioned decision", () => {
+  const currentDecisions = [
+    buildDecision({ id: "inbox-recommended-task", decisionRevision: "revision-b" }),
+  ];
+
+  assert.equal(
+    findStaleTodayDecisionCommandError(currentDecisions, {
+      decisionId: "inbox-recommended-task",
+      action: "approve",
+    }),
+    "decision-replaced",
+  );
+});
+
+test("rejects a stale later command whose revision no longer matches", () => {
+  const currentDecisions = [
+    buildDecision({ id: "inbox-recommended-task", decisionRevision: "revision-b" }),
+  ];
+
+  assert.equal(
+    findStaleTodayDecisionCommandError(currentDecisions, {
+      decisionId: "inbox-recommended-task",
+      action: "later",
+      decisionRevision: "revision-a",
+    }),
+    "decision-replaced",
+  );
+});
+
+test("rejects a stale prioritize command for a revisioned decision even though the id is still present", () => {
+  const currentDecisions = [
+    buildDecision({ id: "visit-weber" }),
+    buildDecision({ id: "inbox-recommended-task", decisionRevision: "revision-b" }),
+  ];
+
+  assert.equal(
+    findStaleTodayDecisionCommandError(currentDecisions, {
+      decisionId: "inbox-recommended-task",
+      action: "prioritize",
+      decisionRevision: "revision-a",
+    }),
+    "decision-replaced",
+  );
+});
+
+test("leaves static fixture decisions without a revision backward compatible", () => {
+  const currentDecisions = [buildDecision({ id: "offer-mueller" })];
+
+  assert.equal(
+    findStaleTodayDecisionCommandError(currentDecisions, {
+      decisionId: "offer-mueller",
+      action: "approve",
+    }),
     null,
   );
 });

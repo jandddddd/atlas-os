@@ -71,6 +71,10 @@ Regeln:
 - Fehlende Angaben gehören in missingInformation.
 - customer.name darf nur aus der Anfrage übernommen werden.
 - Wenn kein Kundenname genannt wird, verwende "Unbekannt".
+- Die Anfrage kann eine ursprüngliche Kundenanfrage sowie eine oder mehrere später eingegangene, ausdrücklich gekennzeichnete Kundenantworten enthalten.
+- Behandle ausdrücklich gekennzeichnete Kundenantworten als Ergänzung desselben Vorgangs, nicht als neue eigenständige Anfrage.
+- Bewerte missingInformation anhand aller vorliegenden Informationen neu; bereits beantwortete Punkte dürfen dort nicht mehr erscheinen.
+- Löse Widersprüche zwischen früheren und späteren Angaben nicht eigenständig auf und erfinde keine Klärung; kennzeichne verbleibende Unsicherheit weiterhin in missingInformation oder nextSteps.
       `.trim(),
       messages: [
         {

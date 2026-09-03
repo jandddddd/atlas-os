@@ -371,6 +371,156 @@ test("offer detail handles an unknown workspace id safely", async ({ page }) => 
   await expect(page.getByRole("link", { name: "Zur Angebotsübersicht" })).toHaveAttribute("href", "/offers");
 });
 
+test("a Today approval cannot re-mark an offer reviewed, but a manual re-review afterwards can", async ({ page }) => {
+  await fillAndAnalyze(page);
+  await generateOfferAndAssertPayload(page);
+
+  await openInboxDecision(page);
+  await page.getByRole("button", { name: "Als geprüft vormerken" }).click();
+  await expect(page.getByRole("region", { name: "Aktueller Abschluss" })).toBeVisible();
+
+  const analysis = await page.evaluate(() =>
+    JSON.parse(window.localStorage.getItem("atlas-inquiry-analysis")),
+  );
+  const readWorkspace = () =>
+    page.evaluate(() => JSON.parse(window.localStorage.getItem("atlas-offer-workspace")));
+
+  let workspace = await readWorkspace();
+  expect(
+    workspace.offers.find((entry) => entry.workflowId === analysis.workflowId).status,
+  ).toBe("reviewed");
+
+  await page.goto("/inbox");
+  await expect(page.getByRole("heading", { name: "Analyse abgeschlossen" })).toBeVisible();
+  await page.route("**/api/analyze-inquiry", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        analysis: { ...inboxAnalysisFixture, missingInformation: [] },
+      }),
+    });
+  });
+
+  await page.getByRole("button", { name: "Kundenantwort ergänzen" }).click();
+  const panel = page.getByLabel("Kundenantwort ergänzen");
+  await panel.getByLabel("Antwort des Kunden").fill("Der Wunschtermin ist Ende des Monats.");
+  await panel.getByRole("button", { name: "Antwort auswerten" }).click();
+  await expect(panel).toHaveCount(0);
+
+  workspace = await readWorkspace();
+  const entryAfterReply = workspace.offers.find(
+    (entry) => entry.workflowId === analysis.workflowId,
+  );
+  expect(entryAfterReply.status).toBe("review-pending");
+  expect(entryAfterReply.offer).toEqual(inboxOfferFixture);
+
+  await openInboxDecision(page);
+  await page.getByRole("button", { name: "Als geprüft vormerken" }).click();
+  await expect(page.getByRole("region", { name: "Aktueller Abschluss" })).toBeVisible();
+
+  workspace = await readWorkspace();
+  const entryAfterApproval = workspace.offers.find(
+    (entry) => entry.workflowId === analysis.workflowId,
+  );
+  expect(entryAfterApproval.status).toBe("review-pending");
+  expect(entryAfterApproval.offer).toEqual(inboxOfferFixture);
+
+  // The Today path is now spent, but a deliberate manual re-review of the
+  // stale offer must still be able to complete the review.
+  await page.goto("/inbox");
+  await expect(
+    page.getByText("Neue Kundeninformationen wurden ergänzt. Bitte prüfe den Angebotsentwurf erneut."),
+  ).toBeVisible();
+
+  await page.getByRole("button", { name: "Entwurf bearbeiten" }).click();
+  await page.getByRole("button", { name: "Änderungen übernehmen" }).click();
+
+  workspace = await readWorkspace();
+  const entryAfterManualReview = workspace.offers.find(
+    (entry) => entry.workflowId === analysis.workflowId,
+  );
+  expect(entryAfterManualReview.status).toBe("reviewed");
+  expect(entryAfterManualReview.offer).toEqual(inboxOfferFixture);
+});
+
+test("a stale Today approval from an earlier tab is rejected once a second tab replaced the inbox decision", async ({ page, context }) => {
+  // Give the inbox decision the highest natural priority score so it is
+  // already the rendered priority card without any manual "select" click,
+  // matching the reported scenario where Tab A simply has Today open.
+  const highPriorityAnalysisFixture = {
+    ...inboxAnalysisFixture,
+    workflow: { ...inboxAnalysisFixture.workflow, priority: "high" },
+  };
+  await page.route("**/api/analyze-inquiry", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ analysis: highPriorityAnalysisFixture }),
+    });
+  });
+  await fillAndAnalyze(page);
+  await page.getByRole("link", { name: "In Heute weiterprüfen" }).click();
+  await expect(page).toHaveURL("/today");
+  await expect(page.getByRole("heading", { name: inboxDecisionTitle })).toBeVisible();
+  const approveButton = page.getByRole("button", { name: "Als geprüft vormerken" });
+  await expect(approveButton).toBeVisible();
+
+  const secondTab = await context.newPage();
+  await secondTab.route("**/api/analyze-inquiry", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        analysis: { ...highPriorityAnalysisFixture, missingInformation: [] },
+      }),
+    });
+  });
+  await fillAndAnalyze(secondTab);
+  await secondTab.close();
+
+  // The first tab still holds the decision it rendered before the second
+  // tab replaced it. Approving now must not silently complete the newer
+  // decision underneath the fixed "inbox-recommended-task" id.
+  await approveButton.click();
+  await expect(page.getByRole("alert", { name: "Entscheidungsfehler" })).toContainText(
+    "wurde inzwischen durch eine neuere Version ersetzt",
+  );
+  await expect(page.getByRole("region", { name: "Aktueller Abschluss" })).toHaveCount(0);
+
+  await page.reload();
+  await expect(page.getByRole("heading", { name: inboxDecisionTitle })).toBeVisible();
+  await expect(page.getByText("Angaben noch offen")).toHaveCount(0);
+  await page.getByRole("button", { name: "Als geprüft vormerken" }).click();
+  await expect(page.getByRole("region", { name: "Aktueller Abschluss" })).toBeVisible();
+});
+
+test("a fresh automatic offer generation stays review-pending, and a normal manual save without prior needsReview does not mark it reviewed either", async ({ page }) => {
+  await fillAndAnalyze(page);
+  await generateOfferAndAssertPayload(page);
+
+  const analysis = await page.evaluate(() =>
+    JSON.parse(window.localStorage.getItem("atlas-inquiry-analysis")),
+  );
+  const readWorkspace = () =>
+    page.evaluate(() => JSON.parse(window.localStorage.getItem("atlas-offer-workspace")));
+
+  let workspace = await readWorkspace();
+  expect(
+    workspace.offers.find((entry) => entry.workflowId === analysis.workflowId).status,
+  ).toBe("review-pending");
+
+  // A normal manual edit/save that never had needsReview must not
+  // suddenly complete a review that was never pending in the first place.
+  await page.getByRole("button", { name: "Entwurf bearbeiten" }).click();
+  await page.getByRole("button", { name: "Änderungen übernehmen" }).click();
+
+  workspace = await readWorkspace();
+  expect(
+    workspace.offers.find((entry) => entry.workflowId === analysis.workflowId).status,
+  ).toBe("review-pending");
+});
+
 test("offer workspace migrates the valid bound draft from before Sprint 4a", async ({ page }) => {
   await page.goto("/offers");
   await page.evaluate(({ analysis, offer }) => {

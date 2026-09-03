@@ -5,6 +5,7 @@ export type TodayDecisionAction = "approve" | "later" | "prioritize";
 export type TodayDecisionCommand = {
   decisionId: string;
   action: TodayDecisionAction;
+  decisionRevision?: string;
 };
 
 export type TodayDecisionResult =
@@ -15,5 +16,10 @@ export type TodayDecisionResult =
     }
   | {
       success: false;
-      error: "invalid-decision-id" | "invalid-action" | "decision-not-found" | "decision-not-current";
+      error:
+        | "invalid-decision-id"
+        | "invalid-action"
+        | "decision-not-found"
+        | "decision-not-current"
+        | "decision-replaced";
     };

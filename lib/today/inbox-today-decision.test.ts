@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  computeInboxTodayDecisionRevision,
   createInboxTodayDecision,
   inboxTodayDecisionId,
 } from "./inbox-today-decision.ts";
@@ -66,6 +67,68 @@ test("creates an approval decision from a persisted inbox analysis", () => {
     description: "Bilder, genaue Maße",
     nextStep: "Bitte prüfe, ob diese Angaben vor der Freigabe benötigt werden.",
   });
+});
+
+test("computes the same revision for the same analysis and includes it on the decision", () => {
+  const analysis = {
+    workflowId: "workflow-schneider",
+    customer: { name: "Familie Schneider" },
+    project: {
+      trade: "Malerarbeiten",
+      service: "Wohnzimmer streichen",
+      estimatedArea: 75,
+    },
+    workflow: {
+      priority: "high" as const,
+      confidence: 0.82,
+      nextAction: "Angebotsentwurf prüfen",
+    },
+    nextSteps: ["Bilder anfordern"],
+    missingInformation: ["Bilder", "genaue Maße"],
+    recommendedTask: {
+      type: "offer" as const,
+      title: "Angebotsentwurf Familie Schneider vorbereiten",
+    },
+  };
+
+  const revisionOne = computeInboxTodayDecisionRevision(analysis);
+  const revisionTwo = computeInboxTodayDecisionRevision(analysis);
+  const decision = createInboxTodayDecision(analysis);
+
+  assert.equal(revisionOne, revisionTwo);
+  assert.equal(decision.decisionRevision, revisionOne);
+});
+
+test("computes a different revision once the analysis actually changes", () => {
+  const baseAnalysis = {
+    workflowId: "workflow-schneider",
+    customer: { name: "Familie Schneider" },
+    project: {
+      trade: "Malerarbeiten",
+      service: "Wohnzimmer streichen",
+      estimatedArea: 75,
+    },
+    workflow: {
+      priority: "high" as const,
+      confidence: 0.82,
+      nextAction: "Angebotsentwurf prüfen",
+    },
+    nextSteps: ["Bilder anfordern"],
+    missingInformation: ["Bilder", "genaue Maße"],
+    recommendedTask: {
+      type: "offer" as const,
+      title: "Angebotsentwurf Familie Schneider vorbereiten",
+    },
+  };
+  const updatedAnalysis = {
+    ...baseAnalysis,
+    missingInformation: [],
+  };
+
+  assert.notEqual(
+    computeInboxTodayDecisionRevision(baseAnalysis),
+    computeInboxTodayDecisionRevision(updatedAnalysis),
+  );
 });
 
 test("legacy offer analyses without workflow identity do not expose a draft handoff", () => {

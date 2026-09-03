@@ -3,6 +3,7 @@
 import { fixtureTodayDecisionRepository } from "@/lib/today/fixture-decision-repository";
 import {
   applyTodayDecisionState,
+  findStaleTodayDecisionCommandError,
   recordTodayDecisionAction,
   restrictTodayDecisionStateToKnownDecisions,
   setTodayDecisionManualPriority,
@@ -49,20 +50,11 @@ export async function submitTodayDecision(
 
   const state = restrictTodayDecisionStateToKnownDecisions(persistedState, decisions);
   const currentDecisions = applyTodayDecisionState(decisions, state);
-  const [currentDecision] = currentDecisions;
 
-  if (
-    command.action === "prioritize" &&
-    !currentDecisions.some((decision) => decision.id === command.decisionId)
-  ) {
-    return { success: false, error: "decision-not-current" };
-  }
+  const staleCommandError = findStaleTodayDecisionCommandError(currentDecisions, command);
 
-  if (
-    command.action !== "prioritize" &&
-    currentDecision?.id !== command.decisionId
-  ) {
-    return { success: false, error: "decision-not-current" };
+  if (staleCommandError) {
+    return { success: false, error: staleCommandError };
   }
 
   const nextState = command.action === "prioritize"
