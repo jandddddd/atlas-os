@@ -353,3 +353,150 @@ test("die Kundenantwort löst keinen Versand oder externe Kommunikation aus", as
 
   await expect(page.getByRole("button", { name: /senden|versenden|verschicken/i })).toHaveCount(0);
 });
+
+test("ein danach erstelltes Angebot basiert auf dem aktualisierten kumulativen Inquiry-Kontext", async ({ page }) => {
+  await fillAndAnalyze(page);
+
+  const panel = await openReplyPanel(page);
+  await panel.getByLabel("Antwort des Kunden").fill("Der Wunschtermin ist Ende des Monats.");
+  await panel.getByRole("button", { name: "Antwort auswerten" }).click();
+  await expect(panel).toHaveCount(0);
+
+  const offerRequestPromise = page.waitForRequest("**/api/generate-offer");
+  await page.getByRole("button", { name: "Angebotsentwurf erstellen" }).click();
+  const offerRequest = await offerRequestPromise;
+
+  const offerPayload = offerRequest.postDataJSON();
+  expect(offerPayload.inquiry).toContain("Bitte unser Wohnzimmer streichen.");
+  expect(offerPayload.inquiry).toContain("Neu eingegangene Kundenantwort:");
+  expect(offerPayload.inquiry).toContain("Der Wunschtermin ist Ende des Monats.");
+});
+
+test("nach Reload und erfolgreicher Kundenantwort basiert ein danach erstelltes Angebot ebenfalls auf dem aktualisierten Kontext", async ({ page }) => {
+  await fillAndAnalyze(page);
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "Analyse abgeschlossen" })).toBeVisible();
+
+  const panel = await openReplyPanel(page);
+  await panel.getByLabel("Antwort des Kunden").fill("Der Wunschtermin ist Ende des Monats.");
+  await panel.getByRole("button", { name: "Antwort auswerten" }).click();
+  await expect(panel).toHaveCount(0);
+
+  const offerRequestPromise = page.waitForRequest("**/api/generate-offer");
+  await expect(page.getByRole("button", { name: "Angebotsentwurf erstellen" })).toBeEnabled();
+  await page.getByRole("button", { name: "Angebotsentwurf erstellen" }).click();
+  const offerRequest = await offerRequestPromise;
+
+  const offerPayload = offerRequest.postDataJSON();
+  expect(offerPayload.inquiry).toContain("Bitte unser Wohnzimmer streichen.");
+  expect(offerPayload.inquiry).toContain("Der Wunschtermin ist Ende des Monats.");
+});
+
+test("eine invalidierte Offer-Generierung ohne vorhandenen Entwurf bleibt nicht dauerhaft im Ladezustand", async ({ page }) => {
+  await fillAndAnalyze(page);
+
+  let releaseOfferResponse;
+  await page.route("**/api/generate-offer", async (route) => {
+    await new Promise((resolve) => {
+      releaseOfferResponse = resolve;
+    });
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ offer: inboxOfferFixture }),
+    });
+  });
+
+  await page.getByRole("button", { name: "Angebotsentwurf erstellen" }).click();
+  await expect(page.getByRole("button", { name: "Angebot wird erstellt ..." })).toBeVisible();
+
+  const panel = await openReplyPanel(page);
+  await panel.getByLabel("Antwort des Kunden").fill("Der Wunschtermin ist Ende des Monats.");
+  await panel.getByRole("button", { name: "Antwort auswerten" }).click();
+  await expect(panel).toHaveCount(0);
+
+  await expect(page.getByRole("button", { name: "Angebot wird erstellt ..." })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Angebotsentwurf erstellen" })).toBeEnabled();
+
+  releaseOfferResponse();
+  await expect(page.getByRole("button", { name: "Angebot wird erstellt ..." })).toHaveCount(0);
+  await expect(page.getByText("Angebotsentwurf Familie Schneider", { exact: true })).toHaveCount(0);
+});
+
+test("eine invalidierte Offer-Regenerierung zeigt weiterhin den vorhandenen Entwurf statt im Ladezustand zu bleiben", async ({ page }) => {
+  await fillAndAnalyze(page);
+  await page.getByRole("button", { name: "Angebotsentwurf erstellen" }).click();
+  await expect(page.getByText("Angebotsentwurf Familie Schneider", { exact: true })).toBeVisible();
+
+  let releaseOfferResponse;
+  await page.route("**/api/generate-offer", async (route) => {
+    await new Promise((resolve) => {
+      releaseOfferResponse = resolve;
+    });
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        offer: { ...inboxOfferFixture, title: "Sollte nicht erscheinen" },
+      }),
+    });
+  });
+
+  await page.getByRole("button", { name: "Angebotsentwurf erstellen" }).click();
+  await expect(page.getByRole("button", { name: "Angebot wird erstellt ..." })).toBeVisible();
+
+  const panel = await openReplyPanel(page);
+  await panel.getByLabel("Antwort des Kunden").fill("Der Wunschtermin ist Ende des Monats.");
+  await panel.getByRole("button", { name: "Antwort auswerten" }).click();
+  await expect(panel).toHaveCount(0);
+
+  await expect(page.getByRole("button", { name: "Angebot wird erstellt ..." })).toHaveCount(0);
+  await expect(page.getByText("Angebotsentwurf Familie Schneider", { exact: true })).toBeVisible();
+
+  releaseOfferResponse();
+  await expect(page.getByText("Sollte nicht erscheinen")).toHaveCount(0);
+});
+
+test("ein invalidierter Reply-Request blockiert das Panel im neuen Workflow nicht dauerhaft", async ({ page }) => {
+  await fillAndAnalyze(page);
+
+  let releaseReplyResponse;
+  await page.route("**/api/analyze-inquiry", async (route) => {
+    await new Promise((resolve) => {
+      releaseReplyResponse = resolve;
+    });
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ analysis: updatedAfterFirstReplyFixture }),
+    });
+  });
+
+  const panel = await openReplyPanel(page);
+  await panel.getByLabel("Antwort des Kunden").fill("Der Wunschtermin ist Ende des Monats.");
+  await panel.getByRole("button", { name: "Antwort auswerten" }).click();
+  await expect(
+    panel.getByRole("button", { name: "Antwort wird ausgewertet …" }),
+  ).toBeDisabled();
+
+  await page.route("**/api/analyze-inquiry", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ analysis: inboxAnalysisFixture }),
+    });
+  });
+
+  await page.getByLabel("Kunde oder Kontakt").fill("Familie Weber");
+  await page.getByLabel("Kundenanfrage").fill("Bitte die Fassade neu streichen.");
+  await page.getByRole("button", { name: "Anfrage analysieren" }).click();
+  await expect(page.getByRole("heading", { name: "Analyse abgeschlossen" })).toBeVisible();
+
+  await expect(page.getByLabel("Kundenantwort ergänzen")).toHaveCount(0);
+
+  const newPanel = await openReplyPanel(page);
+  await expect(newPanel.getByRole("button", { name: "Antwort auswerten" })).toBeEnabled();
+  await expect(newPanel.getByLabel("Antwort des Kunden")).toBeEnabled();
+
+  releaseReplyResponse?.();
+});

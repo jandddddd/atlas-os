@@ -151,6 +151,9 @@ export function InboxAnalysis() {
 
     const inquiry = composeInquiry(intake);
     workflowVersion.current += 1;
+    setIsSubmittingCustomerReply(false);
+    setIsCustomerReplyPanelOpen(false);
+    setCustomerReplySubmitError("");
 
     try {
       setStatus("analyzing");
@@ -399,6 +402,10 @@ export function InboxAnalysis() {
     workflowVersion.current += 1;
     const currentWorkflowVersion = workflowVersion.current;
 
+    if (offerStatus === "generating") {
+      setOfferStatus(offer ? "completed" : "idle");
+    }
+
     try {
       setIsSubmittingCustomerReply(true);
       setCustomerReplySubmitError("");
@@ -435,6 +442,7 @@ export function InboxAnalysis() {
 
       setAnalysis(updatedAnalysis);
       setAnalysisSource("current");
+      setAnalysisInquiry(composedContext);
       setInquiryContext(composedContext);
       setOfferNeedsReview(loadOfferDraftNeedsReview(updatedAnalysis));
       setIsEditingClarification(false);
