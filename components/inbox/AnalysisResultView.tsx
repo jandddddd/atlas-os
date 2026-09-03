@@ -5,6 +5,7 @@ import {
   Clock3,
   FileText,
   MessageSquareText,
+  Reply,
   Sparkles,
 } from "lucide-react";
 
@@ -15,10 +16,13 @@ type AnalysisResultViewProps = {
   isOfferGenerationBlocked: boolean;
   isClarificationBlocked: boolean;
   hasClarificationDraft: boolean;
+  isCustomerReplyBlocked: boolean;
+  isCustomerReplyPanelOpen: boolean;
   isTodayHandoffAvailable: boolean;
   offerStatus: OfferStatus;
   onGenerateOffer: () => void;
   onPrepareClarification: () => void;
+  onToggleCustomerReply: () => void;
   onRestartAnalysis: () => void;
 };
 
@@ -27,10 +31,13 @@ export function AnalysisResultView({
   isOfferGenerationBlocked,
   isClarificationBlocked,
   hasClarificationDraft,
+  isCustomerReplyBlocked,
+  isCustomerReplyPanelOpen,
   isTodayHandoffAvailable,
   offerStatus,
   onGenerateOffer,
   onPrepareClarification,
+  onToggleCustomerReply,
   onRestartAnalysis,
 }: AnalysisResultViewProps) {
   return (
@@ -171,6 +178,17 @@ export function AnalysisResultView({
           className="rounded-xl border border-emerald-300 bg-white px-6 py-3 font-medium transition hover:bg-emerald-100"
         >
           Analyse erneut starten
+        </button>
+
+        <button
+          type="button"
+          onClick={onToggleCustomerReply}
+          aria-expanded={isCustomerReplyPanelOpen}
+          disabled={isCustomerReplyBlocked}
+          className="inline-flex items-center gap-2 rounded-xl border border-emerald-300 bg-white px-6 py-3 font-medium transition hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          <Reply className="h-4 w-4" />
+          Kundenantwort ergänzen
         </button>
 
         {isTodayHandoffAvailable ? (

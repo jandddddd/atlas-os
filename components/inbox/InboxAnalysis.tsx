@@ -10,6 +10,7 @@ import {
 
 import { AnalysisResultView } from "./AnalysisResultView";
 import { ClarificationDraftView } from "./ClarificationDraftView";
+import { CustomerReplyPanel } from "./CustomerReplyPanel";
 import { OfferDraftView } from "./OfferDraftView";
 import type {
   AnalysisResult,
@@ -21,14 +22,19 @@ import {
   clearClarificationDraft,
   clearOfferDraft,
   clearInboxWorkflow,
+  flagOfferDraftForReReview,
   loadClarificationDraftForAnalysis,
   loadInquiryAnalysis,
+  loadInquiryContextForAnalysis,
   loadOfferDraft,
+  loadOfferDraftNeedsReview,
   saveClarificationDraft,
   saveInquiryAnalysis,
+  saveInquiryContext,
   saveOfferDraft,
 } from "@/lib/storage/inbox-storage";
 import { createClarificationDraft } from "@/lib/inbox/clarification-draft";
+import { composeInquiryWithCustomerReply } from "@/lib/inbox/customer-reply";
 import {
   composeInquiry,
   validateInquiryIntake,
@@ -71,6 +77,11 @@ export function InboxAnalysis() {
   const [clarificationLastSavedAt, setClarificationLastSavedAt] = useState<
     string | null
   >(null);
+  const [inquiryContext, setInquiryContext] = useState<string | null>(null);
+  const [offerNeedsReview, setOfferNeedsReview] = useState(false);
+  const [isCustomerReplyPanelOpen, setIsCustomerReplyPanelOpen] = useState(false);
+  const [isSubmittingCustomerReply, setIsSubmittingCustomerReply] = useState(false);
+  const [customerReplySubmitError, setCustomerReplySubmitError] = useState("");
 
   useEffect(() => {
     let cancelled = false;
@@ -80,6 +91,12 @@ export function InboxAnalysis() {
     const savedClarification = savedAnalysis
       ? loadClarificationDraftForAnalysis(savedAnalysis)
       : null;
+    const savedInquiryContext = savedAnalysis
+      ? loadInquiryContextForAnalysis(savedAnalysis)
+      : null;
+    const savedOfferNeedsReview = savedAnalysis
+      ? loadOfferDraftNeedsReview(savedAnalysis)
+      : false;
 
     queueMicrotask(() => {
       if (cancelled) return;
@@ -100,6 +117,12 @@ export function InboxAnalysis() {
         setClarification(savedClarification);
         setEditableClarification(savedClarification);
       }
+
+      if (savedInquiryContext) {
+        setInquiryContext(savedInquiryContext);
+      }
+
+      setOfferNeedsReview(savedOfferNeedsReview);
     });
 
     return () => {
@@ -176,7 +199,12 @@ export function InboxAnalysis() {
       setEditableClarification(null);
       setClarificationLastSavedAt(null);
       clearClarificationDraft();
+      setOfferNeedsReview(false);
+      setInquiryContext(inquiry);
+      setIsCustomerReplyPanelOpen(false);
+      setCustomerReplySubmitError("");
       saveInquiryAnalysis(analyzedWorkflow);
+      saveInquiryContext(inquiry, analyzedWorkflow);
       setStatus("completed");
     } catch (error) {
       setAnalysisError(
@@ -222,6 +250,7 @@ export function InboxAnalysis() {
 
       setOffer(data.offer);
       setEditableOffer(data.offer);
+      setOfferNeedsReview(false);
       saveOfferDraft(data.offer, analysis);
       setOfferStatus("completed");
     } catch (error) {
@@ -243,6 +272,7 @@ export function InboxAnalysis() {
         positions: editableOffer.positions.map((position) => ({ ...position })),
       };
       setOffer(savedOffer);
+      setOfferNeedsReview(false);
       saveOfferDraft(savedOffer, analysis);
       setLastSavedAt(
         new Date().toLocaleTimeString("de-DE", {
@@ -281,6 +311,11 @@ export function InboxAnalysis() {
       setClarification(null);
       setEditableClarification(null);
       setClarificationLastSavedAt(null);
+      setInquiryContext(null);
+      setOfferNeedsReview(false);
+      setIsCustomerReplyPanelOpen(false);
+      setIsSubmittingCustomerReply(false);
+      setCustomerReplySubmitError("");
     }
   }
 
@@ -340,6 +375,88 @@ export function InboxAnalysis() {
       setEditableClarification({ ...clarification });
     }
     setIsEditingClarification(false);
+  }
+
+  function toggleCustomerReplyPanel() {
+    setCustomerReplySubmitError("");
+    setIsCustomerReplyPanelOpen((open) => !open);
+  }
+
+  function cancelCustomerReply() {
+    setIsCustomerReplyPanelOpen(false);
+    setCustomerReplySubmitError("");
+  }
+
+  async function mergeCustomerReply(customerReply: string) {
+    if (!analysis || !analysis.workflowId || !inquiryContext) return;
+
+    const workflowId = analysis.workflowId;
+    const composedContext = composeInquiryWithCustomerReply(
+      inquiryContext,
+      customerReply,
+    );
+
+    workflowVersion.current += 1;
+    const currentWorkflowVersion = workflowVersion.current;
+
+    try {
+      setIsSubmittingCustomerReply(true);
+      setCustomerReplySubmitError("");
+
+      const response = await fetch("/api/analyze-inquiry", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ inquiry: composedContext }),
+      });
+      const data = await response.json();
+
+      if (currentWorkflowVersion !== workflowVersion.current) return;
+
+      if (!response.ok) {
+        throw new Error(
+          data.error ?? "Die Kundenantwort konnte nicht ausgewertet werden.",
+        );
+      }
+
+      const updatedAnalysis: AnalysisResult = {
+        ...data.analysis,
+        workflowId,
+      };
+
+      if (!(await persistInboxTodayDecision(updatedAnalysis))) {
+        throw new Error(
+          "Die aktualisierte Entscheidung konnte nicht gespeichert werden.",
+        );
+      }
+
+      saveInquiryAnalysis(updatedAnalysis);
+      saveInquiryContext(composedContext, updatedAnalysis);
+      flagOfferDraftForReReview(workflowId);
+
+      setAnalysis(updatedAnalysis);
+      setAnalysisSource("current");
+      setInquiryContext(composedContext);
+      setOfferNeedsReview(loadOfferDraftNeedsReview(updatedAnalysis));
+      setIsEditingClarification(false);
+      setClarification(null);
+      setEditableClarification(null);
+      setClarificationLastSavedAt(null);
+      clearClarificationDraft();
+      setIsCustomerReplyPanelOpen(false);
+      setCustomerReplySubmitError("");
+    } catch (error) {
+      if (currentWorkflowVersion !== workflowVersion.current) return;
+
+      setCustomerReplySubmitError(
+        error instanceof Error
+          ? error.message
+          : "Ein unbekannter Fehler ist aufgetreten.",
+      );
+    } finally {
+      if (currentWorkflowVersion === workflowVersion.current) {
+        setIsSubmittingCustomerReply(false);
+      }
+    }
   }
 
   function renderWorkflow() {
@@ -408,12 +525,24 @@ export function InboxAnalysis() {
           isOfferGenerationBlocked={analysisSource !== "current"}
           isClarificationBlocked={analysisSource !== "current"}
           hasClarificationDraft={clarification !== null}
+          isCustomerReplyBlocked={!analysis.workflowId || inquiryContext === null}
+          isCustomerReplyPanelOpen={isCustomerReplyPanelOpen}
           isTodayHandoffAvailable={analysisSource === "current" && !isEditingOffer}
           offerStatus={offerStatus}
           onGenerateOffer={generateOffer}
           onPrepareClarification={handleClarificationCta}
+          onToggleCustomerReply={toggleCustomerReplyPanel}
           onRestartAnalysis={() => void startAnalysis()}
         />
+
+        {isCustomerReplyPanelOpen && (
+          <CustomerReplyPanel
+            isSubmitting={isSubmittingCustomerReply}
+            submitError={customerReplySubmitError}
+            onCancel={cancelCustomerReply}
+            onSubmit={(customerReply) => void mergeCustomerReply(customerReply)}
+          />
+        )}
 
         {clarification && editableClarification && (
           <ClarificationDraftView
@@ -448,6 +577,7 @@ export function InboxAnalysis() {
             editableOffer={editableOffer}
             isEditing={isEditingOffer}
             lastSavedAt={lastSavedAt}
+            needsReview={offerNeedsReview}
             onChange={setEditableOffer}
             onStartEditing={() => setIsEditingOffer(true)}
             onSave={saveOffer}

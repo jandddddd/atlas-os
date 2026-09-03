@@ -11,6 +11,7 @@ type OfferDraftViewProps = {
   canEdit?: boolean;
   statusLabel?: string;
   statusTone?: "pending" | "reviewed";
+  needsReview?: boolean;
   onChange: (offer: OfferDraft) => void;
   onStartEditing: () => void;
   onSave: () => void;
@@ -24,6 +25,7 @@ export function OfferDraftView({
   canEdit = true,
   statusLabel = "Entwurf",
   statusTone = "pending",
+  needsReview = false,
   onChange,
   onStartEditing,
   onSave,
@@ -79,6 +81,16 @@ export function OfferDraftView({
       tabIndex={-1}
       className="scroll-mt-6 rounded-2xl border bg-white p-6 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-neutral-950"
     >
+      {needsReview ? (
+        <p
+          role="status"
+          className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900"
+        >
+          Neue Kundeninformationen wurden ergänzt. Bitte prüfe den
+          Angebotsentwurf erneut.
+        </p>
+      ) : null}
+
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <span

@@ -14,6 +14,8 @@ const OFFER_WORKSPACE_VERSION = 1;
 const CLARIFICATION_DRAFT_KEY = "atlas-clarification-draft";
 const CLARIFICATION_DRAFT_BINDING_KEY = "atlas-clarification-draft-analysis-binding";
 const CLARIFICATION_DRAFT_BINDING_VERSION = 1;
+const INQUIRY_CONTEXT_KEY = "atlas-inquiry-context";
+const INQUIRY_CONTEXT_VERSION = 1;
 
 export type OfferWorkspaceStatus = "review-pending" | "reviewed";
 export type OfferWorkspaceStatusFilter = "all" | OfferWorkspaceStatus;
@@ -36,11 +38,18 @@ type StoredOfferWorkspace = {
 type StoredOfferDraftBinding = {
   version: typeof OFFER_DRAFT_BINDING_VERSION;
   workflowId: string;
+  needsReview?: boolean;
 };
 
 type StoredClarificationDraftBinding = {
   version: typeof CLARIFICATION_DRAFT_BINDING_VERSION;
   workflowId: string;
+};
+
+export type StoredInquiryContext = {
+  version: typeof INQUIRY_CONTEXT_VERSION;
+  workflowId: string;
+  text: string;
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -107,11 +116,14 @@ export function isOfferDraft(value: unknown): value is OfferDraft {
   );
 }
 
-function isStoredOfferDraftBinding(value: unknown): value is StoredOfferDraftBinding {
+export function isStoredOfferDraftBinding(
+  value: unknown,
+): value is StoredOfferDraftBinding {
   return (
     isRecord(value) &&
     value.version === OFFER_DRAFT_BINDING_VERSION &&
-    typeof value.workflowId === "string"
+    typeof value.workflowId === "string" &&
+    (value.needsReview === undefined || typeof value.needsReview === "boolean")
   );
 }
 
@@ -133,6 +145,17 @@ function isStoredClarificationDraftBinding(
     isRecord(value) &&
     value.version === CLARIFICATION_DRAFT_BINDING_VERSION &&
     typeof value.workflowId === "string"
+  );
+}
+
+export function isStoredInquiryContext(
+  value: unknown,
+): value is StoredInquiryContext {
+  return (
+    isRecord(value) &&
+    value.version === INQUIRY_CONTEXT_VERSION &&
+    typeof value.workflowId === "string" &&
+    typeof value.text === "string"
   );
 }
 
@@ -279,6 +302,39 @@ export function clearClarificationDraft() {
       error,
     );
   }
+}
+
+export function loadInquiryContextForAnalysis(
+  analysis: AnalysisResult,
+): string | null {
+  if (!analysis.workflowId) return null;
+
+  const context = loadStoredValue(INQUIRY_CONTEXT_KEY, isStoredInquiryContext);
+  if (!context) return null;
+
+  return context.workflowId === analysis.workflowId ? context.text : null;
+}
+
+export function saveInquiryContext(text: string, analysis: AnalysisResult) {
+  if (!analysis.workflowId) return;
+
+  saveStoredValue(INQUIRY_CONTEXT_KEY, {
+    version: INQUIRY_CONTEXT_VERSION,
+    workflowId: analysis.workflowId,
+    text,
+  } satisfies StoredInquiryContext);
+}
+
+export function clearInquiryContext() {
+  if (typeof window === "undefined") return;
+  window.localStorage.removeItem(INQUIRY_CONTEXT_KEY);
+}
+
+export function loadOfferDraftNeedsReview(analysis: AnalysisResult): boolean {
+  if (!analysis.workflowId) return false;
+
+  const binding = loadStoredValue(OFFER_DRAFT_BINDING_KEY, isStoredOfferDraftBinding);
+  return binding?.workflowId === analysis.workflowId && binding.needsReview === true;
 }
 
 export function loadOfferWorkspace(): OfferWorkspaceEntry[] {
@@ -455,6 +511,54 @@ export function markOfferWorkspaceReviewed(workflowId: string) {
   saveOfferWorkspace(reviewedEntries);
 }
 
+/**
+ * Moves a previously reviewed offer workflow back to review-pending without
+ * touching its stored offer content. Used when new customer information
+ * arrives for a case that already has a reviewed offer draft.
+ */
+export function requestOfferWorkspaceReview(
+  entries: OfferWorkspaceEntry[],
+  workflowId: string,
+  updatedAt: string,
+): OfferWorkspaceEntry[] {
+  const matchingEntry = entries.find((entry) => entry.workflowId === workflowId);
+  if (!matchingEntry) return entries;
+
+  return [
+    {
+      ...matchingEntry,
+      status: "review-pending",
+      updatedAt,
+    },
+    ...entries.filter((entry) => entry.workflowId !== workflowId),
+  ];
+}
+
+/**
+ * Flags an existing offer draft (if any) as needing re-review after new
+ * customer information arrived, without changing the draft content itself.
+ * A no-op when no offer draft is bound to this workflow.
+ */
+export function flagOfferDraftForReReview(workflowId: string) {
+  const binding = loadStoredValue(OFFER_DRAFT_BINDING_KEY, isStoredOfferDraftBinding);
+  if (binding && binding.workflowId === workflowId) {
+    saveStoredValue(OFFER_DRAFT_BINDING_KEY, {
+      ...binding,
+      needsReview: true,
+    } satisfies StoredOfferDraftBinding);
+  }
+
+  const entries = loadOfferWorkspace();
+  const revisedEntries = requestOfferWorkspaceReview(
+    entries,
+    workflowId,
+    new Date().toISOString(),
+  );
+  if (revisedEntries !== entries) {
+    saveOfferWorkspace(revisedEntries);
+  }
+}
+
 export function saveOfferDraft(offer: OfferDraft, analysis: AnalysisResult) {
   saveStoredValue(OFFER_DRAFT_KEY, offer);
 
@@ -499,6 +603,7 @@ export function clearInboxWorkflow() {
     window.localStorage.removeItem(OFFER_DRAFT_BINDING_KEY);
     window.localStorage.removeItem(CLARIFICATION_DRAFT_KEY);
     window.localStorage.removeItem(CLARIFICATION_DRAFT_BINDING_KEY);
+    window.localStorage.removeItem(INQUIRY_CONTEXT_KEY);
   } catch (error) {
     console.error("Gespeicherter Atlas-Vorgang konnte nicht gelöscht werden:", error);
   }
