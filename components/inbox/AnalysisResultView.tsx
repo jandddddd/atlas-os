@@ -179,7 +179,8 @@ export function AnalysisResultView({
         <button
           type="button"
           onClick={onRestartAnalysis}
-          className="rounded-xl border border-emerald-300 bg-white px-6 py-3 font-medium transition hover:bg-emerald-100"
+          disabled={isCustomerReplySubmitting}
+          className="rounded-xl border border-emerald-300 bg-white px-6 py-3 font-medium transition hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-50"
         >
           Analyse erneut starten
         </button>

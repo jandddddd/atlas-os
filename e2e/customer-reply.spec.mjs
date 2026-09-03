@@ -457,7 +457,73 @@ test("eine invalidierte Offer-Regenerierung zeigt weiterhin den vorhandenen Entw
   await expect(page.getByText("Sollte nicht erscheinen")).toHaveCount(0);
 });
 
-test("ein invalidierter Reply-Request blockiert das Panel im neuen Workflow nicht dauerhaft", async ({ page }) => {
+test("eine laufende Kundenantwort-Auswertung verhindert das Starten eines neuen vollständigen Analyze-Workflows", async ({ page }) => {
+  await fillAndAnalyze(page);
+
+  let releaseReplyResponse;
+  let newAnalysisRequested = false;
+  await page.route("**/api/analyze-inquiry", async (route) => {
+    if (route.request().postDataJSON()?.inquiry?.includes("Fassade")) {
+      newAnalysisRequested = true;
+    }
+    await new Promise((resolve) => {
+      releaseReplyResponse = resolve;
+    });
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ analysis: updatedAfterFirstReplyFixture }),
+    });
+  });
+
+  const panel = await openReplyPanel(page);
+  await panel.getByLabel("Antwort des Kunden").fill("Der Wunschtermin ist Ende des Monats.");
+  await panel.getByRole("button", { name: "Antwort auswerten" }).click();
+  await expect(
+    panel.getByRole("button", { name: "Antwort wird ausgewertet …" }),
+  ).toBeDisabled();
+
+  const restartButton = page.getByRole("button", { name: "Analyse erneut starten" });
+  await expect(restartButton).toBeDisabled();
+  const submitButton = page.getByRole("button", { name: "Anfrage analysieren" });
+  await expect(submitButton).toBeDisabled();
+  await expect(page.getByLabel("Kunde oder Kontakt")).toBeDisabled();
+  await expect(page.getByLabel("Kundenanfrage")).toBeDisabled();
+
+  // Both controls are genuinely disabled (not just visually), so a forced
+  // click cannot dispatch a click event to a disabled native button either.
+  await restartButton.click({ force: true }).catch(() => {});
+  await submitButton.click({ force: true }).catch(() => {});
+
+  // The blocked attempts must not have reached the analyze route at all;
+  // the reply's own in-flight request is the only one that resolves it.
+  expect(newAnalysisRequested).toBe(false);
+  await expect(panel).toBeVisible();
+
+  releaseReplyResponse();
+  await expect(panel).toHaveCount(0);
+  await expect(page.getByText("Wunschtermin")).toBeVisible();
+
+  // Once the reply has settled, restarting the analysis works normally again.
+  await page.route("**/api/analyze-inquiry", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ analysis: inboxAnalysisFixture }),
+    });
+  });
+
+  await expect(submitButton).toBeEnabled();
+  await submitButton.click();
+  await expect(page.getByRole("heading", { name: "Analyse abgeschlossen" })).toBeVisible();
+  await expect(page.getByLabel("Kundenantwort ergänzen")).toHaveCount(0);
+
+  const newPanel = await openReplyPanel(page);
+  await expect(newPanel.getByRole("button", { name: "Antwort auswerten" })).toBeEnabled();
+  await expect(newPanel.getByLabel("Antwort des Kunden")).toBeEnabled();
+});
+
+test("eine laufende Kundenantwort-Auswertung verhindert den vollständigen Reset", async ({ page }) => {
   await fillAndAnalyze(page);
 
   let releaseReplyResponse;
@@ -479,26 +545,17 @@ test("ein invalidierter Reply-Request blockiert das Panel im neuen Workflow nich
     panel.getByRole("button", { name: "Antwort wird ausgewertet …" }),
   ).toBeDisabled();
 
-  await page.route("**/api/analyze-inquiry", async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({ analysis: inboxAnalysisFixture }),
-    });
-  });
+  const resetButton = page.getByRole("button", { name: "Gespeicherten Vorgang zurücksetzen" });
+  await expect(resetButton).toBeDisabled();
+  await resetButton.click({ force: true });
 
-  await page.getByLabel("Kunde oder Kontakt").fill("Familie Weber");
-  await page.getByLabel("Kundenanfrage").fill("Bitte die Fassade neu streichen.");
-  await page.getByRole("button", { name: "Anfrage analysieren" }).click();
+  // The reset must not have run: the analysis and panel are still there.
   await expect(page.getByRole("heading", { name: "Analyse abgeschlossen" })).toBeVisible();
+  await expect(panel).toBeVisible();
 
-  await expect(page.getByLabel("Kundenantwort ergänzen")).toHaveCount(0);
-
-  const newPanel = await openReplyPanel(page);
-  await expect(newPanel.getByRole("button", { name: "Antwort auswerten" })).toBeEnabled();
-  await expect(newPanel.getByLabel("Antwort des Kunden")).toBeEnabled();
-
-  releaseReplyResponse?.();
+  releaseReplyResponse();
+  await expect(panel).toHaveCount(0);
+  await expect(resetButton).toBeEnabled();
 });
 
 test("Offer-Generierung ist während einer laufenden Kundenantwort-Auswertung nicht ausführbar", async ({ page }) => {

@@ -371,7 +371,7 @@ test("offer detail handles an unknown workspace id safely", async ({ page }) => 
   await expect(page.getByRole("link", { name: "Zur Angebotsübersicht" })).toHaveAttribute("href", "/offers");
 });
 
-test("a Today approval cannot re-mark an offer reviewed while new customer information requires re-review", async ({ page }) => {
+test("a Today approval cannot re-mark an offer reviewed, but a manual re-review afterwards can", async ({ page }) => {
   await fillAndAnalyze(page);
   await generateOfferAndAssertPayload(page);
 
@@ -425,6 +425,49 @@ test("a Today approval cannot re-mark an offer reviewed while new customer infor
   );
   expect(entryAfterApproval.status).toBe("review-pending");
   expect(entryAfterApproval.offer).toEqual(inboxOfferFixture);
+
+  // The Today path is now spent, but a deliberate manual re-review of the
+  // stale offer must still be able to complete the review.
+  await page.goto("/inbox");
+  await expect(
+    page.getByText("Neue Kundeninformationen wurden ergänzt. Bitte prüfe den Angebotsentwurf erneut."),
+  ).toBeVisible();
+
+  await page.getByRole("button", { name: "Entwurf bearbeiten" }).click();
+  await page.getByRole("button", { name: "Änderungen übernehmen" }).click();
+
+  workspace = await readWorkspace();
+  const entryAfterManualReview = workspace.offers.find(
+    (entry) => entry.workflowId === analysis.workflowId,
+  );
+  expect(entryAfterManualReview.status).toBe("reviewed");
+  expect(entryAfterManualReview.offer).toEqual(inboxOfferFixture);
+});
+
+test("a fresh automatic offer generation stays review-pending, and a normal manual save without prior needsReview does not mark it reviewed either", async ({ page }) => {
+  await fillAndAnalyze(page);
+  await generateOfferAndAssertPayload(page);
+
+  const analysis = await page.evaluate(() =>
+    JSON.parse(window.localStorage.getItem("atlas-inquiry-analysis")),
+  );
+  const readWorkspace = () =>
+    page.evaluate(() => JSON.parse(window.localStorage.getItem("atlas-offer-workspace")));
+
+  let workspace = await readWorkspace();
+  expect(
+    workspace.offers.find((entry) => entry.workflowId === analysis.workflowId).status,
+  ).toBe("review-pending");
+
+  // A normal manual edit/save that never had needsReview must not
+  // suddenly complete a review that was never pending in the first place.
+  await page.getByRole("button", { name: "Entwurf bearbeiten" }).click();
+  await page.getByRole("button", { name: "Änderungen übernehmen" }).click();
+
+  workspace = await readWorkspace();
+  expect(
+    workspace.offers.find((entry) => entry.workflowId === analysis.workflowId).status,
+  ).toBe("review-pending");
 });
 
 test("offer workspace migrates the valid bound draft from before Sprint 4a", async ({ page }) => {

@@ -28,6 +28,7 @@ import {
   loadInquiryContextForAnalysis,
   loadOfferDraft,
   loadOfferDraftNeedsReview,
+  markOfferWorkspaceReviewed,
   saveClarificationDraft,
   saveInquiryAnalysis,
   saveInquiryContext,
@@ -137,6 +138,8 @@ export function InboxAnalysis() {
 
   async function startAnalysis(event?: FormEvent<HTMLFormElement>) {
     event?.preventDefault();
+    if (isSubmittingCustomerReply) return;
+
     const errors = validateInquiryIntake(intake);
 
     if (Object.keys(errors).length > 0) {
@@ -271,6 +274,7 @@ export function InboxAnalysis() {
 
   function saveOffer() {
     if (editableOffer && analysis) {
+      const wasFlaggedForReview = offerNeedsReview;
       const savedOffer = {
         ...editableOffer,
         positions: editableOffer.positions.map((position) => ({ ...position })),
@@ -278,6 +282,12 @@ export function InboxAnalysis() {
       setOffer(savedOffer);
       setOfferNeedsReview(false);
       saveOfferDraft(savedOffer, analysis);
+      // A manual save of an offer that was flagged for renewed review (after
+      // new customer information arrived) represents the deliberate human
+      // re-review Today approval was not allowed to grant on its own.
+      if (wasFlaggedForReview && analysis.workflowId) {
+        markOfferWorkspaceReviewed(analysis.workflowId);
+      }
       setLastSavedAt(
         new Date().toLocaleTimeString("de-DE", {
           hour: "2-digit",
@@ -289,6 +299,8 @@ export function InboxAnalysis() {
   }
 
   async function resetInboxWorkflow() {
+    if (isSubmittingCustomerReply) return;
+
     workflowVersion.current += 1;
 
     try {
@@ -431,7 +443,15 @@ export function InboxAnalysis() {
         workflowId,
       };
 
-      if (!(await persistInboxTodayDecision(updatedAnalysis))) {
+      const todayPersisted = await persistInboxTodayDecision(updatedAnalysis);
+
+      // Defense in depth: even though startAnalysis()/resetInboxWorkflow()
+      // now refuse to run while a reply is submitting, re-check after this
+      // await too, so a replaced workflow can never be overwritten by a
+      // reply that started against the previous one.
+      if (currentWorkflowVersion !== workflowVersion.current) return;
+
+      if (!todayPersisted) {
         throw new Error(
           "Die aktualisierte Entscheidung konnte nicht gespeichert werden.",
         );
@@ -600,7 +620,8 @@ export function InboxAnalysis() {
           <button
             type="button"
             onClick={resetInboxWorkflow}
-            className="text-sm text-neutral-500 transition hover:text-neutral-900"
+            disabled={isSubmittingCustomerReply}
+            className="text-sm text-neutral-500 transition hover:text-neutral-900 disabled:cursor-not-allowed disabled:opacity-50"
           >
             Gespeicherten Vorgang zurücksetzen
           </button>
@@ -610,6 +631,7 @@ export function InboxAnalysis() {
   }
 
   const isAnalyzing = status === "analyzing";
+  const isIntakeDisabled = isAnalyzing || isSubmittingCustomerReply;
 
   return (
     <>
@@ -632,7 +654,7 @@ export function InboxAnalysis() {
                 intakeErrors.customer ? "inquiry-customer-error" : undefined
               }
               aria-invalid={Boolean(intakeErrors.customer)}
-              disabled={isAnalyzing}
+              disabled={isIntakeDisabled}
               className="mt-2 w-full rounded-xl border bg-neutral-50 px-4 py-3 text-neutral-900 outline-none transition focus:border-neutral-500 focus:ring-2 focus:ring-neutral-200 disabled:cursor-wait disabled:opacity-60"
             />
             {intakeErrors.customer ? (
@@ -659,7 +681,7 @@ export function InboxAnalysis() {
               name="location"
               value={intake.location}
               onChange={(event) => updateIntake("location", event.target.value)}
-              disabled={isAnalyzing}
+              disabled={isIntakeDisabled}
               className="mt-2 w-full rounded-xl border bg-neutral-50 px-4 py-3 text-neutral-900 outline-none transition focus:border-neutral-500 focus:ring-2 focus:ring-neutral-200 disabled:cursor-wait disabled:opacity-60"
             />
           </div>
@@ -685,7 +707,7 @@ export function InboxAnalysis() {
                 : "inquiry-message-help"
             }
             aria-invalid={Boolean(intakeErrors.message)}
-            disabled={isAnalyzing}
+            disabled={isIntakeDisabled}
             className="mt-2 w-full resize-y rounded-xl border bg-neutral-50 px-4 py-3 leading-7 text-neutral-900 outline-none transition focus:border-neutral-500 focus:ring-2 focus:ring-neutral-200 disabled:cursor-wait disabled:opacity-60"
           />
           {intakeErrors.message ? (
@@ -706,7 +728,7 @@ export function InboxAnalysis() {
 
         <button
           type="submit"
-          disabled={isAnalyzing}
+          disabled={isIntakeDisabled}
           className="mt-6 inline-flex items-center gap-2 rounded-xl bg-neutral-900 px-6 py-3 font-medium text-white transition hover:bg-neutral-700 disabled:cursor-wait disabled:opacity-60"
         >
           <Sparkles className="h-5 w-5" />
