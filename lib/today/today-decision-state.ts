@@ -206,6 +206,50 @@ export function setTodayDecisionManualPriority(
   };
 }
 
+export type TodayDecisionCommandLike = {
+  decisionId: string;
+  action: "approve" | "later" | "prioritize";
+  decisionRevision?: string;
+};
+
+/**
+ * Rejects a Today command that no longer matches the currently visible
+ * decision it targets, either because the id fell out of the current
+ * priority order or because a fixed-id decision (e.g. the inbox decision)
+ * was silently replaced by newer data underneath an already-rendered
+ * command. Must run before any state write.
+ */
+export function findStaleTodayDecisionCommandError(
+  currentDecisions: TodayApprovalDecision[],
+  command: TodayDecisionCommandLike,
+): "decision-not-current" | "decision-replaced" | null {
+  if (
+    command.action === "prioritize" &&
+    !currentDecisions.some((decision) => decision.id === command.decisionId)
+  ) {
+    return "decision-not-current";
+  }
+
+  const [currentDecision] = currentDecisions;
+
+  if (command.action !== "prioritize" && currentDecision?.id !== command.decisionId) {
+    return "decision-not-current";
+  }
+
+  const targetDecision = command.action === "prioritize"
+    ? currentDecisions.find((decision) => decision.id === command.decisionId)
+    : currentDecision;
+
+  if (
+    targetDecision?.decisionRevision !== undefined &&
+    targetDecision.decisionRevision !== command.decisionRevision
+  ) {
+    return "decision-replaced";
+  }
+
+  return null;
+}
+
 export function applyTodayDecisionState(
   decisions: TodayApprovalDecision[],
   state: TodayDecisionState,

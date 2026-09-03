@@ -444,6 +444,57 @@ test("a Today approval cannot re-mark an offer reviewed, but a manual re-review 
   expect(entryAfterManualReview.offer).toEqual(inboxOfferFixture);
 });
 
+test("a stale Today approval from an earlier tab is rejected once a second tab replaced the inbox decision", async ({ page, context }) => {
+  // Give the inbox decision the highest natural priority score so it is
+  // already the rendered priority card without any manual "select" click,
+  // matching the reported scenario where Tab A simply has Today open.
+  const highPriorityAnalysisFixture = {
+    ...inboxAnalysisFixture,
+    workflow: { ...inboxAnalysisFixture.workflow, priority: "high" },
+  };
+  await page.route("**/api/analyze-inquiry", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ analysis: highPriorityAnalysisFixture }),
+    });
+  });
+  await fillAndAnalyze(page);
+  await page.getByRole("link", { name: "In Heute weiterprüfen" }).click();
+  await expect(page).toHaveURL("/today");
+  await expect(page.getByRole("heading", { name: inboxDecisionTitle })).toBeVisible();
+  const approveButton = page.getByRole("button", { name: "Als geprüft vormerken" });
+  await expect(approveButton).toBeVisible();
+
+  const secondTab = await context.newPage();
+  await secondTab.route("**/api/analyze-inquiry", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        analysis: { ...highPriorityAnalysisFixture, missingInformation: [] },
+      }),
+    });
+  });
+  await fillAndAnalyze(secondTab);
+  await secondTab.close();
+
+  // The first tab still holds the decision it rendered before the second
+  // tab replaced it. Approving now must not silently complete the newer
+  // decision underneath the fixed "inbox-recommended-task" id.
+  await approveButton.click();
+  await expect(page.getByRole("alert", { name: "Entscheidungsfehler" })).toContainText(
+    "wurde inzwischen durch eine neuere Version ersetzt",
+  );
+  await expect(page.getByRole("region", { name: "Aktueller Abschluss" })).toHaveCount(0);
+
+  await page.reload();
+  await expect(page.getByRole("heading", { name: inboxDecisionTitle })).toBeVisible();
+  await expect(page.getByText("Angaben noch offen")).toHaveCount(0);
+  await page.getByRole("button", { name: "Als geprüft vormerken" }).click();
+  await expect(page.getByRole("region", { name: "Aktueller Abschluss" })).toBeVisible();
+});
+
 test("a fresh automatic offer generation stays review-pending, and a normal manual save without prior needsReview does not mark it reviewed either", async ({ page }) => {
   await fillAndAnalyze(page);
   await generateOfferAndAssertPayload(page);

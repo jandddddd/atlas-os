@@ -21,6 +21,7 @@ import type {
 
 type CompletionStatus = "offer-approved" | "change-requested" | null;
 type FeedbackStatus = "completed" | "deferred" | null;
+type SubmissionErrorStatus = "generic" | "stale" | null;
 type CompletionAction = {
   label: string;
   href: string;
@@ -30,6 +31,13 @@ type CompletionAction = {
 
 type TodayApprovalDecision = Omit<ApprovalCardProps, "primaryAction" | "secondaryActions" | "details" | "notice"> & TodayDecisionPriorityFactors & {
   id: string;
+  /**
+   * Fingerprint of the decision's underlying data snapshot. Only decisions
+   * whose underlying data can be silently replaced (currently the inbox
+   * decision) set this; static fixture decisions leave it undefined and
+   * behave exactly as before.
+   */
+  decisionRevision?: string;
   overviewTitle: string;
   overviewContext: string;
   overviewMeta: string;
@@ -106,7 +114,7 @@ export function TodayApprovalCenter({
   const [feedbackStatus, setFeedbackStatus] = useState<FeedbackStatus>(null);
   const [expandedDetailsId, setExpandedDetailsId] = useState<string | null>(null);
   const [editHintDecisionId, setEditHintDecisionId] = useState<string | null>(null);
-  const [submissionError, setSubmissionError] = useState(false);
+  const [submissionError, setSubmissionError] = useState<SubmissionErrorStatus>(null);
   const [isSubmittingPriorityDecision, setIsSubmittingPriorityDecision] = useState(false);
   const priorityDecisionSubmissionInProgress = useRef(false);
 
@@ -143,20 +151,21 @@ export function TodayApprovalCenter({
 
     priorityDecisionSubmissionInProgress.current = true;
     setIsSubmittingPriorityDecision(true);
-    setSubmissionError(false);
+    setSubmissionError(null);
 
     try {
       const result = await submitTodayDecision({
         decisionId: priorityDecision.id,
         action: "approve",
+        decisionRevision: priorityDecision.decisionRevision,
       });
 
       if (!result.success) {
-        setSubmissionError(true);
+        setSubmissionError(result.error === "decision-replaced" ? "stale" : "generic");
         return;
       }
 
-      setSubmissionError(false);
+      setSubmissionError(null);
       setCompletionMessage(priorityDecision.completionMessage);
       const nextCompletionAction = availableCompletionAction(
         priorityDecision.completionAction,
@@ -182,20 +191,21 @@ export function TodayApprovalCenter({
 
     priorityDecisionSubmissionInProgress.current = true;
     setIsSubmittingPriorityDecision(true);
-    setSubmissionError(false);
+    setSubmissionError(null);
 
     try {
       const result = await submitTodayDecision({
         decisionId: priorityDecision.id,
         action: "later",
+        decisionRevision: priorityDecision.decisionRevision,
       });
 
       if (!result.success) {
-        setSubmissionError(true);
+        setSubmissionError(result.error === "decision-replaced" ? "stale" : "generic");
         return;
       }
 
-      setSubmissionError(false);
+      setSubmissionError(null);
       setCompletionMessage(
         "Die Entscheidung wurde für später eingeordnet. Atlas zeigt dir jetzt den nächsten Punkt.",
       );
@@ -226,19 +236,21 @@ export function TodayApprovalCenter({
     }
 
     setIsSubmittingPriorityDecision(true);
-    setSubmissionError(false);
+    setSubmissionError(null);
 
     try {
       const result = await submitTodayDecision({
         decisionId,
         action: "prioritize",
+        decisionRevision: decisionById.get(decisionId)?.decisionRevision,
       });
 
       if (!result.success) {
-        setSubmissionError(true);
+        setSubmissionError(result.error === "decision-replaced" ? "stale" : "generic");
         return;
       }
 
+      setSubmissionError(null);
       setCompletionMessage(null);
       setCompletionAction(null);
       setFeedbackStatus(null);
@@ -261,7 +273,9 @@ export function TodayApprovalCenter({
           role="alert"
           className="rounded-3xl border border-amber-200 bg-amber-50 px-6 py-4 text-sm leading-6 text-amber-900"
         >
-          Die Entscheidung konnte gerade nicht verarbeitet werden. Bitte versuche es erneut.
+          {submissionError === "stale"
+            ? "Diese Entscheidung wurde inzwischen durch eine neuere Version ersetzt. Bitte lade Heute neu, um die aktuelle Entscheidung zu sehen."
+            : "Die Entscheidung konnte gerade nicht verarbeitet werden. Bitte versuche es erneut."}
         </p>
       ) : null}
 

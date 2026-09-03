@@ -1,7 +1,33 @@
+import { createHash } from "node:crypto";
+
 import type { AnalysisResult } from "@/components/inbox/types";
 import type { TodayApprovalDecisionInput } from "@/components/today/TodayApprovalCenter";
 
 export const inboxTodayDecisionId = "inbox-recommended-task";
+
+/**
+ * A deterministic fingerprint of the parts of the analysis that make up the
+ * rendered Today decision. It lets a Today action prove that it was submitted
+ * against the same analysis snapshot that is still current server-side, even
+ * though the decision keeps a fixed id across replacements.
+ */
+export function computeInboxTodayDecisionRevision(analysis: AnalysisResult): string {
+  const fingerprintSource = JSON.stringify({
+    workflowId: analysis.workflowId ?? null,
+    customerName: analysis.customer.name,
+    projectTrade: analysis.project.trade,
+    projectService: analysis.project.service,
+    projectEstimatedArea: analysis.project.estimatedArea,
+    workflowPriority: analysis.workflow.priority,
+    workflowNextAction: analysis.workflow.nextAction,
+    nextSteps: analysis.nextSteps,
+    missingInformation: analysis.missingInformation,
+    recommendedTaskType: analysis.recommendedTask.type,
+    recommendedTaskTitle: analysis.recommendedTask.title,
+  });
+
+  return createHash("sha256").update(fingerprintSource).digest("hex").slice(0, 16);
+}
 
 const priorityByWorkflowPriority = {
   low: "low",
@@ -25,6 +51,7 @@ export function createInboxTodayDecision(
 
   return {
     id: inboxTodayDecisionId,
+    decisionRevision: computeInboxTodayDecisionRevision(analysis),
     urgency: priorityByWorkflowPriority[analysis.workflow.priority],
     economicImpact: isOffer ? "high" : "medium",
     decisionType: isOffer ? "Angebot" : "Nächster Schritt",
