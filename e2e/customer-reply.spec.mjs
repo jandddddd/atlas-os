@@ -599,6 +599,36 @@ test("eine laufende Kundenantwort-Auswertung verhindert den vollständigen Reset
   await expect(resetButton).toBeEnabled();
 });
 
+test("der Today-Handoff ist während einer laufenden Kundenantwort-Auswertung nicht verfügbar", async ({ page }) => {
+  await fillAndAnalyze(page);
+  const handoffLink = page.getByRole("link", { name: "In Heute weiterprüfen" });
+  await expect(handoffLink).toBeVisible();
+
+  let releaseReplyResponse;
+  await page.route("**/api/analyze-inquiry", async (route) => {
+    await new Promise((resolve) => {
+      releaseReplyResponse = resolve;
+    });
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ analysis: updatedAfterFirstReplyFixture }),
+    });
+  });
+
+  const panel = await openReplyPanel(page);
+  await panel.getByLabel("Antwort des Kunden").fill("Der Wunschtermin ist Ende des Monats.");
+  await panel.getByRole("button", { name: "Antwort auswerten" }).click();
+  await expect(
+    panel.getByRole("button", { name: "Antwort wird ausgewertet …" }),
+  ).toBeDisabled();
+  await expect(handoffLink).toHaveCount(0);
+
+  releaseReplyResponse();
+  await expect(panel).toHaveCount(0);
+  await expect(handoffLink).toBeVisible();
+});
+
 test("Offer-Generierung ist während einer laufenden Kundenantwort-Auswertung nicht ausführbar", async ({ page }) => {
   await fillAndAnalyze(page);
 

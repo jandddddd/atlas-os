@@ -557,7 +557,11 @@ export function InboxAnalysis() {
           isCustomerReplyBlocked={!analysis.workflowId || inquiryContext === null}
           isCustomerReplyPanelOpen={isCustomerReplyPanelOpen}
           isCustomerReplySubmitting={isSubmittingCustomerReply}
-          isTodayHandoffAvailable={analysisSource === "current" && !isEditingOffer}
+          isTodayHandoffAvailable={
+            analysisSource === "current" &&
+            !isEditingOffer &&
+            !isSubmittingCustomerReply
+          }
           offerStatus={offerStatus}
           onGenerateOffer={generateOffer}
           onPrepareClarification={handleClarificationCta}
