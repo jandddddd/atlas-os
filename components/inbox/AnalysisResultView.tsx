@@ -18,6 +18,7 @@ type AnalysisResultViewProps = {
   hasClarificationDraft: boolean;
   isCustomerReplyBlocked: boolean;
   isCustomerReplyPanelOpen: boolean;
+  isCustomerReplySubmitting: boolean;
   isTodayHandoffAvailable: boolean;
   offerStatus: OfferStatus;
   onGenerateOffer: () => void;
@@ -33,6 +34,7 @@ export function AnalysisResultView({
   hasClarificationDraft,
   isCustomerReplyBlocked,
   isCustomerReplyPanelOpen,
+  isCustomerReplySubmitting,
   isTodayHandoffAvailable,
   offerStatus,
   onGenerateOffer,
@@ -162,7 +164,9 @@ export function AnalysisResultView({
               : undefined
           }
           disabled={
-            isOfferGenerationBlocked || offerStatus === "generating"
+            isOfferGenerationBlocked ||
+            offerStatus === "generating" ||
+            isCustomerReplySubmitting
           }
           className="inline-flex items-center gap-2 rounded-xl bg-neutral-900 px-6 py-3 font-medium text-white transition hover:bg-neutral-700 disabled:cursor-not-allowed disabled:opacity-50"
         >

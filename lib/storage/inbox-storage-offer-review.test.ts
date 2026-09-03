@@ -3,9 +3,11 @@ import test from "node:test";
 
 import type { OfferDraft } from "../../components/inbox/types.ts";
 import {
+  isOfferBindingFlaggedForReview,
   isStoredOfferDraftBinding,
   requestOfferWorkspaceReview,
   type OfferWorkspaceEntry,
+  type StoredOfferDraftBinding,
 } from "./inbox-storage.ts";
 
 const offer: OfferDraft = {
@@ -68,6 +70,39 @@ test("setzt einen zuvor geprüften Workspace-Eintrag bei neuer Kundeninformation
   assert.equal(revised[0].status, "review-pending");
   assert.equal(revised[0].updatedAt, "2026-09-03T09:00:00.000Z");
   assert.equal(revised[0].offer, offer);
+});
+
+test("erkennt ein für Re-Review markiertes Binding derselben workflowId", () => {
+  const binding: StoredOfferDraftBinding = {
+    version: 1,
+    workflowId: "workflow-1",
+    needsReview: true,
+  };
+
+  assert.equal(isOfferBindingFlaggedForReview(binding, "workflow-1"), true);
+});
+
+test("ignoriert needsReview für eine andere workflowId", () => {
+  const binding: StoredOfferDraftBinding = {
+    version: 1,
+    workflowId: "workflow-1",
+    needsReview: true,
+  };
+
+  assert.equal(isOfferBindingFlaggedForReview(binding, "workflow-2"), false);
+});
+
+test("ein Binding ohne needsReview blockiert die Freigabe nicht", () => {
+  const binding: StoredOfferDraftBinding = {
+    version: 1,
+    workflowId: "workflow-1",
+  };
+
+  assert.equal(isOfferBindingFlaggedForReview(binding, "workflow-1"), false);
+});
+
+test("kein Binding blockiert die Freigabe nicht", () => {
+  assert.equal(isOfferBindingFlaggedForReview(null, "workflow-1"), false);
 });
 
 test("lässt Einträge anderer Workflows unverändert und macht bei fehlendem Treffer nichts", () => {

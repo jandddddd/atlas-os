@@ -35,7 +35,7 @@ type StoredOfferWorkspace = {
   offers: OfferWorkspaceEntry[];
 };
 
-type StoredOfferDraftBinding = {
+export type StoredOfferDraftBinding = {
   version: typeof OFFER_DRAFT_BINDING_VERSION;
   workflowId: string;
   needsReview?: boolean;
@@ -500,7 +500,30 @@ export function reviewOfferWorkspaceEntry(
   ];
 }
 
+/**
+ * True when the given offer draft binding is the one currently flagged for
+ * re-review after new customer information arrived for this exact workflow.
+ */
+export function isOfferBindingFlaggedForReview(
+  binding: StoredOfferDraftBinding | null,
+  workflowId: string,
+): boolean {
+  return binding?.workflowId === workflowId && binding.needsReview === true;
+}
+
+/**
+ * Marks the offer workflow as reviewed, unless its currently bound offer
+ * draft was flagged for re-review by new customer information. In that case
+ * this is a no-op: the workspace entry stays review-pending and the offer
+ * content is left untouched, so a Today approval based on the outdated
+ * analysis cannot silently clear the pending re-review.
+ */
 export function markOfferWorkspaceReviewed(workflowId: string) {
+  const binding = loadStoredValue(OFFER_DRAFT_BINDING_KEY, isStoredOfferDraftBinding);
+  if (isOfferBindingFlaggedForReview(binding, workflowId)) {
+    return;
+  }
+
   const entries = loadOfferWorkspace();
   const reviewedEntries = reviewOfferWorkspaceEntry(
     entries,

@@ -371,6 +371,62 @@ test("offer detail handles an unknown workspace id safely", async ({ page }) => 
   await expect(page.getByRole("link", { name: "Zur Angebotsübersicht" })).toHaveAttribute("href", "/offers");
 });
 
+test("a Today approval cannot re-mark an offer reviewed while new customer information requires re-review", async ({ page }) => {
+  await fillAndAnalyze(page);
+  await generateOfferAndAssertPayload(page);
+
+  await openInboxDecision(page);
+  await page.getByRole("button", { name: "Als geprüft vormerken" }).click();
+  await expect(page.getByRole("region", { name: "Aktueller Abschluss" })).toBeVisible();
+
+  const analysis = await page.evaluate(() =>
+    JSON.parse(window.localStorage.getItem("atlas-inquiry-analysis")),
+  );
+  const readWorkspace = () =>
+    page.evaluate(() => JSON.parse(window.localStorage.getItem("atlas-offer-workspace")));
+
+  let workspace = await readWorkspace();
+  expect(
+    workspace.offers.find((entry) => entry.workflowId === analysis.workflowId).status,
+  ).toBe("reviewed");
+
+  await page.goto("/inbox");
+  await expect(page.getByRole("heading", { name: "Analyse abgeschlossen" })).toBeVisible();
+  await page.route("**/api/analyze-inquiry", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        analysis: { ...inboxAnalysisFixture, missingInformation: [] },
+      }),
+    });
+  });
+
+  await page.getByRole("button", { name: "Kundenantwort ergänzen" }).click();
+  const panel = page.getByLabel("Kundenantwort ergänzen");
+  await panel.getByLabel("Antwort des Kunden").fill("Der Wunschtermin ist Ende des Monats.");
+  await panel.getByRole("button", { name: "Antwort auswerten" }).click();
+  await expect(panel).toHaveCount(0);
+
+  workspace = await readWorkspace();
+  const entryAfterReply = workspace.offers.find(
+    (entry) => entry.workflowId === analysis.workflowId,
+  );
+  expect(entryAfterReply.status).toBe("review-pending");
+  expect(entryAfterReply.offer).toEqual(inboxOfferFixture);
+
+  await openInboxDecision(page);
+  await page.getByRole("button", { name: "Als geprüft vormerken" }).click();
+  await expect(page.getByRole("region", { name: "Aktueller Abschluss" })).toBeVisible();
+
+  workspace = await readWorkspace();
+  const entryAfterApproval = workspace.offers.find(
+    (entry) => entry.workflowId === analysis.workflowId,
+  );
+  expect(entryAfterApproval.status).toBe("review-pending");
+  expect(entryAfterApproval.offer).toEqual(inboxOfferFixture);
+});
+
 test("offer workspace migrates the valid bound draft from before Sprint 4a", async ({ page }) => {
   await page.goto("/offers");
   await page.evaluate(({ analysis, offer }) => {

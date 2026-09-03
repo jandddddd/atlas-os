@@ -500,3 +500,77 @@ test("ein invalidierter Reply-Request blockiert das Panel im neuen Workflow nich
 
   releaseReplyResponse?.();
 });
+
+test("Offer-Generierung ist während einer laufenden Kundenantwort-Auswertung nicht ausführbar", async ({ page }) => {
+  await fillAndAnalyze(page);
+
+  let releaseReplyResponse;
+  await page.route("**/api/analyze-inquiry", async (route) => {
+    await new Promise((resolve) => {
+      releaseReplyResponse = resolve;
+    });
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ analysis: updatedAfterFirstReplyFixture }),
+    });
+  });
+
+  let generateOfferCalled = false;
+  await page.route("**/api/generate-offer", async (route) => {
+    generateOfferCalled = true;
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ offer: inboxOfferFixture }),
+    });
+  });
+
+  const panel = await openReplyPanel(page);
+  await panel.getByLabel("Antwort des Kunden").fill("Der Wunschtermin ist Ende des Monats.");
+  await panel.getByRole("button", { name: "Antwort auswerten" }).click();
+  await expect(
+    panel.getByRole("button", { name: "Antwort wird ausgewertet …" }),
+  ).toBeDisabled();
+
+  const offerButton = page.getByRole("button", { name: "Angebotsentwurf erstellen" });
+  await expect(offerButton).toBeDisabled();
+  await offerButton.click({ force: true });
+  expect(generateOfferCalled).toBe(false);
+
+  releaseReplyResponse();
+  await expect(panel).toHaveCount(0);
+
+  await expect(offerButton).toBeEnabled();
+  const offerRequestPromise = page.waitForRequest("**/api/generate-offer");
+  await offerButton.click();
+  await offerRequestPromise;
+  expect(generateOfferCalled).toBe(true);
+  await expect(
+    page.getByText("Angebotsentwurf Familie Schneider", { exact: true }),
+  ).toBeVisible();
+});
+
+test("nach einem fehlgeschlagenen Reply ist die Offer-Generierung wieder nutzbar", async ({ page }) => {
+  await fillAndAnalyze(page);
+
+  await page.route("**/api/analyze-inquiry", async (route) => {
+    await route.fulfill({
+      status: 500,
+      contentType: "application/json",
+      body: JSON.stringify({ error: "Auswertung vorübergehend nicht möglich." }),
+    });
+  });
+
+  const panel = await openReplyPanel(page);
+  await panel.getByLabel("Antwort des Kunden").fill("Der Wunschtermin ist Ende des Monats.");
+  await panel.getByRole("button", { name: "Antwort auswerten" }).click();
+  await expect(panel.getByText("Auswertung vorübergehend nicht möglich.")).toBeVisible();
+
+  const offerButton = page.getByRole("button", { name: "Angebotsentwurf erstellen" });
+  await expect(offerButton).toBeEnabled();
+  await offerButton.click();
+  await expect(
+    page.getByText("Angebotsentwurf Familie Schneider", { exact: true }),
+  ).toBeVisible();
+});

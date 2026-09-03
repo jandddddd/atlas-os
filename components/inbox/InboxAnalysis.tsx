@@ -221,6 +221,7 @@ export function InboxAnalysis() {
 
   async function generateOffer() {
     if (!analysis || analysisSource !== "current" || !analysisInquiry) return;
+    if (isSubmittingCustomerReply) return;
 
     const currentWorkflowVersion = workflowVersion.current;
     const offerAnalysis = {
@@ -535,6 +536,7 @@ export function InboxAnalysis() {
           hasClarificationDraft={clarification !== null}
           isCustomerReplyBlocked={!analysis.workflowId || inquiryContext === null}
           isCustomerReplyPanelOpen={isCustomerReplyPanelOpen}
+          isCustomerReplySubmitting={isSubmittingCustomerReply}
           isTodayHandoffAvailable={analysisSource === "current" && !isEditingOffer}
           offerStatus={offerStatus}
           onGenerateOffer={generateOffer}
@@ -573,7 +575,8 @@ export function InboxAnalysis() {
             <button
               type="button"
               onClick={generateOffer}
-              className="mt-4 rounded-xl bg-red-900 px-5 py-2.5 text-sm font-medium text-white"
+              disabled={isSubmittingCustomerReply}
+              className="mt-4 rounded-xl bg-red-900 px-5 py-2.5 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-50"
             >
               Erneut versuchen
             </button>
