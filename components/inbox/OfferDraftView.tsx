@@ -1,8 +1,11 @@
-import { useEffect, useRef } from "react";
-import { Plus } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { Copy, Plus } from "lucide-react";
 
+import { formatOfferDraftForCopy } from "@/lib/inbox/offer-copy-text";
 import { OfferPositionRow } from "./OfferPositionRow";
 import type { OfferDraft, OfferPosition } from "./types";
+
+const COPY_STATUS_RESET_DELAY_MS = 2500;
 
 type OfferDraftViewProps = {
   editableOffer: OfferDraft;
@@ -12,6 +15,12 @@ type OfferDraftViewProps = {
   statusLabel?: string;
   statusTone?: "pending" | "reviewed";
   needsReview?: boolean;
+  /**
+   * Whether this offer has passed human review and may be copied out of
+   * Atlas. Must reflect the actual review status the caller already knows
+   * (e.g. an Offer Workspace entry's `reviewed` status), not a visual tone.
+   */
+  canCopy?: boolean;
   onChange: (offer: OfferDraft) => void;
   onStartEditing: () => void;
   onSave: () => void;
@@ -26,12 +35,42 @@ export function OfferDraftView({
   statusLabel = "Entwurf",
   statusTone = "pending",
   needsReview = false,
+  canCopy = false,
   onChange,
   onStartEditing,
   onSave,
   onDiscard,
 }: OfferDraftViewProps) {
   const sectionRef = useRef<HTMLElement>(null);
+  const [copyStatus, setCopyStatus] = useState<"idle" | "copied" | "error">(
+    "idle",
+  );
+  const copyResetTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (copyResetTimeout.current) {
+        clearTimeout(copyResetTimeout.current);
+      }
+    };
+  }, []);
+
+  async function copyOfferText() {
+    try {
+      await navigator.clipboard.writeText(formatOfferDraftForCopy(editableOffer));
+      setCopyStatus("copied");
+    } catch {
+      setCopyStatus("error");
+    }
+
+    if (copyResetTimeout.current) {
+      clearTimeout(copyResetTimeout.current);
+    }
+    copyResetTimeout.current = setTimeout(
+      () => setCopyStatus("idle"),
+      COPY_STATUS_RESET_DELAY_MS,
+    );
+  }
 
   useEffect(() => {
     if (window.location.hash !== "#offer-draft") return;
@@ -119,14 +158,39 @@ export function OfferDraftView({
                   Änderungen verwerfen
                 </button>
               </div>
-            ) : canEdit ? (
-              <button
-                type="button"
-                onClick={onStartEditing}
-                className="rounded-lg border px-4 py-2 text-sm font-medium transition hover:bg-neutral-50"
-              >
-                Entwurf bearbeiten
-              </button>
+            ) : (
+              <div className="flex flex-wrap gap-3">
+                {canEdit ? (
+                  <button
+                    type="button"
+                    onClick={onStartEditing}
+                    className="rounded-lg border px-4 py-2 text-sm font-medium transition hover:bg-neutral-50"
+                  >
+                    Entwurf bearbeiten
+                  </button>
+                ) : null}
+
+                {canCopy ? (
+                  <button
+                    type="button"
+                    onClick={() => void copyOfferText()}
+                    className="inline-flex items-center gap-2 rounded-lg border px-4 py-2 text-sm font-medium transition hover:bg-neutral-50"
+                  >
+                    <Copy className="h-4 w-4" />
+                    Angebotstext kopieren
+                  </button>
+                ) : null}
+              </div>
+            )}
+
+            {canCopy && !isEditing ? (
+              <p role="status" aria-live="polite" className="mt-3 text-sm text-neutral-600">
+                {copyStatus === "copied"
+                  ? "Angebotstext kopiert"
+                  : copyStatus === "error"
+                    ? "Kopieren war nicht möglich."
+                    : ""}
+              </p>
             ) : null}
 
             {lastSavedAt && !isEditing && (

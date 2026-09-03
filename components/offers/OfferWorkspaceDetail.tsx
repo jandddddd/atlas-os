@@ -109,6 +109,7 @@ export function OfferWorkspaceDetail({ offerId }: OfferWorkspaceDetailProps) {
           canEdit={!isCurrentWorkflow}
           statusLabel={statusLabels[entry.status]}
           statusTone={entry.status === "reviewed" ? "reviewed" : "pending"}
+          canCopy={entry.status === "reviewed"}
           onChange={setEditableOffer}
           onStartEditing={() => setIsEditing(true)}
           onSave={saveChanges}

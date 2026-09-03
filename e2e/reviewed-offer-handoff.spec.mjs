@@ -39,6 +39,20 @@ const inboxOfferFixture = {
   status: "draft",
 };
 
+async function stubClipboard(page) {
+  await page.addInitScript(() => {
+    window.__copiedText = null;
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: {
+        writeText: async (text) => {
+          window.__copiedText = text;
+        },
+      },
+    });
+  });
+}
+
 async function fillAndAnalyze(page) {
   await page.goto("/inbox");
   await page.getByLabel("Kunde oder Kontakt").fill("Familie Berger");
@@ -77,6 +91,7 @@ async function generateOfferAndAssertPayload(page) {
 
 test.beforeEach(async ({ context, page }) => {
   await context.clearCookies();
+  await stubClipboard(page);
   await page.route("**/api/analyze-inquiry", async (route) => {
     await route.fulfill({
       status: 200,
@@ -519,6 +534,124 @@ test("a fresh automatic offer generation stays review-pending, and a normal manu
   expect(
     workspace.offers.find((entry) => entry.workflowId === analysis.workflowId).status,
   ).toBe("review-pending");
+});
+
+test("ein geprüfter Offer-Workspace-Eintrag bietet Angebotstext kopieren an", async ({ page }) => {
+  await page.goto("/offers/historical-workflow");
+  await page.evaluate((offer) => {
+    window.localStorage.setItem("atlas-offer-workspace", JSON.stringify({
+      version: 1,
+      offers: [{
+        id: "historical-workflow",
+        workflowId: "historical-workflow",
+        offer,
+        status: "reviewed",
+        updatedAt: "2026-08-17T12:00:00.000Z",
+      }],
+    }));
+  }, inboxOfferFixture);
+  await page.reload();
+
+  await expect(page.getByRole("button", { name: "Angebotstext kopieren" })).toBeVisible();
+});
+
+test("ein review-pending Offer-Workspace-Eintrag bietet Angebotstext kopieren nicht an", async ({ page }) => {
+  await page.goto("/offers/historical-workflow");
+  await page.evaluate((offer) => {
+    window.localStorage.setItem("atlas-offer-workspace", JSON.stringify({
+      version: 1,
+      offers: [{
+        id: "historical-workflow",
+        workflowId: "historical-workflow",
+        offer,
+        status: "review-pending",
+        updatedAt: "2026-08-17T12:00:00.000Z",
+      }],
+    }));
+  }, inboxOfferFixture);
+  await page.reload();
+
+  await expect(page.getByRole("button", { name: "Angebotstext kopieren" })).toHaveCount(0);
+});
+
+test("Angebotstext kopieren kopiert den Text, bestätigt dies und lässt den Review-Status unverändert", async ({ page }) => {
+  await page.goto("/offers/historical-workflow");
+  await page.evaluate((offer) => {
+    window.localStorage.setItem("atlas-offer-workspace", JSON.stringify({
+      version: 1,
+      offers: [{
+        id: "historical-workflow",
+        workflowId: "historical-workflow",
+        offer,
+        status: "reviewed",
+        updatedAt: "2026-08-17T12:00:00.000Z",
+      }],
+    }));
+  }, inboxOfferFixture);
+  await page.reload();
+
+  const beforeWorkspace = await page.evaluate(() =>
+    window.localStorage.getItem("atlas-offer-workspace"),
+  );
+
+  await page.getByRole("button", { name: "Angebotstext kopieren" }).click();
+  await expect(page.getByText("Angebotstext kopiert")).toBeVisible();
+
+  const copiedText = await page.evaluate(() => window.__copiedText);
+  expect(copiedText).toContain("Angebotsentwurf Familie Schneider");
+  expect(copiedText).toContain("Kunde: Unbekannt");
+  expect(copiedText).not.toContain("Bild- und Maßmaterial anfordern");
+  expect(copiedText).not.toContain("genaue Raummaße");
+
+  const afterWorkspace = await page.evaluate(() =>
+    window.localStorage.getItem("atlas-offer-workspace"),
+  );
+  expect(afterWorkspace).toBe(beforeWorkspace);
+  await expect(page.getByText("Geprüft", { exact: true })).toBeVisible();
+});
+
+test("Angebotstext kopieren wird erst nach einem abgeschlossenen Re-Review nach einer Kundenantwort wieder verfügbar", async ({ page }) => {
+  await fillAndAnalyze(page);
+  await generateOfferAndAssertPayload(page);
+  await openInboxDecision(page);
+  await page.getByRole("button", { name: "Als geprüft vormerken" }).click();
+  await expect(page.getByRole("region", { name: "Aktueller Abschluss" })).toBeVisible();
+
+  const analysis = await page.evaluate(() =>
+    JSON.parse(window.localStorage.getItem("atlas-inquiry-analysis")),
+  );
+
+  await page.goto("/inbox");
+  await expect(page.getByRole("heading", { name: "Analyse abgeschlossen" })).toBeVisible();
+  await page.route("**/api/analyze-inquiry", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        analysis: { ...inboxAnalysisFixture, missingInformation: [] },
+      }),
+    });
+  });
+  await page.getByRole("button", { name: "Kundenantwort ergänzen" }).click();
+  const panel = page.getByLabel("Kundenantwort ergänzen");
+  await panel.getByLabel("Antwort des Kunden").fill("Der Wunschtermin ist Ende des Monats.");
+  await panel.getByRole("button", { name: "Antwort auswerten" }).click();
+  await expect(panel).toHaveCount(0);
+
+  await page.goto(`/offers/${analysis.workflowId}`);
+  await expect(page.getByText("Prüfung offen", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Angebotstext kopieren" })).toHaveCount(0);
+
+  await page.goto("/inbox");
+  await expect(
+    page.getByText("Neue Kundeninformationen wurden ergänzt. Bitte prüfe den Angebotsentwurf erneut."),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Entwurf bearbeiten" }).click();
+  await page.getByRole("button", { name: "Änderungen übernehmen" }).click();
+
+  await page.goto(`/offers/${analysis.workflowId}`);
+  await expect(page.getByText("Geprüft", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Angebotstext kopieren" })).toBeVisible();
 });
 
 test("offer workspace migrates the valid bound draft from before Sprint 4a", async ({ page }) => {
