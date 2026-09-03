@@ -259,10 +259,10 @@ function loadClarificationDraft(): ClarificationDraft | null {
   return loadStoredValue(CLARIFICATION_DRAFT_KEY, isClarificationDraft);
 }
 
-export function loadClarificationDraftForAnalysis(
-  analysis: AnalysisResult,
+export function loadClarificationDraftForWorkflowId(
+  workflowId: string | undefined,
 ): ClarificationDraft | null {
-  if (!analysis.workflowId) return null;
+  if (!workflowId) return null;
 
   const draft = loadClarificationDraft();
   const binding = loadStoredValue(
@@ -271,7 +271,13 @@ export function loadClarificationDraftForAnalysis(
   );
   if (!draft || !binding) return null;
 
-  return binding.workflowId === analysis.workflowId ? draft : null;
+  return binding.workflowId === workflowId ? draft : null;
+}
+
+export function loadClarificationDraftForAnalysis(
+  analysis: AnalysisResult,
+): ClarificationDraft | null {
+  return loadClarificationDraftForWorkflowId(analysis.workflowId);
 }
 
 export function saveClarificationDraft(

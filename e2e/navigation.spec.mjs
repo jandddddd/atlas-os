@@ -194,6 +194,133 @@ test("Inbox und Today bilden einen beidseitigen Prüfpfad für die vorbereitete 
   await expect(page.getByRole("link", { name: "In Heute weiterprüfen" })).toHaveCount(0);
 });
 
+test("Today zeigt einen Hinweis, wenn für die Anfrage bereits eine Rückfrage vorbereitet wurde", async ({ page }) => {
+  const inboxDecisionTitle = "Angebotsentwurf Familie Schneider vorbereiten";
+
+  await page.goto("/inbox");
+  await fillInboxInquiry(page);
+  await page.getByRole("button", { name: "Anfrage analysieren" }).click();
+  await expect(page.getByRole("heading", { name: "Analyse abgeschlossen" })).toBeVisible();
+  await page.getByRole("button", { name: "Rückfrage vorbereiten" }).click();
+  await expect(page.getByRole("region", { name: "Rückfrageentwurf" })).toBeVisible();
+
+  await page.getByRole("link", { name: "In Heute weiterprüfen" }).click();
+  await expect(page).toHaveURL("/today");
+  await page.getByRole("button", { name: inboxDecisionTitle }).click();
+  await expect(page.getByRole("heading", { name: inboxDecisionTitle })).toBeVisible();
+
+  await expect(
+    page.getByText("Für diese Anfrage ist bereits eine Rückfrage vorbereitet."),
+  ).toBeVisible();
+});
+
+test("der Rückfrage-Hinweis verschwindet sofort, wenn nach dem Verschieben eine andere Decision Priorität wird", async ({ page }) => {
+  const inboxDecisionTitle = "Angebotsentwurf Familie Schneider vorbereiten";
+
+  await page.goto("/inbox");
+  await fillInboxInquiry(page);
+  await page.getByRole("button", { name: "Anfrage analysieren" }).click();
+  await expect(page.getByRole("heading", { name: "Analyse abgeschlossen" })).toBeVisible();
+  await page.getByRole("button", { name: "Rückfrage vorbereiten" }).click();
+  await expect(page.getByRole("region", { name: "Rückfrageentwurf" })).toBeVisible();
+
+  await page.getByRole("link", { name: "In Heute weiterprüfen" }).click();
+  await expect(page).toHaveURL("/today");
+  await page.getByRole("button", { name: inboxDecisionTitle }).click();
+  await expect(page.getByRole("heading", { name: inboxDecisionTitle })).toBeVisible();
+  await expect(
+    page.getByText("Für diese Anfrage ist bereits eine Rückfrage vorbereitet."),
+  ).toBeVisible();
+
+  // Freeze future animation frames so the note can no longer rely on the
+  // deferred localStorage read (scheduled via requestAnimationFrame) ever
+  // completing again; it must already be correct synchronously once the
+  // priority decision itself switches to an unrelated one.
+  await page.evaluate(() => {
+    window.requestAnimationFrame = () => 0;
+  });
+  await page.getByRole("button", { name: "Später entscheiden" }).click();
+  const priorityHeading = currentPriorityDecisionHeading(page);
+  await expect(priorityHeading).toBeVisible();
+  await expect(priorityHeading).not.toHaveText(inboxDecisionTitle);
+  await expect(
+    page.getByText("Für diese Anfrage ist bereits eine Rückfrage vorbereitet."),
+  ).toHaveCount(0);
+});
+
+test("Today zeigt keinen Rückfrage-Hinweis ohne vorbereiteten Rückfrageentwurf", async ({ page }) => {
+  const inboxDecisionTitle = "Angebotsentwurf Familie Schneider vorbereiten";
+
+  await page.goto("/inbox");
+  await fillInboxInquiry(page);
+  await page.getByRole("button", { name: "Anfrage analysieren" }).click();
+  await expect(page.getByRole("heading", { name: "Analyse abgeschlossen" })).toBeVisible();
+
+  await page.getByRole("link", { name: "In Heute weiterprüfen" }).click();
+  await expect(page).toHaveURL("/today");
+  await page.getByRole("button", { name: inboxDecisionTitle }).click();
+  await expect(page.getByRole("heading", { name: inboxDecisionTitle })).toBeVisible();
+
+  await expect(
+    page.getByText("Für diese Anfrage ist bereits eine Rückfrage vorbereitet."),
+  ).toHaveCount(0);
+});
+
+test("Today zeigt den Hinweis nicht für einen Rückfrageentwurf einer fremden workflowId", async ({ page }) => {
+  const inboxDecisionTitle = "Angebotsentwurf Familie Schneider vorbereiten";
+
+  await page.goto("/inbox");
+  await fillInboxInquiry(page);
+  await page.getByRole("button", { name: "Anfrage analysieren" }).click();
+  await expect(page.getByRole("heading", { name: "Analyse abgeschlossen" })).toBeVisible();
+
+  await page.evaluate(() => {
+    window.localStorage.setItem("atlas-clarification-draft", JSON.stringify({
+      customerName: "Fremde Anfrage",
+      subject: "Rückfrage zu einer anderen Anfrage",
+      message: "Sehr geehrte Damen und Herren,\n\n...",
+      missingInformation: ["Andere Angabe"],
+      status: "draft",
+    }));
+    window.localStorage.setItem("atlas-clarification-draft-analysis-binding", JSON.stringify({
+      version: 1,
+      workflowId: "foreign-workflow-id",
+    }));
+  });
+
+  await page.getByRole("link", { name: "In Heute weiterprüfen" }).click();
+  await expect(page).toHaveURL("/today");
+  await page.getByRole("button", { name: inboxDecisionTitle }).click();
+  await expect(page.getByRole("heading", { name: inboxDecisionTitle })).toBeVisible();
+
+  await expect(
+    page.getByText("Für diese Anfrage ist bereits eine Rückfrage vorbereitet."),
+  ).toHaveCount(0);
+});
+
+test("eine statische Today-Entscheidung ohne workflowId zeigt nie einen Rückfrage-Hinweis", async ({ page }) => {
+  await page.goto("/today");
+  await page.evaluate(() => {
+    window.localStorage.setItem("atlas-clarification-draft", JSON.stringify({
+      customerName: "Irgendein Kunde",
+      subject: "Irgendeine Rückfrage",
+      message: "Sehr geehrte Damen und Herren,\n\n...",
+      missingInformation: ["Irgendeine Angabe"],
+      status: "draft",
+    }));
+    window.localStorage.setItem("atlas-clarification-draft-analysis-binding", JSON.stringify({
+      version: 1,
+      workflowId: "irgendein-workflow",
+    }));
+  });
+  await page.reload();
+
+  await expect(page.getByRole("heading", { name: "Heute zuerst" })).toBeVisible();
+  await expect(
+    page.getByText("Für diese Anfrage ist bereits eine Rückfrage vorbereitet."),
+  ).toHaveCount(0);
+});
+
 test("Inbox-Prüfvormerkung bleibt auch während der Verarbeitung klar benannt", async ({ page }) => {
   await page.goto("/inbox");
   await fillInboxInquiry(page);

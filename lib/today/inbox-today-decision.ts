@@ -52,6 +52,7 @@ export function createInboxTodayDecision(
   return {
     id: inboxTodayDecisionId,
     decisionRevision: computeInboxTodayDecisionRevision(analysis),
+    workflowId: analysis.workflowId,
     urgency: priorityByWorkflowPriority[analysis.workflow.priority],
     economicImpact: isOffer ? "high" : "medium",
     decisionType: isOffer ? "Angebot" : "Nächster Schritt",

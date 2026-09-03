@@ -34,6 +34,12 @@ export type ApprovalCardProps = {
     description: string;
     nextStep: string;
   };
+  /**
+   * Short, factual note shown alongside the uncertainty context. Must only
+   * describe what Atlas actually knows was prepared/stored, never a
+   * communication or delivery status Atlas cannot verify.
+   */
+  clarificationNote?: string;
   consequence: string;
   primaryAction: ApprovalCardAction;
   secondaryActions: ApprovalCardAction[];
@@ -122,6 +128,7 @@ export function ApprovalCard({
   reviewContext,
   priority,
   uncertainty,
+  clarificationNote,
   consequence,
   primaryAction,
   secondaryActions,
@@ -257,6 +264,12 @@ export function ApprovalCard({
                     {uncertainty.nextStep}
                   </p>
                 </section>
+              ) : null}
+
+              {clarificationNote ? (
+                <p role="status" className="text-sm leading-6 text-neutral-600">
+                  {clarificationNote}
+                </p>
               ) : null}
 
               <section aria-labelledby="atlas-consequence" className="border-t border-neutral-200 pt-4 space-y-2">
