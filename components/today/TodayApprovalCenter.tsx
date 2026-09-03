@@ -126,18 +126,27 @@ export function TodayApprovalCenter({
   const [submissionError, setSubmissionError] = useState<SubmissionErrorStatus>(null);
   const [isSubmittingPriorityDecision, setIsSubmittingPriorityDecision] = useState(false);
   const priorityDecisionSubmissionInProgress = useRef(false);
-  const [hasClarificationDraftForPriorityDecision, setHasClarificationDraftForPriorityDecision] =
-    useState(false);
+  const [clarificationDraftWorkflowId, setClarificationDraftWorkflowId] = useState<
+    string | null
+  >(null);
 
   const [priorityDecisionId, ...overviewDecisionIds] = visibleDecisionIds;
   const priorityDecision = priorityDecisionId
     ? decisionById.get(priorityDecisionId) ?? null
     : null;
+  // Gate the note on the workflow ID actually being rendered right now, not
+  // just on the last localStorage read: the read only resolves in a later
+  // animation frame, but the priority decision itself can already change to
+  // an unrelated one within the same render (e.g. after an approve/postpone).
+  const hasClarificationDraftForPriorityDecision =
+    priorityDecision?.workflowId !== undefined &&
+    priorityDecision.workflowId === clarificationDraftWorkflowId;
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => {
-      setHasClarificationDraftForPriorityDecision(
-        Boolean(loadClarificationDraftForWorkflowId(priorityDecision?.workflowId)),
+      const workflowId = priorityDecision?.workflowId;
+      setClarificationDraftWorkflowId(
+        workflowId && loadClarificationDraftForWorkflowId(workflowId) ? workflowId : null,
       );
     });
 
