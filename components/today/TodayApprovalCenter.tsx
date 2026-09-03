@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { submitTodayDecision } from "@/app/today/actions";
 import { ApprovalCard, type ApprovalCardProps } from "@/components/today/ApprovalCard";
@@ -10,6 +10,7 @@ import { TodayCompletionNotice } from "@/components/today/TodayCompletionNotice"
 import { TodayEmptyState } from "@/components/today/TodayEmptyState";
 import { TodayHeader } from "@/components/today/TodayHeader";
 import {
+  loadClarificationDraftForWorkflowId,
   loadInquiryAnalysis,
   loadOfferDraftForAnalysis,
   markOfferWorkspaceReviewed,
@@ -29,7 +30,10 @@ type CompletionAction = {
   workflowId?: string;
 };
 
-type TodayApprovalDecision = Omit<ApprovalCardProps, "primaryAction" | "secondaryActions" | "details" | "notice"> & TodayDecisionPriorityFactors & {
+const CLARIFICATION_PREPARED_NOTE =
+  "Für diese Anfrage ist bereits eine Rückfrage vorbereitet.";
+
+type TodayApprovalDecision = Omit<ApprovalCardProps, "primaryAction" | "secondaryActions" | "details" | "notice" | "clarificationNote"> & TodayDecisionPriorityFactors & {
   id: string;
   /**
    * Fingerprint of the decision's underlying data snapshot. Only decisions
@@ -38,6 +42,11 @@ type TodayApprovalDecision = Omit<ApprovalCardProps, "primaryAction" | "secondar
    * behave exactly as before.
    */
   decisionRevision?: string;
+  /**
+   * The workflow this decision is derived from, if any. Only the dynamic
+   * inbox decision sets this; static fixture decisions leave it undefined.
+   */
+  workflowId?: string;
   overviewTitle: string;
   overviewContext: string;
   overviewMeta: string;
@@ -117,11 +126,23 @@ export function TodayApprovalCenter({
   const [submissionError, setSubmissionError] = useState<SubmissionErrorStatus>(null);
   const [isSubmittingPriorityDecision, setIsSubmittingPriorityDecision] = useState(false);
   const priorityDecisionSubmissionInProgress = useRef(false);
+  const [hasClarificationDraftForPriorityDecision, setHasClarificationDraftForPriorityDecision] =
+    useState(false);
 
   const [priorityDecisionId, ...overviewDecisionIds] = visibleDecisionIds;
   const priorityDecision = priorityDecisionId
     ? decisionById.get(priorityDecisionId) ?? null
     : null;
+
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(() => {
+      setHasClarificationDraftForPriorityDecision(
+        Boolean(loadClarificationDraftForWorkflowId(priorityDecision?.workflowId)),
+      );
+    });
+
+    return () => window.cancelAnimationFrame(frame);
+  }, [priorityDecision?.workflowId]);
   const overviewDecisions = overviewDecisionIds
     .map((decisionId) => decisionById.get(decisionId))
     .filter((decision): decision is TodayApprovalDecision => Boolean(decision))
@@ -329,6 +350,11 @@ export function TodayApprovalCenter({
               id: `details-${priorityDecision.id}`,
               isVisible: expandedDetailsId === priorityDecision.id,
             }}
+            clarificationNote={
+              hasClarificationDraftForPriorityDecision
+                ? CLARIFICATION_PREPARED_NOTE
+                : undefined
+            }
             notice={
               editHintDecisionId === priorityDecision.id
                 ? { text: "Bearbeitungsansicht folgt." }
