@@ -72,6 +72,15 @@ async function readLocalStorageJson(page, key) {
   );
 }
 
+async function goToTodayAndApprove(page, decisionTitle) {
+  await page.getByRole("link", { name: "In Heute weiterprüfen" }).click();
+  await expect(page).toHaveURL("/today");
+  await page.getByRole("button", { name: decisionTitle }).click();
+  await expect(page.getByRole("heading", { name: decisionTitle })).toBeVisible();
+  await page.getByRole("button", { name: "Als geprüft vormerken" }).click();
+  await expect(page.getByRole("region", { name: "Aktueller Abschluss" })).toBeVisible();
+}
+
 test.beforeEach(async ({ page }) => {
   let analyzeCallCount = 0;
 
@@ -700,5 +709,739 @@ test("nach einem fehlgeschlagenen Reply ist die Offer-Generierung wieder nutzbar
   await offerButton.click();
   await expect(
     page.getByText("Angebotsentwurf Familie Schneider", { exact: true }),
+  ).toBeVisible();
+});
+
+test("Analyse erneut starten nutzt nach einem Today-Rundlauf weiterhin den kumulativen Kontext und dieselbe workflowId", async ({ page }) => {
+  await fillAndAnalyze(page);
+  const panel = await openReplyPanel(page);
+  await panel.getByLabel("Antwort des Kunden").fill("Der Wunschtermin ist Ende des Monats.");
+  await panel.getByRole("button", { name: "Antwort auswerten" }).click();
+  await expect(panel).toHaveCount(0);
+  await expect(page.getByText("Wunschtermin")).toBeVisible();
+
+  const workflowIdBefore = (await readLocalStorageJson(page, "atlas-inquiry-analysis")).workflowId;
+  const contextBefore = await readLocalStorageJson(page, "atlas-inquiry-context");
+  expect(workflowIdBefore).toBeTruthy();
+  expect(contextBefore.text).toContain("Der Wunschtermin ist Ende des Monats.");
+
+  await goToTodayAndApprove(page, inboxAnalysisFixture.recommendedTask.title);
+
+  await page.goto("/inbox");
+  await expect(page.getByRole("heading", { name: "Analyse abgeschlossen" })).toBeVisible();
+  await expect(
+    page.getByText("Diese Analyse wurde aus dem letzten Vorgang wiederhergestellt."),
+  ).toBeVisible();
+  const offerButton = page.getByRole("button", { name: "Angebotsentwurf erstellen" });
+  await expect(offerButton).toBeDisabled();
+
+  const requestPromise = page.waitForRequest("**/api/analyze-inquiry");
+  await page.getByRole("button", { name: "Analyse erneut starten" }).click();
+  const request = await requestPromise;
+  const payload = request.postDataJSON();
+
+  expect(payload.inquiry).toContain("Bitte unser Wohnzimmer streichen.");
+  expect(payload.inquiry).toContain("Neu eingegangene Kundenantwort:");
+  expect(payload.inquiry).toContain("Der Wunschtermin ist Ende des Monats.");
+
+  await expect(
+    page.getByText("Diese Analyse wurde aus dem letzten Vorgang wiederhergestellt."),
+  ).toHaveCount(0);
+  await expect(offerButton).toBeEnabled();
+
+  const analysisAfter = await readLocalStorageJson(page, "atlas-inquiry-analysis");
+  const contextAfter = await readLocalStorageJson(page, "atlas-inquiry-context");
+  expect(analysisAfter.workflowId).toBe(workflowIdBefore);
+  expect(contextAfter).toEqual(contextBefore);
+});
+
+test("ein Fehler bei der sicheren Reanalyse erhält Analysis, Kontext und workflowId", async ({ page }) => {
+  await fillAndAnalyze(page);
+  const panel = await openReplyPanel(page);
+  await panel.getByLabel("Antwort des Kunden").fill("Der Wunschtermin ist Ende des Monats.");
+  await panel.getByRole("button", { name: "Antwort auswerten" }).click();
+  await expect(panel).toHaveCount(0);
+
+  await goToTodayAndApprove(page, inboxAnalysisFixture.recommendedTask.title);
+  await page.goto("/inbox");
+  await expect(page.getByRole("heading", { name: "Analyse abgeschlossen" })).toBeVisible();
+
+  const analysisBefore = await readLocalStorageJson(page, "atlas-inquiry-analysis");
+  const contextBefore = await readLocalStorageJson(page, "atlas-inquiry-context");
+
+  await page.route("**/api/analyze-inquiry", async (route) => {
+    await route.fulfill({
+      status: 500,
+      contentType: "application/json",
+      body: JSON.stringify({ error: "Die Analyse ist vorübergehend nicht verfügbar." }),
+    });
+  });
+
+  await page.getByRole("button", { name: "Analyse erneut starten" }).click();
+  await expect(
+    page.getByText("Die Analyse ist vorübergehend nicht verfügbar."),
+  ).toBeVisible();
+
+  await expect(
+    page.getByText("Diese Analyse wurde aus dem letzten Vorgang wiederhergestellt."),
+  ).toBeVisible();
+  await expect(page.getByRole("button", { name: "Angebotsentwurf erstellen" })).toBeDisabled();
+
+  const analysisAfter = await readLocalStorageJson(page, "atlas-inquiry-analysis");
+  const contextAfter = await readLocalStorageJson(page, "atlas-inquiry-context");
+  expect(analysisAfter).toEqual(analysisBefore);
+  expect(contextAfter).toEqual(contextBefore);
+});
+
+test("Analyse erneut starten ohne gültigen gespeicherten Kontext zeigt eine sichere Meldung statt leerer Intake-Validierung", async ({ page }) => {
+  await page.addInitScript((analysis) => {
+    window.localStorage.setItem("atlas-inquiry-analysis", JSON.stringify(analysis));
+  }, inboxAnalysisFixture);
+  await page.goto("/inbox");
+
+  await expect(page.getByRole("heading", { name: "Analyse abgeschlossen" })).toBeVisible();
+  await expect(
+    page.getByText("Diese Analyse wurde aus dem letzten Vorgang wiederhergestellt."),
+  ).toBeVisible();
+
+  let analyzeRequested = false;
+  await page.route("**/api/analyze-inquiry", async (route) => {
+    analyzeRequested = true;
+    await route.continue();
+  });
+
+  await page.getByRole("button", { name: "Analyse erneut starten" }).click();
+
+  await expect(
+    page.getByText(
+      "Der gespeicherte Anfragekontext fehlt. Diese Analyse kann nicht sicher erneut ausgewertet werden.",
+    ),
+  ).toBeVisible();
+  expect(analyzeRequested).toBe(false);
+  await expect(page.getByLabel("Kundenanfrage")).toHaveValue("");
+  await expect(page.getByRole("heading", { name: "Analyse abgeschlossen" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Angebotsentwurf erstellen" })).toBeDisabled();
+});
+
+test("Analyse erneut starten bei einer aktuellen Analyse verwendet weiterhin das normale Intake-Verhalten", async ({ page }) => {
+  await fillAndAnalyze(page);
+  await expect(page.getByLabel("Kunde oder Kontakt")).toHaveValue("Familie Berger");
+
+  const workflowIdBefore = (await readLocalStorageJson(page, "atlas-inquiry-analysis")).workflowId;
+
+  const requestPromise = page.waitForRequest("**/api/analyze-inquiry");
+  await page.getByRole("button", { name: "Analyse erneut starten" }).click();
+  const request = await requestPromise;
+
+  expect(request.postDataJSON().inquiry).toContain("Familie Berger");
+  expect(request.postDataJSON().inquiry).not.toContain("Neu eingegangene Kundenantwort:");
+
+  await expect(page.getByRole("heading", { name: "Analyse abgeschlossen" })).toBeVisible();
+  const workflowIdAfter = (await readLocalStorageJson(page, "atlas-inquiry-analysis")).workflowId;
+  expect(workflowIdAfter).not.toBe(workflowIdBefore);
+});
+
+test("eine laufende sichere Reanalyse verhindert Reset, Kundenantwort und eine neue Intake-Analyse", async ({ page }) => {
+  await fillAndAnalyze(page);
+  const panel = await openReplyPanel(page);
+  await panel.getByLabel("Antwort des Kunden").fill("Der Wunschtermin ist Ende des Monats.");
+  await panel.getByRole("button", { name: "Antwort auswerten" }).click();
+  await expect(panel).toHaveCount(0);
+
+  await goToTodayAndApprove(page, inboxAnalysisFixture.recommendedTask.title);
+  await page.goto("/inbox");
+  await expect(page.getByRole("heading", { name: "Analyse abgeschlossen" })).toBeVisible();
+
+  let releaseReanalysisResponse;
+  await page.route("**/api/analyze-inquiry", async (route) => {
+    await new Promise((resolve) => {
+      releaseReanalysisResponse = resolve;
+    });
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ analysis: updatedAfterSecondReplyFixture }),
+    });
+  });
+
+  const restartButton = page.getByRole("button", { name: "Analyse erneut starten" });
+  await restartButton.click();
+  await expect(page.getByRole("button", { name: "Wird erneut ausgewertet …" })).toBeDisabled();
+
+  const resetButton = page.getByRole("button", { name: "Gespeicherten Vorgang zurücksetzen" });
+  await expect(resetButton).toBeDisabled();
+  const replyToggle = page.getByRole("button", { name: "Kundenantwort ergänzen" });
+  await expect(replyToggle).toBeDisabled();
+  const submitButton = page.getByRole("button", { name: "Anfrage analysieren" });
+  await expect(submitButton).toBeDisabled();
+
+  await resetButton.click({ force: true }).catch(() => {});
+  await replyToggle.click({ force: true }).catch(() => {});
+  await submitButton.click({ force: true }).catch(() => {});
+
+  await expect(page.getByRole("heading", { name: "Analyse abgeschlossen" })).toBeVisible();
+  await expect(page.getByLabel("Kundenantwort ergänzen")).toHaveCount(0);
+
+  releaseReanalysisResponse();
+  await expect(
+    page.getByText("Diese Analyse wurde aus dem letzten Vorgang wiederhergestellt."),
+  ).toHaveCount(0);
+});
+
+test("eine erfolgreiche restored Reanalyse entfernt einen bestehenden Rückfrageentwurf", async ({ page }) => {
+  await fillAndAnalyze(page);
+  await page.getByRole("button", { name: "Rückfrage vorbereiten" }).click();
+  await expect(page.getByLabel("Rückfrageentwurf")).toBeVisible();
+
+  await goToTodayAndApprove(page, inboxAnalysisFixture.recommendedTask.title);
+  await page.goto("/inbox");
+  await expect(page.getByRole("heading", { name: "Analyse abgeschlossen" })).toBeVisible();
+  await expect(page.getByLabel("Rückfrageentwurf")).toBeVisible();
+
+  const workflowIdBefore = (await readLocalStorageJson(page, "atlas-inquiry-analysis")).workflowId;
+  const contextBefore = await readLocalStorageJson(page, "atlas-inquiry-context");
+
+  await page.getByRole("button", { name: "Analyse erneut starten" }).click();
+  await expect(
+    page.getByText("Diese Analyse wurde aus dem letzten Vorgang wiederhergestellt."),
+  ).toHaveCount(0);
+
+  await expect(page.getByLabel("Rückfrageentwurf")).toHaveCount(0);
+  expect(await readLocalStorageJson(page, "atlas-clarification-draft")).toBeNull();
+  expect(
+    await readLocalStorageJson(page, "atlas-clarification-draft-analysis-binding"),
+  ).toBeNull();
+
+  const analysisAfter = await readLocalStorageJson(page, "atlas-inquiry-analysis");
+  const contextAfter = await readLocalStorageJson(page, "atlas-inquiry-context");
+  expect(analysisAfter.workflowId).toBe(workflowIdBefore);
+  expect(contextAfter).toEqual(contextBefore);
+});
+
+test("ein bereits geöffnetes Reply-Panel bleibt während einer restored Reanalyse sichtbar, aber nicht interaktiv", async ({ page }) => {
+  await fillAndAnalyze(page);
+  await goToTodayAndApprove(page, inboxAnalysisFixture.recommendedTask.title);
+  await page.goto("/inbox");
+  await expect(page.getByRole("heading", { name: "Analyse abgeschlossen" })).toBeVisible();
+
+  const panel = await openReplyPanel(page);
+  await panel.getByLabel("Antwort des Kunden").fill("Noch nicht abgeschickter Text.");
+
+  let releaseReanalysisResponse;
+  let mergeReplyRequested = false;
+  await page.route("**/api/analyze-inquiry", async (route) => {
+    if (route.request().postDataJSON()?.inquiry?.includes("Neu eingegangene Kundenantwort:")) {
+      mergeReplyRequested = true;
+    }
+    await new Promise((resolve) => {
+      releaseReanalysisResponse = resolve;
+    });
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ analysis: updatedAfterFirstReplyFixture }),
+    });
+  });
+
+  await page.getByRole("button", { name: "Analyse erneut starten" }).click();
+  await expect(
+    page.getByRole("button", { name: "Wird erneut ausgewertet …" }),
+  ).toBeDisabled();
+
+  await expect(panel).toBeVisible();
+  await expect(panel.getByLabel("Antwort des Kunden")).toBeDisabled();
+  await expect(panel.getByRole("button", { name: "Antwort auswerten" })).toBeDisabled();
+  await expect(panel.getByLabel("Antwort des Kunden")).toHaveValue(
+    "Noch nicht abgeschickter Text.",
+  );
+
+  // A genuinely disabled native button cannot dispatch a click even when
+  // forced, so this proves the submit path is truly blocked, not just
+  // visually discouraged.
+  await panel
+    .getByRole("button", { name: "Antwort auswerten" })
+    .click({ force: true })
+    .catch(() => {});
+  expect(mergeReplyRequested).toBe(false);
+
+  releaseReanalysisResponse();
+  await expect(
+    page.getByText("Diese Analyse wurde aus dem letzten Vorgang wiederhergestellt."),
+  ).toHaveCount(0);
+
+  await expect(panel).toBeVisible();
+  await expect(panel.getByLabel("Antwort des Kunden")).toBeEnabled();
+  await expect(panel.getByLabel("Antwort des Kunden")).toHaveValue(
+    "Noch nicht abgeschickter Text.",
+  );
+  await expect(panel.getByRole("button", { name: "Antwort auswerten" })).toBeEnabled();
+});
+
+test("ein nicht-JSON-Fehler bei der restored Reanalyse zeigt nur die kontrollierte Fallback-Meldung", async ({ page }) => {
+  await fillAndAnalyze(page);
+  await page.getByRole("button", { name: "Rückfrage vorbereiten" }).click();
+  await expect(page.getByLabel("Rückfrageentwurf")).toBeVisible();
+
+  await goToTodayAndApprove(page, inboxAnalysisFixture.recommendedTask.title);
+  await page.goto("/inbox");
+  await expect(page.getByRole("heading", { name: "Analyse abgeschlossen" })).toBeVisible();
+
+  const analysisBefore = await readLocalStorageJson(page, "atlas-inquiry-analysis");
+  const contextBefore = await readLocalStorageJson(page, "atlas-inquiry-context");
+
+  await page.route("**/api/analyze-inquiry", async (route) => {
+    await route.fulfill({
+      status: 502,
+      contentType: "text/html",
+      body: "<html>Bad Gateway</html>",
+    });
+  });
+
+  await page.getByRole("button", { name: "Analyse erneut starten" }).click();
+  await expect(
+    page.getByText("Die Analyse konnte nicht erneut ausgewertet werden."),
+  ).toBeVisible();
+  await expect(
+    page.getByText(/Unexpected token|JSON\.parse|Unexpected end of JSON/i),
+  ).toHaveCount(0);
+
+  await expect(
+    page.getByText("Diese Analyse wurde aus dem letzten Vorgang wiederhergestellt."),
+  ).toBeVisible();
+  await expect(page.getByLabel("Rückfrageentwurf")).toBeVisible();
+
+  const analysisAfter = await readLocalStorageJson(page, "atlas-inquiry-analysis");
+  const contextAfter = await readLocalStorageJson(page, "atlas-inquiry-context");
+  expect(analysisAfter).toEqual(analysisBefore);
+  expect(contextAfter).toEqual(contextBefore);
+});
+
+test("eine erfolgreiche restored Reanalyse setzt ein bereits geprüftes Angebot wieder auf Re-Review", async ({ page }) => {
+  await fillAndAnalyze(page);
+  await page.getByRole("button", { name: "Angebotsentwurf erstellen" }).click();
+  await expect(page.getByText("Angebotsentwurf Familie Schneider", { exact: true })).toBeVisible();
+
+  await goToTodayAndApprove(page, inboxAnalysisFixture.recommendedTask.title);
+  await page.goto("/inbox");
+  await expect(page.getByRole("heading", { name: "Analyse abgeschlossen" })).toBeVisible();
+
+  const workflowIdBefore = (await readLocalStorageJson(page, "atlas-inquiry-analysis")).workflowId;
+  const contextBefore = await readLocalStorageJson(page, "atlas-inquiry-context");
+  const offerBefore = await readLocalStorageJson(page, "atlas-editable-offer");
+  let workspace = await readLocalStorageJson(page, "atlas-offer-workspace");
+  expect(workspace.offers.find((entry) => entry.workflowId === workflowIdBefore).status).toBe(
+    "reviewed",
+  );
+
+  await page.getByRole("button", { name: "Analyse erneut starten" }).click();
+  await expect(
+    page.getByText("Diese Analyse wurde aus dem letzten Vorgang wiederhergestellt."),
+  ).toHaveCount(0);
+
+  await expect(
+    page.getByText("Neue Kundeninformationen wurden ergänzt. Bitte prüfe den Angebotsentwurf erneut."),
+  ).toBeVisible();
+  await expect(page.getByText("Angebotsentwurf Familie Schneider", { exact: true })).toBeVisible();
+
+  const analysisAfter = await readLocalStorageJson(page, "atlas-inquiry-analysis");
+  const contextAfter = await readLocalStorageJson(page, "atlas-inquiry-context");
+  const offerAfter = await readLocalStorageJson(page, "atlas-editable-offer");
+  const binding = await readLocalStorageJson(page, "atlas-editable-offer-analysis-binding");
+  workspace = await readLocalStorageJson(page, "atlas-offer-workspace");
+
+  expect(analysisAfter.workflowId).toBe(workflowIdBefore);
+  expect(contextAfter).toEqual(contextBefore);
+  expect(offerAfter).toEqual(offerBefore);
+  expect(binding.needsReview).toBe(true);
+  expect(workspace.offers.find((entry) => entry.workflowId === workflowIdBefore).status).toBe(
+    "review-pending",
+  );
+
+  await page.goto(`/offers/${workflowIdBefore}`);
+  await expect(page.getByText("Prüfung offen", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Angebotstext kopieren" })).toHaveCount(0);
+});
+
+test("eine fehlgeschlagene restored Reanalyse lässt ein bereits geprüftes Angebot vollständig reviewed", async ({ page }) => {
+  await fillAndAnalyze(page);
+  await page.getByRole("button", { name: "Angebotsentwurf erstellen" }).click();
+  await expect(page.getByText("Angebotsentwurf Familie Schneider", { exact: true })).toBeVisible();
+
+  await goToTodayAndApprove(page, inboxAnalysisFixture.recommendedTask.title);
+  await page.goto("/inbox");
+  await expect(page.getByRole("heading", { name: "Analyse abgeschlossen" })).toBeVisible();
+
+  const workflowIdBefore = (await readLocalStorageJson(page, "atlas-inquiry-analysis")).workflowId;
+  const analysisBefore = await readLocalStorageJson(page, "atlas-inquiry-analysis");
+  const contextBefore = await readLocalStorageJson(page, "atlas-inquiry-context");
+  const offerBefore = await readLocalStorageJson(page, "atlas-editable-offer");
+  const workspaceBefore = await readLocalStorageJson(page, "atlas-offer-workspace");
+
+  await page.route("**/api/analyze-inquiry", async (route) => {
+    await route.fulfill({
+      status: 502,
+      contentType: "text/html",
+      body: "<html>Bad Gateway</html>",
+    });
+  });
+
+  await page.getByRole("button", { name: "Analyse erneut starten" }).click();
+  await expect(
+    page.getByText("Die Analyse konnte nicht erneut ausgewertet werden."),
+  ).toBeVisible();
+
+  await expect(
+    page.getByText("Neue Kundeninformationen wurden ergänzt. Bitte prüfe den Angebotsentwurf erneut."),
+  ).toHaveCount(0);
+
+  const analysisAfter = await readLocalStorageJson(page, "atlas-inquiry-analysis");
+  const contextAfter = await readLocalStorageJson(page, "atlas-inquiry-context");
+  const offerAfter = await readLocalStorageJson(page, "atlas-editable-offer");
+  const bindingAfter = await readLocalStorageJson(page, "atlas-editable-offer-analysis-binding");
+  const workspaceAfter = await readLocalStorageJson(page, "atlas-offer-workspace");
+
+  expect(analysisAfter).toEqual(analysisBefore);
+  expect(contextAfter).toEqual(contextBefore);
+  expect(offerAfter).toEqual(offerBefore);
+  expect(bindingAfter?.needsReview).not.toBe(true);
+  expect(workspaceAfter).toEqual(workspaceBefore);
+
+  await page.goto(`/offers/${workflowIdBefore}`);
+  await expect(page.getByText("Geprüft", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Angebotstext kopieren" })).toBeVisible();
+});
+
+test("ein zweiter Klick auf Analyse erneut starten nach erfolgreicher restored Reanalyse verwendet weiterhin den persistierten Kontext", async ({ page }) => {
+  await fillAndAnalyze(page);
+  await goToTodayAndApprove(page, inboxAnalysisFixture.recommendedTask.title);
+  await page.goto("/inbox");
+  await expect(page.getByRole("heading", { name: "Analyse abgeschlossen" })).toBeVisible();
+
+  const workflowIdBefore = (await readLocalStorageJson(page, "atlas-inquiry-analysis")).workflowId;
+  const contextBefore = await readLocalStorageJson(page, "atlas-inquiry-context");
+
+  const firstRequestPromise = page.waitForRequest("**/api/analyze-inquiry");
+  await page.getByRole("button", { name: "Analyse erneut starten" }).click();
+  const firstRequest = await firstRequestPromise;
+  expect(firstRequest.postDataJSON().inquiry).toBe(contextBefore.text);
+  await expect(
+    page.getByText("Diese Analyse wurde aus dem letzten Vorgang wiederhergestellt."),
+  ).toHaveCount(0);
+
+  const secondRequestPromise = page.waitForRequest("**/api/analyze-inquiry");
+  await page.getByRole("button", { name: "Analyse erneut starten" }).click();
+  const secondRequest = await secondRequestPromise;
+  expect(secondRequest.postDataJSON().inquiry).toBe(contextBefore.text);
+
+  await expect(
+    page.getByText("Bitte einen Kunden oder Kontakt angeben."),
+  ).toHaveCount(0);
+
+  const analysisAfter = await readLocalStorageJson(page, "atlas-inquiry-analysis");
+  const contextAfter = await readLocalStorageJson(page, "atlas-inquiry-context");
+  expect(analysisAfter.workflowId).toBe(workflowIdBefore);
+  expect(contextAfter).toEqual(contextBefore);
+});
+
+test("Analyse erneut starten nach einer Kundenantwort (ohne Navigation über Today) verwendet weiterhin den kumulativen Kontext", async ({ page }) => {
+  await fillAndAnalyze(page);
+  const panel = await openReplyPanel(page);
+  await panel.getByLabel("Antwort des Kunden").fill("Der Wunschtermin ist Ende des Monats.");
+  await panel.getByRole("button", { name: "Antwort auswerten" }).click();
+  await expect(panel).toHaveCount(0);
+  await expect(page.getByText("Wunschtermin")).toBeVisible();
+
+  const workflowIdBefore = (await readLocalStorageJson(page, "atlas-inquiry-analysis")).workflowId;
+  const contextBefore = await readLocalStorageJson(page, "atlas-inquiry-context");
+  expect(contextBefore.text).toContain("Bitte unser Wohnzimmer streichen.");
+  expect(contextBefore.text).toContain("Der Wunschtermin ist Ende des Monats.");
+
+  const requestPromise = page.waitForRequest("**/api/analyze-inquiry");
+  await page.getByRole("button", { name: "Analyse erneut starten" }).click();
+  const request = await requestPromise;
+  const payload = request.postDataJSON();
+
+  expect(payload.inquiry).toBe(contextBefore.text);
+  expect(payload.inquiry).toContain("Neu eingegangene Kundenantwort:");
+
+  const analysisAfter = await readLocalStorageJson(page, "atlas-inquiry-analysis");
+  expect(analysisAfter.workflowId).toBe(workflowIdBefore);
+});
+
+test("Rückfrage vorbereiten ist während einer laufenden persisted-context Reanalyse ohne vorhandenen Entwurf gesperrt und erzeugt keinen Entwurf", async ({ page }) => {
+  await fillAndAnalyze(page);
+  const panel = await openReplyPanel(page);
+  await panel.getByLabel("Antwort des Kunden").fill("Der Wunschtermin ist Ende des Monats.");
+  await panel.getByRole("button", { name: "Antwort auswerten" }).click();
+  await expect(panel).toHaveCount(0);
+  await expect(page.getByText("Wunschtermin")).toBeVisible();
+
+  const prepareButton = page.getByRole("button", { name: "Rückfrage vorbereiten" });
+  await expect(prepareButton).toBeEnabled();
+
+  let releaseReanalysisResponse;
+  await page.route("**/api/analyze-inquiry", async (route) => {
+    await new Promise((resolve) => {
+      releaseReanalysisResponse = resolve;
+    });
+    await route.fulfill({
+      status: 500,
+      contentType: "application/json",
+      body: JSON.stringify({ error: "Die Analyse ist vorübergehend nicht verfügbar." }),
+    });
+  });
+
+  await page.getByRole("button", { name: "Analyse erneut starten" }).click();
+  await expect(
+    page.getByRole("button", { name: "Wird erneut ausgewertet …" }),
+  ).toBeDisabled();
+
+  await expect(prepareButton).toBeDisabled();
+
+  // A genuinely disabled native button cannot dispatch a click even when
+  // forced, so this proves the draft-creation path is truly blocked, not
+  // just visually discouraged.
+  await prepareButton.click({ force: true }).catch(() => {});
+  await expect(page.getByLabel("Rückfrageentwurf")).toHaveCount(0);
+  expect(await readLocalStorageJson(page, "atlas-clarification-draft")).toBeNull();
+
+  releaseReanalysisResponse();
+  await expect(
+    page.getByText("Die Analyse ist vorübergehend nicht verfügbar."),
+  ).toBeVisible();
+
+  await expect(prepareButton).toBeEnabled();
+  await expect(page.getByLabel("Rückfrageentwurf")).toHaveCount(0);
+});
+
+test("ein bereits editierter, ungespeicherter Rückfrageentwurf blockiert Analyse erneut starten", async ({ page }) => {
+  await fillAndAnalyze(page);
+  await page.getByRole("button", { name: "Rückfrage vorbereiten" }).click();
+  const draft = page.getByLabel("Rückfrageentwurf");
+  await expect(draft).toBeVisible();
+
+  await draft.getByRole("button", { name: "Entwurf bearbeiten" }).click();
+  await draft.getByLabel("Nachricht").fill("Geänderter, noch nicht gespeicherter Text.");
+
+  let analyzeRequested = false;
+  await page.route("**/api/analyze-inquiry", async (route) => {
+    analyzeRequested = true;
+    await route.continue();
+  });
+
+  const restartButton = page.getByRole("button", { name: "Analyse erneut starten" });
+  await expect(restartButton).toBeDisabled();
+  await restartButton.click({ force: true }).catch(() => {});
+  expect(analyzeRequested).toBe(false);
+  await expect(draft.getByLabel("Nachricht")).toHaveValue(
+    "Geänderter, noch nicht gespeicherter Text.",
+  );
+
+  await draft.getByRole("button", { name: "Änderungen übernehmen" }).click();
+  await expect(restartButton).toBeEnabled();
+});
+
+test("ein vorhandener Rückfrageentwurf ist während einer laufenden restored Reanalyse nicht editierbar, Kopieren bleibt möglich", async ({ page }) => {
+  await fillAndAnalyze(page);
+  await page.getByRole("button", { name: "Rückfrage vorbereiten" }).click();
+  const draft = page.getByLabel("Rückfrageentwurf");
+  await expect(draft).toBeVisible();
+
+  await goToTodayAndApprove(page, inboxAnalysisFixture.recommendedTask.title);
+  await page.goto("/inbox");
+  await expect(page.getByRole("heading", { name: "Analyse abgeschlossen" })).toBeVisible();
+  await expect(draft).toBeVisible();
+
+  let releaseReanalysisResponse;
+  await page.route("**/api/analyze-inquiry", async (route) => {
+    await new Promise((resolve) => {
+      releaseReanalysisResponse = resolve;
+    });
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ analysis: updatedAfterFirstReplyFixture }),
+    });
+  });
+
+  await page.getByRole("button", { name: "Analyse erneut starten" }).click();
+  await expect(
+    page.getByRole("button", { name: "Wird erneut ausgewertet …" }),
+  ).toBeDisabled();
+
+  await expect(draft).toBeVisible();
+  await expect(draft.getByRole("button", { name: "Entwurf bearbeiten" })).toBeDisabled();
+  await expect(draft.getByRole("button", { name: "Nachricht kopieren" })).toBeEnabled();
+
+  releaseReanalysisResponse();
+  await expect(draft).toHaveCount(0);
+});
+
+test("nach fehlgeschlagener restored Reanalyse bleibt der Rückfrageentwurf unverändert und wieder editierbar", async ({ page }) => {
+  await fillAndAnalyze(page);
+  await page.getByRole("button", { name: "Rückfrage vorbereiten" }).click();
+  const draft = page.getByLabel("Rückfrageentwurf");
+  await expect(draft).toBeVisible();
+
+  await goToTodayAndApprove(page, inboxAnalysisFixture.recommendedTask.title);
+  await page.goto("/inbox");
+  await expect(page.getByRole("heading", { name: "Analyse abgeschlossen" })).toBeVisible();
+
+  const workflowIdBefore = (await readLocalStorageJson(page, "atlas-inquiry-analysis")).workflowId;
+  const contextBefore = await readLocalStorageJson(page, "atlas-inquiry-context");
+
+  await page.route("**/api/analyze-inquiry", async (route) => {
+    await route.fulfill({
+      status: 502,
+      contentType: "text/html",
+      body: "<html>Bad Gateway</html>",
+    });
+  });
+
+  await page.getByRole("button", { name: "Analyse erneut starten" }).click();
+  await expect(
+    page.getByText("Die Analyse konnte nicht erneut ausgewertet werden."),
+  ).toBeVisible();
+
+  await expect(draft).toBeVisible();
+  await expect(draft.getByRole("button", { name: "Entwurf bearbeiten" })).toBeEnabled();
+  await draft.getByRole("button", { name: "Entwurf bearbeiten" }).click();
+  await draft.getByLabel("Nachricht").fill("Weiterhin editierbar.");
+  await draft.getByRole("button", { name: "Änderungen übernehmen" }).click();
+  await expect(draft.getByText("Weiterhin editierbar.")).toBeVisible();
+
+  const analysisAfter = await readLocalStorageJson(page, "atlas-inquiry-analysis");
+  const contextAfter = await readLocalStorageJson(page, "atlas-inquiry-context");
+  expect(analysisAfter.workflowId).toBe(workflowIdBefore);
+  expect(contextAfter).toEqual(contextBefore);
+});
+
+test("Analyse erneut starten ist während einer laufenden Angebotserstellung gesperrt", async ({ page }) => {
+  await fillAndAnalyze(page);
+  await goToTodayAndApprove(page, inboxAnalysisFixture.recommendedTask.title);
+  await page.goto("/inbox");
+  await expect(page.getByRole("heading", { name: "Analyse abgeschlossen" })).toBeVisible();
+
+  // Bring the workflow to "current" via a successful restored reanalysis,
+  // so restartUsesPersistedContext is true and a later restart would again
+  // route through reanalyzePersistedInquiryContext().
+  const firstRestartRequestPromise = page.waitForRequest("**/api/analyze-inquiry");
+  await page.getByRole("button", { name: "Analyse erneut starten" }).click();
+  await firstRestartRequestPromise;
+  await expect(
+    page.getByText("Diese Analyse wurde aus dem letzten Vorgang wiederhergestellt."),
+  ).toHaveCount(0);
+
+  let releaseOfferResponse;
+  await page.route("**/api/generate-offer", async (route) => {
+    await new Promise((resolve) => {
+      releaseOfferResponse = resolve;
+    });
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ offer: inboxOfferFixture }),
+    });
+  });
+
+  await page.getByRole("button", { name: "Angebotsentwurf erstellen" }).click();
+  await expect(page.getByRole("button", { name: "Angebot wird erstellt ..." })).toBeVisible();
+
+  const restartButton = page.getByRole("button", { name: "Analyse erneut starten" });
+  await expect(restartButton).toBeDisabled();
+
+  let secondAnalyzeRequested = false;
+  await page.route("**/api/analyze-inquiry", async (route) => {
+    secondAnalyzeRequested = true;
+    await route.continue();
+  });
+  await restartButton.click({ force: true }).catch(() => {});
+  expect(secondAnalyzeRequested).toBe(false);
+
+  releaseOfferResponse();
+  await expect(page.getByRole("button", { name: "Angebot wird erstellt ..." })).toHaveCount(0);
+  await expect(page.getByText("Angebotsentwurf Familie Schneider", { exact: true })).toBeVisible();
+  await expect(restartButton).toBeEnabled();
+
+  // Restore a normal fulfilling mock (the route above only proved no
+  // request escaped while generation was in flight) before confirming the
+  // restart works normally again.
+  await page.route("**/api/analyze-inquiry", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ analysis: updatedAfterSecondReplyFixture }),
+    });
+  });
+
+  const finalRequestPromise = page.waitForRequest("**/api/analyze-inquiry");
+  await restartButton.click();
+  await finalRequestPromise;
+  await expect(
+    page.getByText("Diese Analyse wurde aus dem letzten Vorgang wiederhergestellt."),
+  ).toHaveCount(0);
+});
+
+test("Erneut versuchen (Angebot) ist während einer laufenden persisted-context Reanalyse gesperrt und löst keinen Request aus", async ({ page }) => {
+  await fillAndAnalyze(page);
+  const panel = await openReplyPanel(page);
+  await panel.getByLabel("Antwort des Kunden").fill("Der Wunschtermin ist Ende des Monats.");
+  await panel.getByRole("button", { name: "Antwort auswerten" }).click();
+  await expect(panel).toHaveCount(0);
+
+  let generateOfferCallCount = 0;
+  await page.route("**/api/generate-offer", async (route) => {
+    generateOfferCallCount += 1;
+    await route.fulfill({
+      status: 500,
+      contentType: "application/json",
+      body: JSON.stringify({
+        error: "Der Angebotsdienst ist vorübergehend nicht verfügbar.",
+      }),
+    });
+  });
+
+  await page.getByRole("button", { name: "Angebotsentwurf erstellen" }).click();
+  await expect(
+    page.getByText("Der Angebotsdienst ist vorübergehend nicht verfügbar."),
+  ).toBeVisible();
+  expect(generateOfferCallCount).toBe(1);
+
+  const retryButton = page.getByRole("button", { name: "Erneut versuchen" });
+  await expect(retryButton).toBeEnabled();
+
+  let releaseReanalysisResponse;
+  await page.route("**/api/analyze-inquiry", async (route) => {
+    await new Promise((resolve) => {
+      releaseReanalysisResponse = resolve;
+    });
+    await route.fulfill({
+      status: 500,
+      contentType: "application/json",
+      body: JSON.stringify({ error: "Die Analyse ist vorübergehend nicht verfügbar." }),
+    });
+  });
+
+  await page.getByRole("button", { name: "Analyse erneut starten" }).click();
+  await expect(
+    page.getByRole("button", { name: "Wird erneut ausgewertet …" }),
+  ).toBeDisabled();
+
+  await expect(retryButton).toBeDisabled();
+
+  // A genuinely disabled native button cannot dispatch a click even when
+  // forced, so this proves the retry path is truly blocked, not just
+  // visually discouraged.
+  await retryButton.click({ force: true }).catch(() => {});
+  expect(generateOfferCallCount).toBe(1);
+
+  releaseReanalysisResponse();
+  await expect(
+    page.getByText("Die Analyse ist vorübergehend nicht verfügbar."),
+  ).toBeVisible();
+
+  await expect(retryButton).toBeEnabled();
+  await expect(
+    page.getByText("Der Angebotsdienst ist vorübergehend nicht verfügbar."),
   ).toBeVisible();
 });

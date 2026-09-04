@@ -19,6 +19,15 @@ type AnalysisResultViewProps = {
   isCustomerReplyBlocked: boolean;
   isCustomerReplyPanelOpen: boolean;
   isCustomerReplySubmitting: boolean;
+  isReanalyzingPersistedContext: boolean;
+  reanalysisError: string;
+  /**
+   * Disables "Analyse erneut starten" without claiming anything else is in
+   * flight (unlike isReanalyzingPersistedContext, never swaps its label).
+   * Used to prevent starting any restart while an unsaved clarification
+   * edit is active, so that edit can never be silently discarded.
+   */
+  restartDisabled: boolean;
   isTodayHandoffAvailable: boolean;
   offerStatus: OfferStatus;
   onGenerateOffer: () => void;
@@ -35,6 +44,9 @@ export function AnalysisResultView({
   isCustomerReplyBlocked,
   isCustomerReplyPanelOpen,
   isCustomerReplySubmitting,
+  isReanalyzingPersistedContext,
+  reanalysisError,
+  restartDisabled,
   isTodayHandoffAvailable,
   offerStatus,
   onGenerateOffer,
@@ -133,7 +145,10 @@ export function AnalysisResultView({
                 ? "restored-analysis-offer-warning"
                 : undefined
             }
-            disabled={isClarificationBlocked && !hasClarificationDraft}
+            disabled={
+              (isClarificationBlocked || isReanalyzingPersistedContext) &&
+              !hasClarificationDraft
+            }
             className="mt-4 inline-flex items-center gap-2 rounded-xl border border-neutral-300 bg-white px-4 py-2.5 text-sm font-medium text-neutral-800 transition hover:bg-neutral-100 disabled:cursor-not-allowed disabled:opacity-50"
           >
             <MessageSquareText className="h-4 w-4" />
@@ -154,6 +169,12 @@ export function AnalysisResultView({
         </p>
       ) : null}
 
+      {reanalysisError ? (
+        <p role="alert" className="mt-4 text-sm text-red-700">
+          {reanalysisError}
+        </p>
+      ) : null}
+
       <div className="mt-6 flex flex-wrap gap-3">
         <button
           type="button"
@@ -166,7 +187,8 @@ export function AnalysisResultView({
           disabled={
             isOfferGenerationBlocked ||
             offerStatus === "generating" ||
-            isCustomerReplySubmitting
+            isCustomerReplySubmitting ||
+            isReanalyzingPersistedContext
           }
           className="inline-flex items-center gap-2 rounded-xl bg-neutral-900 px-6 py-3 font-medium text-white transition hover:bg-neutral-700 disabled:cursor-not-allowed disabled:opacity-50"
         >
@@ -179,17 +201,27 @@ export function AnalysisResultView({
         <button
           type="button"
           onClick={onRestartAnalysis}
-          disabled={isCustomerReplySubmitting}
+          disabled={
+            isCustomerReplySubmitting ||
+            isReanalyzingPersistedContext ||
+            restartDisabled
+          }
           className="rounded-xl border border-emerald-300 bg-white px-6 py-3 font-medium transition hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-50"
         >
-          Analyse erneut starten
+          {isReanalyzingPersistedContext
+            ? "Wird erneut ausgewertet …"
+            : "Analyse erneut starten"}
         </button>
 
         <button
           type="button"
           onClick={onToggleCustomerReply}
           aria-expanded={isCustomerReplyPanelOpen}
-          disabled={isCustomerReplyBlocked || isCustomerReplySubmitting}
+          disabled={
+            isCustomerReplyBlocked ||
+            isCustomerReplySubmitting ||
+            isReanalyzingPersistedContext
+          }
           className="inline-flex items-center gap-2 rounded-xl border border-emerald-300 bg-white px-6 py-3 font-medium transition hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-50"
         >
           <Reply className="h-4 w-4" />

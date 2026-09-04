@@ -83,6 +83,16 @@ export function InboxAnalysis() {
   const [isCustomerReplyPanelOpen, setIsCustomerReplyPanelOpen] = useState(false);
   const [isSubmittingCustomerReply, setIsSubmittingCustomerReply] = useState(false);
   const [customerReplySubmitError, setCustomerReplySubmitError] = useState("");
+  const [isReanalyzingPersistedContext, setIsReanalyzingPersistedContext] =
+    useState(false);
+  const [reanalysisError, setReanalysisError] = useState("");
+  // True once the current "current" analysis originated from re-running a
+  // persisted, workflow-bound inquiryContext (via a restored reanalysis or a
+  // merged customer reply) rather than from the visible intake fields. A
+  // later "Analyse erneut starten" click must keep using that persisted
+  // context instead of falling back to the (unrelated/empty) intake form.
+  const [restartUsesPersistedContext, setRestartUsesPersistedContext] =
+    useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -138,7 +148,7 @@ export function InboxAnalysis() {
 
   async function startAnalysis(event?: FormEvent<HTMLFormElement>) {
     event?.preventDefault();
-    if (isSubmittingCustomerReply) return;
+    if (isSubmittingCustomerReply || isReanalyzingPersistedContext) return;
 
     const errors = validateInquiryIntake(intake);
 
@@ -157,6 +167,10 @@ export function InboxAnalysis() {
     setIsSubmittingCustomerReply(false);
     setIsCustomerReplyPanelOpen(false);
     setCustomerReplySubmitError("");
+    setReanalysisError("");
+    // A genuinely new intake-driven analysis starts an unrelated workflow;
+    // any earlier persisted-context provenance no longer applies to it.
+    setRestartUsesPersistedContext(false);
 
     try {
       setStatus("analyzing");
@@ -224,7 +238,7 @@ export function InboxAnalysis() {
 
   async function generateOffer() {
     if (!analysis || analysisSource !== "current" || !analysisInquiry) return;
-    if (isSubmittingCustomerReply) return;
+    if (isSubmittingCustomerReply || isReanalyzingPersistedContext) return;
 
     const currentWorkflowVersion = workflowVersion.current;
     const offerAnalysis = {
@@ -299,7 +313,7 @@ export function InboxAnalysis() {
   }
 
   async function resetInboxWorkflow() {
-    if (isSubmittingCustomerReply) return;
+    if (isSubmittingCustomerReply || isReanalyzingPersistedContext) return;
 
     workflowVersion.current += 1;
 
@@ -332,6 +346,9 @@ export function InboxAnalysis() {
       setIsCustomerReplyPanelOpen(false);
       setIsSubmittingCustomerReply(false);
       setCustomerReplySubmitError("");
+      setIsReanalyzingPersistedContext(false);
+      setReanalysisError("");
+      setRestartUsesPersistedContext(false);
     }
   }
 
@@ -346,7 +363,13 @@ export function InboxAnalysis() {
   }
 
   function prepareClarification() {
-    if (!analysis || analysisSource !== "current") return;
+    if (
+      !analysis ||
+      analysisSource !== "current" ||
+      isReanalyzingPersistedContext
+    ) {
+      return;
+    }
 
     const draft = createClarificationDraft({
       customerName: analysis.customer.name,
@@ -404,6 +427,7 @@ export function InboxAnalysis() {
   }
 
   async function mergeCustomerReply(customerReply: string) {
+    if (isReanalyzingPersistedContext) return;
     if (!analysis || !analysis.workflowId || !inquiryContext) return;
 
     const workflowId = analysis.workflowId;
@@ -466,6 +490,10 @@ export function InboxAnalysis() {
       setAnalysisInquiry(composedContext);
       setInquiryContext(composedContext);
       setOfferNeedsReview(loadOfferDraftNeedsReview(updatedAnalysis));
+      // The persisted inquiryContext now holds more information (the merged
+      // reply) than the visible intake fields ever did; a later restart must
+      // keep reusing it instead of falling back to those intake fields.
+      setRestartUsesPersistedContext(true);
       setIsEditingClarification(false);
       setClarification(null);
       setEditableClarification(null);
@@ -473,6 +501,7 @@ export function InboxAnalysis() {
       clearClarificationDraft();
       setIsCustomerReplyPanelOpen(false);
       setCustomerReplySubmitError("");
+      setReanalysisError("");
     } catch (error) {
       if (currentWorkflowVersion !== workflowVersion.current) return;
 
@@ -486,6 +515,149 @@ export function InboxAnalysis() {
         setIsSubmittingCustomerReply(false);
       }
     }
+  }
+
+  /**
+   * Safely re-runs the already persisted, cumulative inquiry context for a
+   * restored analysis (e.g. original inquiry plus a merged customer reply)
+   * against the same workflow, instead of requiring the user to retype the
+   * inquiry into the now-empty intake form. Only applies to a restored
+   * analysis; a "current" analysis keeps using startAnalysis() unchanged.
+   */
+  async function reanalyzePersistedInquiryContext() {
+    if (
+      isSubmittingCustomerReply ||
+      isReanalyzingPersistedContext ||
+      offerStatus === "generating"
+    )
+      return;
+
+    if (
+      !(analysisSource === "restored" || restartUsesPersistedContext) ||
+      !analysis ||
+      !analysis.workflowId ||
+      inquiryContext === null
+    ) {
+      setReanalysisError(
+        "Der gespeicherte Anfragekontext fehlt. Diese Analyse kann nicht sicher erneut ausgewertet werden.",
+      );
+      return;
+    }
+
+    const workflowId = analysis.workflowId;
+    const persistedInquiry = inquiryContext;
+
+    workflowVersion.current += 1;
+    const currentWorkflowVersion = workflowVersion.current;
+
+    try {
+      setIsReanalyzingPersistedContext(true);
+      setReanalysisError("");
+
+      const response = await fetch("/api/analyze-inquiry", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ inquiry: persistedInquiry }),
+      });
+
+      // A proxy/gateway failure (e.g. 502/504) can return an empty or HTML
+      // body instead of JSON; never let that raw parser error reach the
+      // user, always fall back to the controlled message below.
+      let data;
+      try {
+        data = await response.json();
+      } catch {
+        data = null;
+      }
+
+      if (currentWorkflowVersion !== workflowVersion.current) return;
+
+      if (!response.ok || !data) {
+        throw new Error(
+          data?.error ?? "Die Analyse konnte nicht erneut ausgewertet werden.",
+        );
+      }
+
+      const updatedAnalysis: AnalysisResult = {
+        ...data.analysis,
+        workflowId,
+      };
+
+      const todayPersisted = await persistInboxTodayDecision(updatedAnalysis);
+
+      if (currentWorkflowVersion !== workflowVersion.current) return;
+
+      if (!todayPersisted) {
+        throw new Error(
+          "Die aktualisierte Entscheidung konnte nicht gespeichert werden.",
+        );
+      }
+
+      saveInquiryAnalysis(updatedAnalysis);
+      // An existing workflow-bound offer was reviewed against the
+      // now-superseded analysis; flag it for renewed human review instead
+      // of leaving it silently marked reviewed (and copyable) against
+      // content that may no longer match. Offer content itself is never
+      // rewritten here.
+      flagOfferDraftForReReview(workflowId);
+
+      setAnalysis(updatedAnalysis);
+      setAnalysisSource("current");
+      setAnalysisInquiry(persistedInquiry);
+      setOfferNeedsReview(loadOfferDraftNeedsReview(updatedAnalysis));
+      // A later restart must keep reusing this same persisted context,
+      // regardless of analysisSource now reading "current".
+      setRestartUsesPersistedContext(true);
+      // The previous clarification draft (if any) was prepared for the
+      // now-superseded analysis and must not keep asking about information
+      // the fresh analysis may no longer consider missing.
+      setIsEditingClarification(false);
+      setClarification(null);
+      setEditableClarification(null);
+      setClarificationLastSavedAt(null);
+      clearClarificationDraft();
+      setReanalysisError("");
+    } catch (error) {
+      if (currentWorkflowVersion !== workflowVersion.current) return;
+
+      setReanalysisError(
+        error instanceof Error
+          ? error.message
+          : "Ein unbekannter Fehler ist aufgetreten.",
+      );
+    } finally {
+      if (currentWorkflowVersion === workflowVersion.current) {
+        setIsReanalyzingPersistedContext(false);
+      }
+    }
+  }
+
+  // Shared by the restart routing decision below and the render's
+  // restartDisabled prop: true whenever a restart would re-run the same
+  // persisted/restored workflow context instead of starting a genuinely
+  // new, independent intake analysis.
+  const restartUsesPersistedWorkflow =
+    analysisSource === "restored" || restartUsesPersistedContext;
+
+  function handleRestartAnalysis() {
+    // A currently unsaved clarification edit must never be silently
+    // discarded by whichever restart path would run next.
+    if (isEditingClarification) return;
+
+    if (restartUsesPersistedWorkflow) {
+      // Only this path re-runs against the *same* workflow a running offer
+      // generation is also bound to, so only here must a running generation
+      // be allowed to finish undisturbed instead of being silently
+      // invalidated by a workflowVersion bump from a restart. A genuinely
+      // new, unrelated intake analysis (below) already resets offerStatus
+      // itself and must remain startable regardless.
+      if (offerStatus === "generating") return;
+
+      void reanalyzePersistedInquiryContext();
+      return;
+    }
+
+    void startAnalysis();
   }
 
   function renderWorkflow() {
@@ -557,21 +729,29 @@ export function InboxAnalysis() {
           isCustomerReplyBlocked={!analysis.workflowId || inquiryContext === null}
           isCustomerReplyPanelOpen={isCustomerReplyPanelOpen}
           isCustomerReplySubmitting={isSubmittingCustomerReply}
+          isReanalyzingPersistedContext={isReanalyzingPersistedContext}
+          reanalysisError={reanalysisError}
+          restartDisabled={
+            isEditingClarification ||
+            (restartUsesPersistedWorkflow && offerStatus === "generating")
+          }
           isTodayHandoffAvailable={
             analysisSource === "current" &&
             !isEditingOffer &&
-            !isSubmittingCustomerReply
+            !isSubmittingCustomerReply &&
+            !isReanalyzingPersistedContext
           }
           offerStatus={offerStatus}
           onGenerateOffer={generateOffer}
           onPrepareClarification={handleClarificationCta}
           onToggleCustomerReply={toggleCustomerReplyPanel}
-          onRestartAnalysis={() => void startAnalysis()}
+          onRestartAnalysis={handleRestartAnalysis}
         />
 
         {isCustomerReplyPanelOpen && (
           <CustomerReplyPanel
             isSubmitting={isSubmittingCustomerReply}
+            disabled={isReanalyzingPersistedContext}
             submitError={customerReplySubmitError}
             onCancel={cancelCustomerReply}
             onSubmit={(customerReply) => void mergeCustomerReply(customerReply)}
@@ -583,6 +763,7 @@ export function InboxAnalysis() {
             editableDraft={editableClarification}
             isEditing={isEditingClarification}
             lastSavedAt={clarificationLastSavedAt}
+            disabled={isReanalyzingPersistedContext}
             onChange={setEditableClarification}
             onStartEditing={() => setIsEditingClarification(true)}
             onSave={saveClarification}
@@ -599,7 +780,7 @@ export function InboxAnalysis() {
             <button
               type="button"
               onClick={generateOffer}
-              disabled={isSubmittingCustomerReply}
+              disabled={isSubmittingCustomerReply || isReanalyzingPersistedContext}
               className="mt-4 rounded-xl bg-red-900 px-5 py-2.5 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-50"
             >
               Erneut versuchen
@@ -624,7 +805,7 @@ export function InboxAnalysis() {
           <button
             type="button"
             onClick={resetInboxWorkflow}
-            disabled={isSubmittingCustomerReply}
+            disabled={isSubmittingCustomerReply || isReanalyzingPersistedContext}
             className="text-sm text-neutral-500 transition hover:text-neutral-900 disabled:cursor-not-allowed disabled:opacity-50"
           >
             Gespeicherten Vorgang zurücksetzen
@@ -635,7 +816,8 @@ export function InboxAnalysis() {
   }
 
   const isAnalyzing = status === "analyzing";
-  const isIntakeDisabled = isAnalyzing || isSubmittingCustomerReply;
+  const isIntakeDisabled =
+    isAnalyzing || isSubmittingCustomerReply || isReanalyzingPersistedContext;
 
   return (
     <>

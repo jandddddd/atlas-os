@@ -9,6 +9,13 @@ type ClarificationDraftViewProps = {
   editableDraft: ClarificationDraft;
   isEditing: boolean;
   lastSavedAt: string | null;
+  /**
+   * Disables starting/saving/discarding an edit without hiding the draft or
+   * discarding any text already typed. Used while an unrelated
+   * workflow-mutating action is in progress elsewhere. "Nachricht kopieren"
+   * stays available, since it is read-only.
+   */
+  disabled?: boolean;
   onChange: (draft: ClarificationDraft) => void;
   onStartEditing: () => void;
   onSave: () => void;
@@ -21,6 +28,7 @@ export function ClarificationDraftView({
   editableDraft,
   isEditing,
   lastSavedAt,
+  disabled = false,
   onChange,
   onStartEditing,
   onSave,
@@ -75,14 +83,16 @@ export function ClarificationDraftView({
                 <button
                   type="button"
                   onClick={onSave}
-                  className="rounded-lg bg-neutral-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-neutral-700"
+                  disabled={disabled}
+                  className="rounded-lg bg-neutral-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-neutral-700 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   Änderungen übernehmen
                 </button>
                 <button
                   type="button"
                   onClick={onDiscard}
-                  className="rounded-lg border bg-white px-4 py-2 text-sm font-medium transition hover:bg-neutral-50"
+                  disabled={disabled}
+                  className="rounded-lg border bg-white px-4 py-2 text-sm font-medium transition hover:bg-neutral-50 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   Änderungen verwerfen
                 </button>
@@ -91,7 +101,8 @@ export function ClarificationDraftView({
               <button
                 type="button"
                 onClick={onStartEditing}
-                className="rounded-lg border px-4 py-2 text-sm font-medium transition hover:bg-neutral-50"
+                disabled={disabled}
+                className="rounded-lg border px-4 py-2 text-sm font-medium transition hover:bg-neutral-50 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 Entwurf bearbeiten
               </button>
@@ -136,7 +147,8 @@ export function ClarificationDraftView({
             onChange={(event) =>
               onChange({ ...editableDraft, subject: event.target.value })
             }
-            className="w-full rounded-lg border px-3 py-2 text-xl font-bold"
+            disabled={disabled}
+            className="w-full rounded-lg border px-3 py-2 text-xl font-bold disabled:cursor-not-allowed disabled:opacity-60"
           />
           <textarea
             aria-label="Nachricht"
@@ -145,7 +157,8 @@ export function ClarificationDraftView({
               onChange({ ...editableDraft, message: event.target.value })
             }
             rows={10}
-            className="min-h-48 w-full rounded-lg border px-3 py-2 leading-6 text-neutral-700"
+            disabled={disabled}
+            className="min-h-48 w-full rounded-lg border px-3 py-2 leading-6 text-neutral-700 disabled:cursor-not-allowed disabled:opacity-60"
           />
         </div>
       ) : (

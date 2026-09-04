@@ -429,9 +429,13 @@ test("Eine erneute Inbox-Analyse entfernt eine alte manuelle Priorisierung", asy
   await page.goto("/inbox");
   await fillInboxInquiry(page);
   await page.getByRole("button", { name: "Analyse erneut starten" }).click();
+  // "Analyse erneut starten" on a restored analysis now safely re-runs the
+  // persisted context instead of the (unused) intake fields; wait for the
+  // restored warning to clear as the reliable completion signal, since the
+  // "Analyse abgeschlossen" heading is already visible before the click.
   await expect(
-    page.getByRole("heading", { name: "Analyse abgeschlossen" }),
-  ).toBeVisible();
+    page.getByText("Diese Analyse wurde aus dem letzten Vorgang wiederhergestellt."),
+  ).toHaveCount(0);
 
   await page.goto("/today");
   await expect(manualPriorityExplanation(page)).toHaveCount(0);
@@ -997,7 +1001,46 @@ test("Eine wiederhergestellte Analyse benötigt vor der Angebotserstellung eine 
   });
   await expect(offerButton).toBeDisabled();
 
+  // This restored analysis has no persisted workflow-bound context, so
+  // "Analyse erneut starten" must not silently start a new workflow from
+  // whatever happens to be typed in the intake fields; it shows a safe,
+  // understandable message instead and leaves everything else untouched.
+  let analyzeRequested = false;
+  await page.route("**/api/analyze-inquiry", async (route) => {
+    analyzeRequested = true;
+    await route.continue();
+  });
   await page.getByRole("button", { name: "Analyse erneut starten" }).click();
+  await expect(
+    page.getByText(
+      "Der gespeicherte Anfragekontext fehlt. Diese Analyse kann nicht sicher erneut ausgewertet werden.",
+    ),
+  ).toBeVisible();
+  expect(analyzeRequested).toBe(false);
+  await expect(offerButton).toBeDisabled();
+
+  // The existing reset button remains the correct, explicit way to discard
+  // this restored analysis and analyze a genuinely new inquiry.
+  await page.getByRole("button", { name: "Gespeicherten Vorgang zurücksetzen" }).click();
+  await fillInboxInquiry(page, {
+    customer: "Familie Anders",
+    location: "Ludwigshafen",
+    message: "Bitte die Fassade neu streichen.",
+  });
+
+  // Restore the normal analyze-inquiry mock: the route.continue() handler
+  // above only proved the safety path makes no request, but it would
+  // otherwise shadow the beforeEach fixture mock and let this next,
+  // legitimate submit reach the real API route.
+  await page.route("**/api/analyze-inquiry", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ analysis: inboxAnalysisFixture }),
+    });
+  });
+
+  await page.getByRole("button", { name: "Anfrage analysieren" }).click();
   await expect(page.getByRole("heading", { name: "Analyse abgeschlossen" })).toBeVisible();
   await expect(offerButton).toBeEnabled();
 
@@ -1038,7 +1081,7 @@ test("Die Angebotserstellung bleibt an die exakt analysierte Anfrage gebunden", 
   ].join("\n"));
 });
 
-test("Eine erfolgreiche Ersatzanalyse entfernt den alten Angebotsentwurf dauerhaft", async ({ page }) => {
+test("Analyse erneut starten entfernt bei fehlendem Kontext den bestehenden Angebotsentwurf nicht", async ({ page }) => {
   await page.goto("/");
   await page.evaluate(({ analysis, offer }) => {
     window.localStorage.setItem("atlas-inquiry-analysis", JSON.stringify(analysis));
@@ -1052,31 +1095,35 @@ test("Eine erfolgreiche Ersatzanalyse entfernt den alten Angebotsentwurf dauerha
     location: "Heidelberg",
     message: "Bitte das Schlafzimmer streichen.",
   });
+
+  // This restored analysis has no persisted workflow-bound context (it was
+  // seeded directly, not via a real analyze run), so restarting must not
+  // silently swap the workflow using the freshly typed intake fields, and
+  // must therefore not touch the existing offer draft either.
   await page.getByRole("button", { name: "Analyse erneut starten" }).click();
-  await expect(page.getByRole("heading", { name: "Analyse abgeschlossen" })).toBeVisible();
-  await expect(page.getByText("Angebotsentwurf Familie Schneider", { exact: true })).toHaveCount(0);
-  await expect.poll(
-    () => page.evaluate(() => window.localStorage.getItem("atlas-editable-offer")),
-  ).toBeNull();
+  await expect(
+    page.getByText(
+      "Der gespeicherte Anfragekontext fehlt. Diese Analyse kann nicht sicher erneut ausgewertet werden.",
+    ),
+  ).toBeVisible();
+  await expect(page.getByText("Angebotsentwurf Familie Schneider", { exact: true })).toBeVisible();
 
   await page.reload();
   await expect(page.getByRole("heading", { name: "Analyse abgeschlossen" })).toBeVisible();
-  await expect(page.getByText("Angebotsentwurf Familie Schneider", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("Angebotsentwurf Familie Schneider", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Angebotsentwurf erstellen" })).toBeDisabled();
 });
 
-test("Eine fehlgeschlagene Ersatzanalyse erhält den vorherigen persistenten Vorgang", async ({ page }) => {
+test("Analyse erneut starten löst bei fehlendem Kontext keinen Request aus und lässt den persistierten Vorgang unverändert", async ({ page }) => {
   await page.goto("/");
   await page.evaluate(({ analysis, offer }) => {
     window.localStorage.setItem("atlas-inquiry-analysis", JSON.stringify(analysis));
     window.localStorage.setItem("atlas-editable-offer", JSON.stringify(offer));
   }, { analysis: inboxAnalysisFixture, offer: inboxOfferFixture });
+  let analyzeRequested = false;
   await page.route("**/api/analyze-inquiry", async (route) => {
-    await route.fulfill({
-      status: 500,
-      contentType: "application/json",
-      body: JSON.stringify({ error: "Analyse B fehlgeschlagen." }),
-    });
+    analyzeRequested = true;
+    await route.continue();
   });
   await page.goto("/inbox");
   await fillInboxInquiry(page, {
@@ -1084,7 +1131,12 @@ test("Eine fehlgeschlagene Ersatzanalyse erhält den vorherigen persistenten Vor
     message: "Bitte das Schlafzimmer streichen.",
   });
   await page.getByRole("button", { name: "Analyse erneut starten" }).click();
-  await expect(page.getByText("Analyse B fehlgeschlagen.")).toBeVisible();
+  await expect(
+    page.getByText(
+      "Der gespeicherte Anfragekontext fehlt. Diese Analyse kann nicht sicher erneut ausgewertet werden.",
+    ),
+  ).toBeVisible();
+  expect(analyzeRequested).toBe(false);
 
   const storedWorkflow = await page.evaluate(() => ({
     analysis: JSON.parse(window.localStorage.getItem("atlas-inquiry-analysis") ?? "null"),
