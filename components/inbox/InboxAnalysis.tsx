@@ -86,6 +86,13 @@ export function InboxAnalysis() {
   const [isReanalyzingPersistedContext, setIsReanalyzingPersistedContext] =
     useState(false);
   const [reanalysisError, setReanalysisError] = useState("");
+  // True once the current "current" analysis originated from re-running a
+  // persisted, workflow-bound inquiryContext (via a restored reanalysis or a
+  // merged customer reply) rather than from the visible intake fields. A
+  // later "Analyse erneut starten" click must keep using that persisted
+  // context instead of falling back to the (unrelated/empty) intake form.
+  const [restartUsesPersistedContext, setRestartUsesPersistedContext] =
+    useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -161,6 +168,9 @@ export function InboxAnalysis() {
     setIsCustomerReplyPanelOpen(false);
     setCustomerReplySubmitError("");
     setReanalysisError("");
+    // A genuinely new intake-driven analysis starts an unrelated workflow;
+    // any earlier persisted-context provenance no longer applies to it.
+    setRestartUsesPersistedContext(false);
 
     try {
       setStatus("analyzing");
@@ -338,6 +348,7 @@ export function InboxAnalysis() {
       setCustomerReplySubmitError("");
       setIsReanalyzingPersistedContext(false);
       setReanalysisError("");
+      setRestartUsesPersistedContext(false);
     }
   }
 
@@ -473,6 +484,10 @@ export function InboxAnalysis() {
       setAnalysisInquiry(composedContext);
       setInquiryContext(composedContext);
       setOfferNeedsReview(loadOfferDraftNeedsReview(updatedAnalysis));
+      // The persisted inquiryContext now holds more information (the merged
+      // reply) than the visible intake fields ever did; a later restart must
+      // keep reusing it instead of falling back to those intake fields.
+      setRestartUsesPersistedContext(true);
       setIsEditingClarification(false);
       setClarification(null);
       setEditableClarification(null);
@@ -507,7 +522,7 @@ export function InboxAnalysis() {
     if (isSubmittingCustomerReply || isReanalyzingPersistedContext) return;
 
     if (
-      analysisSource !== "restored" ||
+      !(analysisSource === "restored" || restartUsesPersistedContext) ||
       !analysis ||
       !analysis.workflowId ||
       inquiryContext === null
@@ -579,6 +594,9 @@ export function InboxAnalysis() {
       setAnalysisSource("current");
       setAnalysisInquiry(persistedInquiry);
       setOfferNeedsReview(loadOfferDraftNeedsReview(updatedAnalysis));
+      // A later restart must keep reusing this same persisted context,
+      // regardless of analysisSource now reading "current".
+      setRestartUsesPersistedContext(true);
       // The previous clarification draft (if any) was prepared for the
       // now-superseded analysis and must not keep asking about information
       // the fresh analysis may no longer consider missing.
@@ -604,7 +622,11 @@ export function InboxAnalysis() {
   }
 
   function handleRestartAnalysis() {
-    if (analysisSource === "restored") {
+    // A currently unsaved clarification edit must never be silently
+    // discarded by whichever restart path would run next.
+    if (isEditingClarification) return;
+
+    if (analysisSource === "restored" || restartUsesPersistedContext) {
       void reanalyzePersistedInquiryContext();
       return;
     }
@@ -682,6 +704,7 @@ export function InboxAnalysis() {
           isCustomerReplySubmitting={isSubmittingCustomerReply}
           isReanalyzingPersistedContext={isReanalyzingPersistedContext}
           reanalysisError={reanalysisError}
+          restartDisabled={isEditingClarification}
           isTodayHandoffAvailable={
             analysisSource === "current" &&
             !isEditingOffer &&
@@ -710,6 +733,7 @@ export function InboxAnalysis() {
             editableDraft={editableClarification}
             isEditing={isEditingClarification}
             lastSavedAt={clarificationLastSavedAt}
+            disabled={isReanalyzingPersistedContext}
             onChange={setEditableClarification}
             onStartEditing={() => setIsEditingClarification(true)}
             onSave={saveClarification}

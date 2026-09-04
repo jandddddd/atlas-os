@@ -21,6 +21,13 @@ type AnalysisResultViewProps = {
   isCustomerReplySubmitting: boolean;
   isReanalyzingPersistedContext: boolean;
   reanalysisError: string;
+  /**
+   * Disables "Analyse erneut starten" without claiming anything else is in
+   * flight (unlike isReanalyzingPersistedContext, never swaps its label).
+   * Used to prevent starting any restart while an unsaved clarification
+   * edit is active, so that edit can never be silently discarded.
+   */
+  restartDisabled: boolean;
   isTodayHandoffAvailable: boolean;
   offerStatus: OfferStatus;
   onGenerateOffer: () => void;
@@ -39,6 +46,7 @@ export function AnalysisResultView({
   isCustomerReplySubmitting,
   isReanalyzingPersistedContext,
   reanalysisError,
+  restartDisabled,
   isTodayHandoffAvailable,
   offerStatus,
   onGenerateOffer,
@@ -190,7 +198,11 @@ export function AnalysisResultView({
         <button
           type="button"
           onClick={onRestartAnalysis}
-          disabled={isCustomerReplySubmitting || isReanalyzingPersistedContext}
+          disabled={
+            isCustomerReplySubmitting ||
+            isReanalyzingPersistedContext ||
+            restartDisabled
+          }
           className="rounded-xl border border-emerald-300 bg-white px-6 py-3 font-medium transition hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-50"
         >
           {isReanalyzingPersistedContext
