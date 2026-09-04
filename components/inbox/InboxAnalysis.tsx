@@ -519,7 +519,12 @@ export function InboxAnalysis() {
    * analysis; a "current" analysis keeps using startAnalysis() unchanged.
    */
   async function reanalyzePersistedInquiryContext() {
-    if (isSubmittingCustomerReply || isReanalyzingPersistedContext) return;
+    if (
+      isSubmittingCustomerReply ||
+      isReanalyzingPersistedContext ||
+      offerStatus === "generating"
+    )
+      return;
 
     if (
       !(analysisSource === "restored" || restartUsesPersistedContext) ||
@@ -621,15 +626,31 @@ export function InboxAnalysis() {
     }
   }
 
+  // Shared by the restart routing decision below and the render's
+  // restartDisabled prop: true whenever a restart would re-run the same
+  // persisted/restored workflow context instead of starting a genuinely
+  // new, independent intake analysis.
+  const restartUsesPersistedWorkflow =
+    analysisSource === "restored" || restartUsesPersistedContext;
+
   function handleRestartAnalysis() {
     // A currently unsaved clarification edit must never be silently
     // discarded by whichever restart path would run next.
     if (isEditingClarification) return;
 
-    if (analysisSource === "restored" || restartUsesPersistedContext) {
+    if (restartUsesPersistedWorkflow) {
+      // Only this path re-runs against the *same* workflow a running offer
+      // generation is also bound to, so only here must a running generation
+      // be allowed to finish undisturbed instead of being silently
+      // invalidated by a workflowVersion bump from a restart. A genuinely
+      // new, unrelated intake analysis (below) already resets offerStatus
+      // itself and must remain startable regardless.
+      if (offerStatus === "generating") return;
+
       void reanalyzePersistedInquiryContext();
       return;
     }
+
     void startAnalysis();
   }
 
@@ -704,7 +725,10 @@ export function InboxAnalysis() {
           isCustomerReplySubmitting={isSubmittingCustomerReply}
           isReanalyzingPersistedContext={isReanalyzingPersistedContext}
           reanalysisError={reanalysisError}
-          restartDisabled={isEditingClarification}
+          restartDisabled={
+            isEditingClarification ||
+            (restartUsesPersistedWorkflow && offerStatus === "generating")
+          }
           isTodayHandoffAvailable={
             analysisSource === "current" &&
             !isEditingOffer &&

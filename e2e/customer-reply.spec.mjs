@@ -1269,3 +1269,69 @@ test("nach fehlgeschlagener restored Reanalyse bleibt der Rückfrageentwurf unve
   expect(analysisAfter.workflowId).toBe(workflowIdBefore);
   expect(contextAfter).toEqual(contextBefore);
 });
+
+test("Analyse erneut starten ist während einer laufenden Angebotserstellung gesperrt", async ({ page }) => {
+  await fillAndAnalyze(page);
+  await goToTodayAndApprove(page, inboxAnalysisFixture.recommendedTask.title);
+  await page.goto("/inbox");
+  await expect(page.getByRole("heading", { name: "Analyse abgeschlossen" })).toBeVisible();
+
+  // Bring the workflow to "current" via a successful restored reanalysis,
+  // so restartUsesPersistedContext is true and a later restart would again
+  // route through reanalyzePersistedInquiryContext().
+  const firstRestartRequestPromise = page.waitForRequest("**/api/analyze-inquiry");
+  await page.getByRole("button", { name: "Analyse erneut starten" }).click();
+  await firstRestartRequestPromise;
+  await expect(
+    page.getByText("Diese Analyse wurde aus dem letzten Vorgang wiederhergestellt."),
+  ).toHaveCount(0);
+
+  let releaseOfferResponse;
+  await page.route("**/api/generate-offer", async (route) => {
+    await new Promise((resolve) => {
+      releaseOfferResponse = resolve;
+    });
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ offer: inboxOfferFixture }),
+    });
+  });
+
+  await page.getByRole("button", { name: "Angebotsentwurf erstellen" }).click();
+  await expect(page.getByRole("button", { name: "Angebot wird erstellt ..." })).toBeVisible();
+
+  const restartButton = page.getByRole("button", { name: "Analyse erneut starten" });
+  await expect(restartButton).toBeDisabled();
+
+  let secondAnalyzeRequested = false;
+  await page.route("**/api/analyze-inquiry", async (route) => {
+    secondAnalyzeRequested = true;
+    await route.continue();
+  });
+  await restartButton.click({ force: true }).catch(() => {});
+  expect(secondAnalyzeRequested).toBe(false);
+
+  releaseOfferResponse();
+  await expect(page.getByRole("button", { name: "Angebot wird erstellt ..." })).toHaveCount(0);
+  await expect(page.getByText("Angebotsentwurf Familie Schneider", { exact: true })).toBeVisible();
+  await expect(restartButton).toBeEnabled();
+
+  // Restore a normal fulfilling mock (the route above only proved no
+  // request escaped while generation was in flight) before confirming the
+  // restart works normally again.
+  await page.route("**/api/analyze-inquiry", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ analysis: updatedAfterSecondReplyFixture }),
+    });
+  });
+
+  const finalRequestPromise = page.waitForRequest("**/api/analyze-inquiry");
+  await restartButton.click();
+  await finalRequestPromise;
+  await expect(
+    page.getByText("Diese Analyse wurde aus dem letzten Vorgang wiederhergestellt."),
+  ).toHaveCount(0);
+});
