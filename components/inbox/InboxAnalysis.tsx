@@ -363,7 +363,13 @@ export function InboxAnalysis() {
   }
 
   function prepareClarification() {
-    if (!analysis || analysisSource !== "current") return;
+    if (
+      !analysis ||
+      analysisSource !== "current" ||
+      isReanalyzingPersistedContext
+    ) {
+      return;
+    }
 
     const draft = createClarificationDraft({
       customerName: analysis.customer.name,
@@ -774,7 +780,7 @@ export function InboxAnalysis() {
             <button
               type="button"
               onClick={generateOffer}
-              disabled={isSubmittingCustomerReply}
+              disabled={isSubmittingCustomerReply || isReanalyzingPersistedContext}
               className="mt-4 rounded-xl bg-red-900 px-5 py-2.5 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-50"
             >
               Erneut versuchen

@@ -145,7 +145,10 @@ export function AnalysisResultView({
                 ? "restored-analysis-offer-warning"
                 : undefined
             }
-            disabled={isClarificationBlocked && !hasClarificationDraft}
+            disabled={
+              (isClarificationBlocked || isReanalyzingPersistedContext) &&
+              !hasClarificationDraft
+            }
             className="mt-4 inline-flex items-center gap-2 rounded-xl border border-neutral-300 bg-white px-4 py-2.5 text-sm font-medium text-neutral-800 transition hover:bg-neutral-100 disabled:cursor-not-allowed disabled:opacity-50"
           >
             <MessageSquareText className="h-4 w-4" />

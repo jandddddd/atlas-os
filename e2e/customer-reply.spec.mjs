@@ -1168,6 +1168,52 @@ test("Analyse erneut starten nach einer Kundenantwort (ohne Navigation über Tod
   expect(analysisAfter.workflowId).toBe(workflowIdBefore);
 });
 
+test("Rückfrage vorbereiten ist während einer laufenden persisted-context Reanalyse ohne vorhandenen Entwurf gesperrt und erzeugt keinen Entwurf", async ({ page }) => {
+  await fillAndAnalyze(page);
+  const panel = await openReplyPanel(page);
+  await panel.getByLabel("Antwort des Kunden").fill("Der Wunschtermin ist Ende des Monats.");
+  await panel.getByRole("button", { name: "Antwort auswerten" }).click();
+  await expect(panel).toHaveCount(0);
+  await expect(page.getByText("Wunschtermin")).toBeVisible();
+
+  const prepareButton = page.getByRole("button", { name: "Rückfrage vorbereiten" });
+  await expect(prepareButton).toBeEnabled();
+
+  let releaseReanalysisResponse;
+  await page.route("**/api/analyze-inquiry", async (route) => {
+    await new Promise((resolve) => {
+      releaseReanalysisResponse = resolve;
+    });
+    await route.fulfill({
+      status: 500,
+      contentType: "application/json",
+      body: JSON.stringify({ error: "Die Analyse ist vorübergehend nicht verfügbar." }),
+    });
+  });
+
+  await page.getByRole("button", { name: "Analyse erneut starten" }).click();
+  await expect(
+    page.getByRole("button", { name: "Wird erneut ausgewertet …" }),
+  ).toBeDisabled();
+
+  await expect(prepareButton).toBeDisabled();
+
+  // A genuinely disabled native button cannot dispatch a click even when
+  // forced, so this proves the draft-creation path is truly blocked, not
+  // just visually discouraged.
+  await prepareButton.click({ force: true }).catch(() => {});
+  await expect(page.getByLabel("Rückfrageentwurf")).toHaveCount(0);
+  expect(await readLocalStorageJson(page, "atlas-clarification-draft")).toBeNull();
+
+  releaseReanalysisResponse();
+  await expect(
+    page.getByText("Die Analyse ist vorübergehend nicht verfügbar."),
+  ).toBeVisible();
+
+  await expect(prepareButton).toBeEnabled();
+  await expect(page.getByLabel("Rückfrageentwurf")).toHaveCount(0);
+});
+
 test("ein bereits editierter, ungespeicherter Rückfrageentwurf blockiert Analyse erneut starten", async ({ page }) => {
   await fillAndAnalyze(page);
   await page.getByRole("button", { name: "Rückfrage vorbereiten" }).click();
@@ -1334,4 +1380,68 @@ test("Analyse erneut starten ist während einer laufenden Angebotserstellung ges
   await expect(
     page.getByText("Diese Analyse wurde aus dem letzten Vorgang wiederhergestellt."),
   ).toHaveCount(0);
+});
+
+test("Erneut versuchen (Angebot) ist während einer laufenden persisted-context Reanalyse gesperrt und löst keinen Request aus", async ({ page }) => {
+  await fillAndAnalyze(page);
+  const panel = await openReplyPanel(page);
+  await panel.getByLabel("Antwort des Kunden").fill("Der Wunschtermin ist Ende des Monats.");
+  await panel.getByRole("button", { name: "Antwort auswerten" }).click();
+  await expect(panel).toHaveCount(0);
+
+  let generateOfferCallCount = 0;
+  await page.route("**/api/generate-offer", async (route) => {
+    generateOfferCallCount += 1;
+    await route.fulfill({
+      status: 500,
+      contentType: "application/json",
+      body: JSON.stringify({
+        error: "Der Angebotsdienst ist vorübergehend nicht verfügbar.",
+      }),
+    });
+  });
+
+  await page.getByRole("button", { name: "Angebotsentwurf erstellen" }).click();
+  await expect(
+    page.getByText("Der Angebotsdienst ist vorübergehend nicht verfügbar."),
+  ).toBeVisible();
+  expect(generateOfferCallCount).toBe(1);
+
+  const retryButton = page.getByRole("button", { name: "Erneut versuchen" });
+  await expect(retryButton).toBeEnabled();
+
+  let releaseReanalysisResponse;
+  await page.route("**/api/analyze-inquiry", async (route) => {
+    await new Promise((resolve) => {
+      releaseReanalysisResponse = resolve;
+    });
+    await route.fulfill({
+      status: 500,
+      contentType: "application/json",
+      body: JSON.stringify({ error: "Die Analyse ist vorübergehend nicht verfügbar." }),
+    });
+  });
+
+  await page.getByRole("button", { name: "Analyse erneut starten" }).click();
+  await expect(
+    page.getByRole("button", { name: "Wird erneut ausgewertet …" }),
+  ).toBeDisabled();
+
+  await expect(retryButton).toBeDisabled();
+
+  // A genuinely disabled native button cannot dispatch a click even when
+  // forced, so this proves the retry path is truly blocked, not just
+  // visually discouraged.
+  await retryButton.click({ force: true }).catch(() => {});
+  expect(generateOfferCallCount).toBe(1);
+
+  releaseReanalysisResponse();
+  await expect(
+    page.getByText("Die Analyse ist vorübergehend nicht verfügbar."),
+  ).toBeVisible();
+
+  await expect(retryButton).toBeEnabled();
+  await expect(
+    page.getByText("Der Angebotsdienst ist vorübergehend nicht verfügbar."),
+  ).toBeVisible();
 });
