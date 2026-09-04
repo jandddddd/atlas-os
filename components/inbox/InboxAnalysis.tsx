@@ -568,9 +568,17 @@ export function InboxAnalysis() {
       }
 
       saveInquiryAnalysis(updatedAnalysis);
+      // An existing workflow-bound offer was reviewed against the
+      // now-superseded analysis; flag it for renewed human review instead
+      // of leaving it silently marked reviewed (and copyable) against
+      // content that may no longer match. Offer content itself is never
+      // rewritten here.
+      flagOfferDraftForReReview(workflowId);
+
       setAnalysis(updatedAnalysis);
       setAnalysisSource("current");
       setAnalysisInquiry(persistedInquiry);
+      setOfferNeedsReview(loadOfferDraftNeedsReview(updatedAnalysis));
       // The previous clarification draft (if any) was prepared for the
       // now-superseded analysis and must not keep asking about information
       // the fresh analysis may no longer consider missing.

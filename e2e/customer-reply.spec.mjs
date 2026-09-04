@@ -1015,3 +1015,98 @@ test("ein nicht-JSON-Fehler bei der restored Reanalyse zeigt nur die kontrollier
   expect(analysisAfter).toEqual(analysisBefore);
   expect(contextAfter).toEqual(contextBefore);
 });
+
+test("eine erfolgreiche restored Reanalyse setzt ein bereits geprüftes Angebot wieder auf Re-Review", async ({ page }) => {
+  await fillAndAnalyze(page);
+  await page.getByRole("button", { name: "Angebotsentwurf erstellen" }).click();
+  await expect(page.getByText("Angebotsentwurf Familie Schneider", { exact: true })).toBeVisible();
+
+  await goToTodayAndApprove(page, inboxAnalysisFixture.recommendedTask.title);
+  await page.goto("/inbox");
+  await expect(page.getByRole("heading", { name: "Analyse abgeschlossen" })).toBeVisible();
+
+  const workflowIdBefore = (await readLocalStorageJson(page, "atlas-inquiry-analysis")).workflowId;
+  const contextBefore = await readLocalStorageJson(page, "atlas-inquiry-context");
+  const offerBefore = await readLocalStorageJson(page, "atlas-editable-offer");
+  let workspace = await readLocalStorageJson(page, "atlas-offer-workspace");
+  expect(workspace.offers.find((entry) => entry.workflowId === workflowIdBefore).status).toBe(
+    "reviewed",
+  );
+
+  await page.getByRole("button", { name: "Analyse erneut starten" }).click();
+  await expect(
+    page.getByText("Diese Analyse wurde aus dem letzten Vorgang wiederhergestellt."),
+  ).toHaveCount(0);
+
+  await expect(
+    page.getByText("Neue Kundeninformationen wurden ergänzt. Bitte prüfe den Angebotsentwurf erneut."),
+  ).toBeVisible();
+  await expect(page.getByText("Angebotsentwurf Familie Schneider", { exact: true })).toBeVisible();
+
+  const analysisAfter = await readLocalStorageJson(page, "atlas-inquiry-analysis");
+  const contextAfter = await readLocalStorageJson(page, "atlas-inquiry-context");
+  const offerAfter = await readLocalStorageJson(page, "atlas-editable-offer");
+  const binding = await readLocalStorageJson(page, "atlas-editable-offer-analysis-binding");
+  workspace = await readLocalStorageJson(page, "atlas-offer-workspace");
+
+  expect(analysisAfter.workflowId).toBe(workflowIdBefore);
+  expect(contextAfter).toEqual(contextBefore);
+  expect(offerAfter).toEqual(offerBefore);
+  expect(binding.needsReview).toBe(true);
+  expect(workspace.offers.find((entry) => entry.workflowId === workflowIdBefore).status).toBe(
+    "review-pending",
+  );
+
+  await page.goto(`/offers/${workflowIdBefore}`);
+  await expect(page.getByText("Prüfung offen", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Angebotstext kopieren" })).toHaveCount(0);
+});
+
+test("eine fehlgeschlagene restored Reanalyse lässt ein bereits geprüftes Angebot vollständig reviewed", async ({ page }) => {
+  await fillAndAnalyze(page);
+  await page.getByRole("button", { name: "Angebotsentwurf erstellen" }).click();
+  await expect(page.getByText("Angebotsentwurf Familie Schneider", { exact: true })).toBeVisible();
+
+  await goToTodayAndApprove(page, inboxAnalysisFixture.recommendedTask.title);
+  await page.goto("/inbox");
+  await expect(page.getByRole("heading", { name: "Analyse abgeschlossen" })).toBeVisible();
+
+  const workflowIdBefore = (await readLocalStorageJson(page, "atlas-inquiry-analysis")).workflowId;
+  const analysisBefore = await readLocalStorageJson(page, "atlas-inquiry-analysis");
+  const contextBefore = await readLocalStorageJson(page, "atlas-inquiry-context");
+  const offerBefore = await readLocalStorageJson(page, "atlas-editable-offer");
+  const workspaceBefore = await readLocalStorageJson(page, "atlas-offer-workspace");
+
+  await page.route("**/api/analyze-inquiry", async (route) => {
+    await route.fulfill({
+      status: 502,
+      contentType: "text/html",
+      body: "<html>Bad Gateway</html>",
+    });
+  });
+
+  await page.getByRole("button", { name: "Analyse erneut starten" }).click();
+  await expect(
+    page.getByText("Die Analyse konnte nicht erneut ausgewertet werden."),
+  ).toBeVisible();
+
+  await expect(
+    page.getByText("Neue Kundeninformationen wurden ergänzt. Bitte prüfe den Angebotsentwurf erneut."),
+  ).toHaveCount(0);
+
+  const analysisAfter = await readLocalStorageJson(page, "atlas-inquiry-analysis");
+  const contextAfter = await readLocalStorageJson(page, "atlas-inquiry-context");
+  const offerAfter = await readLocalStorageJson(page, "atlas-editable-offer");
+  const bindingAfter = await readLocalStorageJson(page, "atlas-editable-offer-analysis-binding");
+  const workspaceAfter = await readLocalStorageJson(page, "atlas-offer-workspace");
+
+  expect(analysisAfter).toEqual(analysisBefore);
+  expect(contextAfter).toEqual(contextBefore);
+  expect(offerAfter).toEqual(offerBefore);
+  expect(bindingAfter?.needsReview).not.toBe(true);
+  expect(workspaceAfter).toEqual(workspaceBefore);
+
+  await page.goto(`/offers/${workflowIdBefore}`);
+  await expect(page.getByText("Geprüft", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Angebotstext kopieren" })).toBeVisible();
+});
