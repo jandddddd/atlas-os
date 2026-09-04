@@ -1027,6 +1027,19 @@ test("Eine wiederhergestellte Analyse benötigt vor der Angebotserstellung eine 
     location: "Ludwigshafen",
     message: "Bitte die Fassade neu streichen.",
   });
+
+  // Restore the normal analyze-inquiry mock: the route.continue() handler
+  // above only proved the safety path makes no request, but it would
+  // otherwise shadow the beforeEach fixture mock and let this next,
+  // legitimate submit reach the real API route.
+  await page.route("**/api/analyze-inquiry", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ analysis: inboxAnalysisFixture }),
+    });
+  });
+
   await page.getByRole("button", { name: "Anfrage analysieren" }).click();
   await expect(page.getByRole("heading", { name: "Analyse abgeschlossen" })).toBeVisible();
   await expect(offerButton).toBeEnabled();
