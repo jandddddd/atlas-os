@@ -533,13 +533,22 @@ export function InboxAnalysis() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ inquiry: persistedInquiry }),
       });
-      const data = await response.json();
+
+      // A proxy/gateway failure (e.g. 502/504) can return an empty or HTML
+      // body instead of JSON; never let that raw parser error reach the
+      // user, always fall back to the controlled message below.
+      let data;
+      try {
+        data = await response.json();
+      } catch {
+        data = null;
+      }
 
       if (currentWorkflowVersion !== workflowVersion.current) return;
 
-      if (!response.ok) {
+      if (!response.ok || !data) {
         throw new Error(
-          data.error ?? "Die Analyse konnte nicht erneut ausgewertet werden.",
+          data?.error ?? "Die Analyse konnte nicht erneut ausgewertet werden.",
         );
       }
 
@@ -562,6 +571,14 @@ export function InboxAnalysis() {
       setAnalysis(updatedAnalysis);
       setAnalysisSource("current");
       setAnalysisInquiry(persistedInquiry);
+      // The previous clarification draft (if any) was prepared for the
+      // now-superseded analysis and must not keep asking about information
+      // the fresh analysis may no longer consider missing.
+      setIsEditingClarification(false);
+      setClarification(null);
+      setEditableClarification(null);
+      setClarificationLastSavedAt(null);
+      clearClarificationDraft();
       setReanalysisError("");
     } catch (error) {
       if (currentWorkflowVersion !== workflowVersion.current) return;
@@ -673,6 +690,7 @@ export function InboxAnalysis() {
         {isCustomerReplyPanelOpen && (
           <CustomerReplyPanel
             isSubmitting={isSubmittingCustomerReply}
+            disabled={isReanalyzingPersistedContext}
             submitError={customerReplySubmitError}
             onCancel={cancelCustomerReply}
             onSubmit={(customerReply) => void mergeCustomerReply(customerReply)}

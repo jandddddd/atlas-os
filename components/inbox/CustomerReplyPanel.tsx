@@ -4,6 +4,14 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 
 type CustomerReplyPanelProps = {
   isSubmitting: boolean;
+  /**
+   * Disables the textarea and submit action without claiming a reply is
+   * being evaluated (unlike isSubmitting, this never changes the submit
+   * button's label). Used when an unrelated workflow-mutating action is in
+   * progress elsewhere and this panel must stay non-interactive, without
+   * discarding whatever the user has already typed here.
+   */
+  disabled?: boolean;
   submitError: string;
   onCancel: () => void;
   onSubmit: (customerReply: string) => void;
@@ -11,6 +19,7 @@ type CustomerReplyPanelProps = {
 
 export function CustomerReplyPanel({
   isSubmitting,
+  disabled = false,
   submitError,
   onCancel,
   onSubmit,
@@ -18,6 +27,7 @@ export function CustomerReplyPanel({
   const [reply, setReply] = useState("");
   const [validationError, setValidationError] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const isInteractionDisabled = isSubmitting || disabled;
 
   useEffect(() => {
     textareaRef.current?.focus();
@@ -57,7 +67,7 @@ export function CustomerReplyPanel({
             setReply(event.target.value);
             if (validationError) setValidationError("");
           }}
-          disabled={isSubmitting}
+          disabled={isInteractionDisabled}
           aria-describedby={
             validationError ? "customer-reply-error" : undefined
           }
@@ -86,7 +96,7 @@ export function CustomerReplyPanel({
         <div className="mt-4 flex flex-wrap gap-3">
           <button
             type="submit"
-            disabled={isSubmitting}
+            disabled={isInteractionDisabled}
             className="rounded-xl bg-neutral-900 px-6 py-3 text-sm font-medium text-white transition hover:bg-neutral-700 disabled:cursor-wait disabled:opacity-60"
           >
             {isSubmitting ? "Antwort wird ausgewertet …" : "Antwort auswerten"}

@@ -887,3 +887,131 @@ test("eine laufende sichere Reanalyse verhindert Reset, Kundenantwort und eine n
     page.getByText("Diese Analyse wurde aus dem letzten Vorgang wiederhergestellt."),
   ).toHaveCount(0);
 });
+
+test("eine erfolgreiche restored Reanalyse entfernt einen bestehenden Rückfrageentwurf", async ({ page }) => {
+  await fillAndAnalyze(page);
+  await page.getByRole("button", { name: "Rückfrage vorbereiten" }).click();
+  await expect(page.getByLabel("Rückfrageentwurf")).toBeVisible();
+
+  await goToTodayAndApprove(page, inboxAnalysisFixture.recommendedTask.title);
+  await page.goto("/inbox");
+  await expect(page.getByRole("heading", { name: "Analyse abgeschlossen" })).toBeVisible();
+  await expect(page.getByLabel("Rückfrageentwurf")).toBeVisible();
+
+  const workflowIdBefore = (await readLocalStorageJson(page, "atlas-inquiry-analysis")).workflowId;
+  const contextBefore = await readLocalStorageJson(page, "atlas-inquiry-context");
+
+  await page.getByRole("button", { name: "Analyse erneut starten" }).click();
+  await expect(
+    page.getByText("Diese Analyse wurde aus dem letzten Vorgang wiederhergestellt."),
+  ).toHaveCount(0);
+
+  await expect(page.getByLabel("Rückfrageentwurf")).toHaveCount(0);
+  expect(await readLocalStorageJson(page, "atlas-clarification-draft")).toBeNull();
+  expect(
+    await readLocalStorageJson(page, "atlas-clarification-draft-analysis-binding"),
+  ).toBeNull();
+
+  const analysisAfter = await readLocalStorageJson(page, "atlas-inquiry-analysis");
+  const contextAfter = await readLocalStorageJson(page, "atlas-inquiry-context");
+  expect(analysisAfter.workflowId).toBe(workflowIdBefore);
+  expect(contextAfter).toEqual(contextBefore);
+});
+
+test("ein bereits geöffnetes Reply-Panel bleibt während einer restored Reanalyse sichtbar, aber nicht interaktiv", async ({ page }) => {
+  await fillAndAnalyze(page);
+  await goToTodayAndApprove(page, inboxAnalysisFixture.recommendedTask.title);
+  await page.goto("/inbox");
+  await expect(page.getByRole("heading", { name: "Analyse abgeschlossen" })).toBeVisible();
+
+  const panel = await openReplyPanel(page);
+  await panel.getByLabel("Antwort des Kunden").fill("Noch nicht abgeschickter Text.");
+
+  let releaseReanalysisResponse;
+  let mergeReplyRequested = false;
+  await page.route("**/api/analyze-inquiry", async (route) => {
+    if (route.request().postDataJSON()?.inquiry?.includes("Neu eingegangene Kundenantwort:")) {
+      mergeReplyRequested = true;
+    }
+    await new Promise((resolve) => {
+      releaseReanalysisResponse = resolve;
+    });
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ analysis: updatedAfterFirstReplyFixture }),
+    });
+  });
+
+  await page.getByRole("button", { name: "Analyse erneut starten" }).click();
+  await expect(
+    page.getByRole("button", { name: "Wird erneut ausgewertet …" }),
+  ).toBeDisabled();
+
+  await expect(panel).toBeVisible();
+  await expect(panel.getByLabel("Antwort des Kunden")).toBeDisabled();
+  await expect(panel.getByRole("button", { name: "Antwort auswerten" })).toBeDisabled();
+  await expect(panel.getByLabel("Antwort des Kunden")).toHaveValue(
+    "Noch nicht abgeschickter Text.",
+  );
+
+  // A genuinely disabled native button cannot dispatch a click even when
+  // forced, so this proves the submit path is truly blocked, not just
+  // visually discouraged.
+  await panel
+    .getByRole("button", { name: "Antwort auswerten" })
+    .click({ force: true })
+    .catch(() => {});
+  expect(mergeReplyRequested).toBe(false);
+
+  releaseReanalysisResponse();
+  await expect(
+    page.getByText("Diese Analyse wurde aus dem letzten Vorgang wiederhergestellt."),
+  ).toHaveCount(0);
+
+  await expect(panel).toBeVisible();
+  await expect(panel.getByLabel("Antwort des Kunden")).toBeEnabled();
+  await expect(panel.getByLabel("Antwort des Kunden")).toHaveValue(
+    "Noch nicht abgeschickter Text.",
+  );
+  await expect(panel.getByRole("button", { name: "Antwort auswerten" })).toBeEnabled();
+});
+
+test("ein nicht-JSON-Fehler bei der restored Reanalyse zeigt nur die kontrollierte Fallback-Meldung", async ({ page }) => {
+  await fillAndAnalyze(page);
+  await page.getByRole("button", { name: "Rückfrage vorbereiten" }).click();
+  await expect(page.getByLabel("Rückfrageentwurf")).toBeVisible();
+
+  await goToTodayAndApprove(page, inboxAnalysisFixture.recommendedTask.title);
+  await page.goto("/inbox");
+  await expect(page.getByRole("heading", { name: "Analyse abgeschlossen" })).toBeVisible();
+
+  const analysisBefore = await readLocalStorageJson(page, "atlas-inquiry-analysis");
+  const contextBefore = await readLocalStorageJson(page, "atlas-inquiry-context");
+
+  await page.route("**/api/analyze-inquiry", async (route) => {
+    await route.fulfill({
+      status: 502,
+      contentType: "text/html",
+      body: "<html>Bad Gateway</html>",
+    });
+  });
+
+  await page.getByRole("button", { name: "Analyse erneut starten" }).click();
+  await expect(
+    page.getByText("Die Analyse konnte nicht erneut ausgewertet werden."),
+  ).toBeVisible();
+  await expect(
+    page.getByText(/Unexpected token|JSON\.parse|Unexpected end of JSON/i),
+  ).toHaveCount(0);
+
+  await expect(
+    page.getByText("Diese Analyse wurde aus dem letzten Vorgang wiederhergestellt."),
+  ).toBeVisible();
+  await expect(page.getByLabel("Rückfrageentwurf")).toBeVisible();
+
+  const analysisAfter = await readLocalStorageJson(page, "atlas-inquiry-analysis");
+  const contextAfter = await readLocalStorageJson(page, "atlas-inquiry-context");
+  expect(analysisAfter).toEqual(analysisBefore);
+  expect(contextAfter).toEqual(contextBefore);
+});
