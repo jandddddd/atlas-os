@@ -19,6 +19,7 @@ import type {
   TodayDecisionPriorityExplanation,
   TodayDecisionPriorityFactors,
 } from "@/lib/today/decision-priority";
+import { inboxTodayDecisionId } from "@/lib/today/inbox-today-decision";
 
 type CompletionStatus = "offer-approved" | "change-requested" | null;
 type FeedbackStatus = "completed" | "deferred" | null;
@@ -97,17 +98,23 @@ function availableCompletionAction(
 /**
  * A decision's editHref may only be used to navigate to the live Inbox when
  * that Inbox's single persisted analysis slot still holds the same workflow
- * this decision was derived from. Static fixture decisions never set a
- * workflowId and keep their editHref unconditionally, exactly as before.
+ * this decision was derived from. Static fixture decisions are identified by
+ * id (never inboxTodayDecisionId) and keep their editHref unconditionally,
+ * exactly as before. A legacy dynamic Inbox decision from before workflowId
+ * existed has no workflowId to match against the live slot at all, so it
+ * cannot be safely confirmed either and falls back the same way a stale
+ * match would.
  */
 function availableEditHref(
-  decision: { editHref?: string; workflowId?: string },
+  decision: { id: string; editHref?: string; workflowId?: string },
   liveInboxWorkflowId: string | null,
 ): string | undefined {
   if (!decision.editHref) return undefined;
-  if (decision.workflowId === undefined) return decision.editHref;
+  if (decision.id !== inboxTodayDecisionId) return decision.editHref;
 
-  return decision.workflowId === liveInboxWorkflowId ? decision.editHref : undefined;
+  return decision.workflowId !== undefined && decision.workflowId === liveInboxWorkflowId
+    ? decision.editHref
+    : undefined;
 }
 
 export function TodayApprovalCenter({
@@ -170,6 +177,21 @@ export function TodayApprovalCenter({
 
     return () => window.cancelAnimationFrame(frame);
   }, [priorityDecision?.workflowId]);
+
+  // The above effect only re-reads the live Inbox workflow when the
+  // rendered priority decision itself changes, so it never notices another
+  // tab overwriting the single-slot Inbox analysis while this page stays
+  // mounted. The native "storage" event only fires in other tabs/windows of
+  // the same origin, which is exactly the cross-tab case to cover here; a
+  // same-tab write already goes through the effect above via navigation.
+  useEffect(() => {
+    function handleStorageChange() {
+      setLiveInboxWorkflowId(loadInquiryAnalysis()?.workflowId ?? null);
+    }
+
+    window.addEventListener("storage", handleStorageChange);
+    return () => window.removeEventListener("storage", handleStorageChange);
+  }, []);
   const overviewDecisions = overviewDecisionIds
     .map((decisionId) => decisionById.get(decisionId))
     .filter((decision): decision is TodayApprovalDecision => Boolean(decision))

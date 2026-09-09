@@ -235,6 +235,119 @@ test("Ändern führt bei einer inzwischen fremden live Inbox-Analyse nicht mehr 
   expect(analysisAfter.workflowId).toBe("unrelated-workflow-b");
 });
 
+test("Ändern erkennt einen echten Cross-Tab-Wechsel des live Inbox-Workflows ohne Reload", async ({
+  page,
+  context,
+}) => {
+  const inboxDecisionTitle = "Angebotsentwurf Familie Schneider vorbereiten";
+
+  await page.goto("/inbox");
+  await fillInboxInquiry(page);
+  await page.getByRole("button", { name: "Anfrage analysieren" }).click();
+  await expect(page.getByRole("heading", { name: "Analyse abgeschlossen" })).toBeVisible();
+
+  await page.getByRole("link", { name: "In Heute weiterprüfen" }).click();
+  await expect(page).toHaveURL("/today");
+  await page.getByRole("button", { name: inboxDecisionTitle }).click();
+  await expect(page.getByRole("heading", { name: inboxDecisionTitle })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Ändern" })).toBeVisible();
+
+  // A genuine second tab in the same browser context shares the same
+  // localStorage origin. Writing there fires a native "storage" event in
+  // the first tab (the same-tab case never fires "storage" at all, which is
+  // why this needs a real second page instead of page.evaluate on `page`).
+  const secondTab = await context.newPage();
+  await secondTab.goto("/inbox");
+  await secondTab.evaluate(() => {
+    const currentAnalysis = JSON.parse(
+      window.localStorage.getItem("atlas-inquiry-analysis"),
+    );
+    currentAnalysis.workflowId = "unrelated-workflow-b";
+    window.localStorage.setItem(
+      "atlas-inquiry-analysis",
+      JSON.stringify(currentAnalysis),
+    );
+  });
+  await secondTab.close();
+
+  // No reload: Today must notice the cross-tab change while staying mounted.
+  const changeAction = page.getByRole("link", { name: "Ändern" });
+  await expect(changeAction).toHaveCount(0);
+  await page.getByRole("button", { name: "Ändern" }).click();
+  await expect(page.getByText("Bearbeitungsansicht folgt.")).toBeVisible();
+  await expect(page).toHaveURL("/today");
+
+  const analysisAfter = await page.evaluate(() =>
+    JSON.parse(window.localStorage.getItem("atlas-inquiry-analysis")),
+  );
+  expect(analysisAfter.workflowId).toBe("unrelated-workflow-b");
+});
+
+test("Ändern öffnet bei einer legacy Inbox-Today-Entscheidung ohne workflowId nicht ungeprüft /inbox", async ({
+  page,
+  context,
+}) => {
+  const legacyDecisionTitle = "Altbestand ohne workflowId pruefen";
+
+  // A dynamic Inbox Today decision from before workflowId existed on the
+  // analysis contract: isAnalysisResult() explicitly allows workflowId to be
+  // omitted, and createInboxTodayDecision() still renders it, exactly as
+  // covered by the existing unit test for legacy offer analyses. Kept
+  // free of German diacritics: this cookie is injected as a raw value via
+  // context.addCookies() to simulate a decision from before workflowId
+  // existed, bypassing the app's own cookie read/write round-trip that
+  // normally encodes/decodes matching pairs consistently.
+  const legacyAnalysis = {
+    customer: { name: "Familie Alt" },
+    project: {
+      trade: "Malerarbeiten",
+      service: "Flur streichen",
+      estimatedArea: null,
+    },
+    workflow: {
+      priority: "high",
+      confidence: 0.7,
+      nextAction: "Entwurf pruefen",
+    },
+    nextSteps: [],
+    missingInformation: [],
+    recommendedTask: {
+      type: "offer",
+      title: legacyDecisionTitle,
+    },
+  };
+  await context.addCookies([
+    {
+      name: "atlas-inbox-today-decision",
+      value: JSON.stringify(legacyAnalysis),
+      url: "http://localhost:3000",
+      httpOnly: true,
+      sameSite: "Lax",
+    },
+  ]);
+
+  // A live, unrelated current Inbox workflow exists, but the legacy decision
+  // has nothing to safely match it against.
+  await page.addInitScript((analysis) => {
+    window.localStorage.setItem("atlas-inquiry-analysis", JSON.stringify(analysis));
+  }, { ...inboxAnalysisFixture, workflowId: "current-workflow-c" });
+
+  await page.goto("/today");
+  // High priority/confidence already makes this the primary "Heute zuerst"
+  // decision, so no selection click is needed before it is visible.
+  await expect(page.getByRole("heading", { name: legacyDecisionTitle })).toBeVisible();
+
+  await expect(page.getByRole("link", { name: "Ändern" })).toHaveCount(0);
+  await page.getByRole("button", { name: "Ändern" }).click();
+  await expect(page.getByText("Bearbeitungsansicht folgt.")).toBeVisible();
+  await expect(page).toHaveURL("/today");
+
+  const liveAnalysis = await page.evaluate(() =>
+    JSON.parse(window.localStorage.getItem("atlas-inquiry-analysis")),
+  );
+  expect(liveAnalysis.workflowId).toBe("current-workflow-c");
+});
+
 test("Today zeigt einen Hinweis, wenn für die Anfrage bereits eine Rückfrage vorbereitet wurde", async ({ page }) => {
   const inboxDecisionTitle = "Angebotsentwurf Familie Schneider vorbereiten";
 
