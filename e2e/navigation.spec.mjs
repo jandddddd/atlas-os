@@ -194,6 +194,47 @@ test("Inbox und Today bilden einen beidseitigen Prüfpfad für die vorbereitete 
   await expect(page.getByRole("link", { name: "In Heute weiterprüfen" })).toHaveCount(0);
 });
 
+test("Ändern führt bei einer inzwischen fremden live Inbox-Analyse nicht mehr in den falschen Vorgang", async ({ page }) => {
+  const inboxDecisionTitle = "Angebotsentwurf Familie Schneider vorbereiten";
+
+  await page.goto("/inbox");
+  await fillInboxInquiry(page);
+  await page.getByRole("button", { name: "Anfrage analysieren" }).click();
+  await expect(page.getByRole("heading", { name: "Analyse abgeschlossen" })).toBeVisible();
+
+  await page.getByRole("link", { name: "In Heute weiterprüfen" }).click();
+  await expect(page).toHaveURL("/today");
+  await page.getByRole("button", { name: inboxDecisionTitle }).click();
+  await expect(page.getByRole("heading", { name: inboxDecisionTitle })).toBeVisible();
+
+  // Simulate the live Inbox slot moving on to an unrelated workflow after
+  // this Today decision was created, without touching the Today decision
+  // itself (its cookie-backed snapshot still refers to the original case).
+  await page.evaluate(() => {
+    const currentAnalysis = JSON.parse(
+      window.localStorage.getItem("atlas-inquiry-analysis"),
+    );
+    currentAnalysis.workflowId = "unrelated-workflow-b";
+    window.localStorage.setItem(
+      "atlas-inquiry-analysis",
+      JSON.stringify(currentAnalysis),
+    );
+  });
+  await page.reload();
+  await expect(page.getByRole("heading", { name: inboxDecisionTitle })).toBeVisible();
+
+  const changeAction = page.getByRole("link", { name: "Ändern" });
+  await expect(changeAction).toHaveCount(0);
+  await page.getByRole("button", { name: "Ändern" }).click();
+  await expect(page.getByText("Bearbeitungsansicht folgt.")).toBeVisible();
+  await expect(page).toHaveURL("/today");
+
+  const analysisAfter = await page.evaluate(() =>
+    JSON.parse(window.localStorage.getItem("atlas-inquiry-analysis")),
+  );
+  expect(analysisAfter.workflowId).toBe("unrelated-workflow-b");
+});
+
 test("Today zeigt einen Hinweis, wenn für die Anfrage bereits eine Rückfrage vorbereitet wurde", async ({ page }) => {
   const inboxDecisionTitle = "Angebotsentwurf Familie Schneider vorbereiten";
 

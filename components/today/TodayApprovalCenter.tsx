@@ -94,6 +94,22 @@ function availableCompletionAction(
   return action;
 }
 
+/**
+ * A decision's editHref may only be used to navigate to the live Inbox when
+ * that Inbox's single persisted analysis slot still holds the same workflow
+ * this decision was derived from. Static fixture decisions never set a
+ * workflowId and keep their editHref unconditionally, exactly as before.
+ */
+function availableEditHref(
+  decision: { editHref?: string; workflowId?: string },
+  liveInboxWorkflowId: string | null,
+): string | undefined {
+  if (!decision.editHref) return undefined;
+  if (decision.workflowId === undefined) return decision.editHref;
+
+  return decision.workflowId === liveInboxWorkflowId ? decision.editHref : undefined;
+}
+
 export function TodayApprovalCenter({
   dateLabel,
   initialCompletionStatus,
@@ -129,6 +145,7 @@ export function TodayApprovalCenter({
   const [clarificationDraftWorkflowId, setClarificationDraftWorkflowId] = useState<
     string | null
   >(null);
+  const [liveInboxWorkflowId, setLiveInboxWorkflowId] = useState<string | null>(null);
 
   const [priorityDecisionId, ...overviewDecisionIds] = visibleDecisionIds;
   const priorityDecision = priorityDecisionId
@@ -148,6 +165,7 @@ export function TodayApprovalCenter({
       setClarificationDraftWorkflowId(
         workflowId && loadClarificationDraftForWorkflowId(workflowId) ? workflowId : null,
       );
+      setLiveInboxWorkflowId(loadInquiryAnalysis()?.workflowId ?? null);
     });
 
     return () => window.cancelAnimationFrame(frame);
@@ -377,10 +395,10 @@ export function TodayApprovalCenter({
               isDisabled: isSubmittingPriorityDecision,
             }}
             secondaryActions={[
-              priorityDecision.editHref
+              availableEditHref(priorityDecision, liveInboxWorkflowId)
                 ? {
                     label: "Ändern",
-                    href: priorityDecision.editHref,
+                    href: availableEditHref(priorityDecision, liveInboxWorkflowId),
                     isDisabled: isSubmittingPriorityDecision,
                   }
                 : {
