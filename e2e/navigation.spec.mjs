@@ -967,6 +967,12 @@ test("Inbox übermittelt Kontakt, optionalen Ort und Anfrage im bestehenden Anal
     ].join("\n"),
   });
   await expect(page.getByRole("heading", { name: "Analyse abgeschlossen" })).toBeVisible();
+  await expect(page.getByText("Flächenangabe laut Analyse")).toBeVisible();
+  await expect(page.getByText("75 m²", { exact: true })).toBeVisible();
+  await expect(
+    page.getByText("Keine automatisch abgeleitete Wand- oder Deckenfläche."),
+  ).toBeVisible();
+  await expect(page.getByText("Geschätzte Fläche")).toHaveCount(0);
 });
 
 test("Inbox analysiert eine gültige Anfrage ohne optionalen Ort", async ({ page }) => {
