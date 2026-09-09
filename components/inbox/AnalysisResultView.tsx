@@ -102,12 +102,17 @@ export function AnalysisResultView({
           <p className="mt-1 font-medium">{analysis.project.trade}</p>
         </div>
         <div className="rounded-xl bg-white/70 p-5">
-          <p className="text-sm text-neutral-500">Geschätzte Fläche</p>
+          <p className="text-sm text-neutral-500">Flächenangabe laut Analyse</p>
           <p className="mt-1 font-medium">
             {analysis.project.estimatedArea !== null
               ? `${analysis.project.estimatedArea} m²`
               : "Noch nicht bekannt"}
           </p>
+          {analysis.project.estimatedArea !== null && (
+            <p className="mt-1 text-xs text-neutral-500">
+              Keine automatisch abgeleitete Wand- oder Deckenfläche.
+            </p>
+          )}
         </div>
         <div className="rounded-xl bg-white/70 p-5">
           <p className="text-sm text-neutral-500">Nächste Aktion</p>
