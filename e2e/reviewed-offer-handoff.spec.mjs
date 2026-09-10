@@ -895,3 +895,64 @@ test("Today Overview zeigt den Offer-Link nach einem Cross-Tab-Angebot ohne Relo
     `/offers/${encodeURIComponent(analysis.workflowId)}`,
   );
 });
+
+test("Today Primary zeigt den Offer-Link nach einem Cross-Tab-Angebot ohne Reload", async ({
+  page,
+  context,
+}) => {
+  await fillAndAnalyze(page);
+  const analysis = await page.evaluate(() =>
+    JSON.parse(window.localStorage.getItem("atlas-inquiry-analysis")),
+  );
+
+  await openInboxDecision(page);
+  await expect(page.getByRole("link", { name: "Angebot öffnen" })).toHaveCount(0);
+
+  // A genuine second tab shares the same localStorage origin, so writing
+  // there fires a native "storage" event in the first tab (a same-tab write
+  // never fires this event at all).
+  const secondTab = await context.newPage();
+  await secondTab.goto("/inbox");
+  await secondTab.evaluate(
+    ({ workflowId, offer }) => {
+      window.localStorage.setItem(
+        "atlas-offer-workspace",
+        JSON.stringify({
+          version: 1,
+          offers: [
+            {
+              id: workflowId,
+              workflowId,
+              offer,
+              status: "review-pending",
+              updatedAt: new Date().toISOString(),
+            },
+          ],
+        }),
+      );
+    },
+    { workflowId: analysis.workflowId, offer: inboxOfferFixture },
+  );
+
+  // No reload: the primary card must notice the cross-tab offer draft while
+  // staying mounted, symmetric with the already-covered overview case.
+  const offerLink = page.getByRole("link", { name: "Angebot öffnen" });
+  await expect(offerLink).toBeVisible();
+  await expect(offerLink).toHaveAttribute(
+    "href",
+    `/offers/${encodeURIComponent(analysis.workflowId)}`,
+  );
+
+  // The reverse direction using the same plain storage write this suite
+  // already relies on elsewhere: the entry disappears in another tab, and
+  // the now-stale primary link must disappear without reload too.
+  await secondTab.evaluate(() => {
+    window.localStorage.setItem(
+      "atlas-offer-workspace",
+      JSON.stringify({ version: 1, offers: [] }),
+    );
+  });
+  await secondTab.close();
+
+  await expect(offerLink).toHaveCount(0);
+});

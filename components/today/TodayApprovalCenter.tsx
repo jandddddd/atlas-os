@@ -285,9 +285,23 @@ export function TodayApprovalCenter({
           ? overviewInboxDecision.workflowId
           : null,
       );
+      // Symmetric with the effect above: an offer created/removed for the
+      // dynamic Inbox decision in another tab must revalidate the link
+      // regardless of whether that decision is currently primary or in the
+      // overview list. Loaded once and reused for both checks.
+      const offerWorkspace = loadOfferWorkspace();
+      const priorityWorkflowId =
+        priorityDecision?.id === inboxTodayDecisionId
+          ? priorityDecision.workflowId
+          : undefined;
+      setPriorityOfferWorkspaceWorkflowId(
+        priorityWorkflowId && findOfferWorkspaceEntry(offerWorkspace, priorityWorkflowId)
+          ? priorityWorkflowId
+          : null,
+      );
       const overviewWorkflowId = overviewInboxDecision?.workflowId;
       setOverviewOfferWorkspaceWorkflowId(
-        overviewWorkflowId && findOfferWorkspaceEntry(loadOfferWorkspace(), overviewWorkflowId)
+        overviewWorkflowId && findOfferWorkspaceEntry(offerWorkspace, overviewWorkflowId)
           ? overviewWorkflowId
           : null,
       );
@@ -295,7 +309,7 @@ export function TodayApprovalCenter({
 
     window.addEventListener("storage", handleStorageChange);
     return () => window.removeEventListener("storage", handleStorageChange);
-  }, [overviewInboxDecision?.workflowId]);
+  }, [priorityDecision?.id, priorityDecision?.workflowId, overviewInboxDecision?.workflowId]);
 
   // Pure navigation focus, not a state change: scrolls to and puts real DOM
   // focus on whichever element (if any) was securely matched and marked
