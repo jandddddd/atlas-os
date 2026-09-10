@@ -10,9 +10,11 @@ import { TodayCompletionNotice } from "@/components/today/TodayCompletionNotice"
 import { TodayEmptyState } from "@/components/today/TodayEmptyState";
 import { TodayHeader } from "@/components/today/TodayHeader";
 import {
+  findOfferWorkspaceEntry,
   loadClarificationDraftForWorkflowId,
   loadInquiryAnalysis,
   loadOfferDraftForAnalysis,
+  loadOfferWorkspace,
   markOfferWorkspaceReviewed,
 } from "@/lib/storage/inbox-storage";
 import type {
@@ -171,6 +173,17 @@ export function TodayApprovalCenter({
   const [liveInboxWorkflowId, setLiveInboxWorkflowId] = useState<string | null>(null);
   const [overviewClarificationDraftWorkflowId, setOverviewClarificationDraftWorkflowId] =
     useState<string | null>(null);
+  // Workflow ids for which a matching OfferWorkspaceEntry was confirmed to
+  // exist, scoped separately to whichever decision (priority vs. overview)
+  // is currently rendering the dynamic Inbox case. Deliberately independent
+  // of liveInboxWorkflowId: an older, still-valid offer draft must remain
+  // reachable even after the Inbox single slot has moved on to another case.
+  const [priorityOfferWorkspaceWorkflowId, setPriorityOfferWorkspaceWorkflowId] = useState<
+    string | null
+  >(null);
+  const [overviewOfferWorkspaceWorkflowId, setOverviewOfferWorkspaceWorkflowId] = useState<
+    string | null
+  >(null);
 
   const [priorityDecisionId, ...overviewDecisionIds] = visibleDecisionIds;
   const priorityDecision = priorityDecisionId
@@ -198,6 +211,23 @@ export function TodayApprovalCenter({
   const hasClarificationDraftForOverviewInboxDecision =
     overviewInboxDecision?.workflowId !== undefined &&
     overviewInboxDecision.workflowId === overviewClarificationDraftWorkflowId;
+  // Same workflow-scoped matching rule as the clarification checks above,
+  // applied to the Offer Workspace archive instead of the clarification
+  // draft binding. Only decision.id === inboxTodayDecisionId with an exact
+  // workflowId match may ever resolve a link; a legacy decision with no
+  // workflowId, a static fixture, or an unrelated OfferWorkspaceEntry can
+  // never match.
+  const priorityOfferHref =
+    priorityDecision?.id === inboxTodayDecisionId &&
+    priorityDecision.workflowId !== undefined &&
+    priorityDecision.workflowId === priorityOfferWorkspaceWorkflowId
+      ? `/offers/${encodeURIComponent(priorityDecision.workflowId)}`
+      : undefined;
+  const overviewOfferHref =
+    overviewInboxDecision?.workflowId !== undefined &&
+    overviewInboxDecision.workflowId === overviewOfferWorkspaceWorkflowId
+      ? `/offers/${encodeURIComponent(overviewInboxDecision.workflowId)}`
+      : undefined;
   // A pure navigation/focus match, never a priority decision: inboxTodayDecisionId
   // alone is not enough, since it is a fixed constant reused across any
   // dynamic Inbox decision snapshot, not a per-analysis identity. workflowId
@@ -224,6 +254,15 @@ export function TodayApprovalCenter({
           ? overviewWorkflowId
           : null,
       );
+      const offerWorkspace = loadOfferWorkspace();
+      setPriorityOfferWorkspaceWorkflowId(
+        workflowId && findOfferWorkspaceEntry(offerWorkspace, workflowId) ? workflowId : null,
+      );
+      setOverviewOfferWorkspaceWorkflowId(
+        overviewWorkflowId && findOfferWorkspaceEntry(offerWorkspace, overviewWorkflowId)
+          ? overviewWorkflowId
+          : null,
+      );
       setLiveInboxWorkflowId(loadInquiryAnalysis()?.workflowId ?? null);
     });
 
@@ -246,11 +285,31 @@ export function TodayApprovalCenter({
           ? overviewInboxDecision.workflowId
           : null,
       );
+      // Symmetric with the effect above: an offer created/removed for the
+      // dynamic Inbox decision in another tab must revalidate the link
+      // regardless of whether that decision is currently primary or in the
+      // overview list. Loaded once and reused for both checks.
+      const offerWorkspace = loadOfferWorkspace();
+      const priorityWorkflowId =
+        priorityDecision?.id === inboxTodayDecisionId
+          ? priorityDecision.workflowId
+          : undefined;
+      setPriorityOfferWorkspaceWorkflowId(
+        priorityWorkflowId && findOfferWorkspaceEntry(offerWorkspace, priorityWorkflowId)
+          ? priorityWorkflowId
+          : null,
+      );
+      const overviewWorkflowId = overviewInboxDecision?.workflowId;
+      setOverviewOfferWorkspaceWorkflowId(
+        overviewWorkflowId && findOfferWorkspaceEntry(offerWorkspace, overviewWorkflowId)
+          ? overviewWorkflowId
+          : null,
+      );
     }
 
     window.addEventListener("storage", handleStorageChange);
     return () => window.removeEventListener("storage", handleStorageChange);
-  }, [overviewInboxDecision?.workflowId]);
+  }, [priorityDecision?.id, priorityDecision?.workflowId, overviewInboxDecision?.workflowId]);
 
   // Pure navigation focus, not a state change: scrolls to and puts real DOM
   // focus on whichever element (if any) was securely matched and marked
@@ -299,6 +358,7 @@ export function TodayApprovalCenter({
         decision.id === inboxTodayDecisionId && hasClarificationDraftForOverviewInboxDecision
           ? `${decision.overviewMeta} · Rückfrage vorbereitet`
           : decision.overviewMeta,
+      offerHref: decision.id === inboxTodayDecisionId ? overviewOfferHref : undefined,
     }));
   const hasDecisions = visibleDecisionIds.length > 0;
 
@@ -548,6 +608,15 @@ export function TodayApprovalCenter({
                 expanded: expandedDetailsId === priorityDecision.id,
                 isDisabled: isSubmittingPriorityDecision,
               },
+              ...(priorityOfferHref
+                ? [
+                    {
+                      label: "Angebot öffnen",
+                      href: priorityOfferHref,
+                      isDisabled: isSubmittingPriorityDecision,
+                    },
+                  ]
+                : []),
             ]}
           />
           </div>

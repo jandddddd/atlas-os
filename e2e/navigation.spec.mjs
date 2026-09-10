@@ -224,6 +224,14 @@ test("Inbox → Today Handoff fokussiert die dynamische Inbox-Decision, ohne sie
   // Accessible handoff: keyboard and screen reader users must land on the
   // same target as the visual highlight, not just see it scrolled into view.
   await expect(focusedItem).toBeFocused();
+  // The handoff target is the real decision button itself, not a
+  // non-interactive card wrapper: real button semantics/accessible name
+  // and Enter/Space activation must be preserved for screen reader and
+  // keyboard users.
+  const overviewDecisionButton = page.getByRole("button", {
+    name: "Angebotsentwurf Familie Schneider vorbereiten",
+  });
+  await expect(overviewDecisionButton).toBeFocused();
 
   // No prioritization mutation: the decision-state cookie must not record a
   // "prioritize" action for the inbox decision from this pure focus hint.
@@ -339,6 +347,44 @@ test("Ein bereits verarbeiteter Inbox-Handoff wird nach 'Später entscheiden' ni
   // The already-consumed handoff must not scroll/focus the just-moved
   // decision again.
   await expect(overviewItem).not.toBeFocused();
+});
+
+test("Overview Decision-Button behält einen sichtbaren Tastatur-Fokusindikator innerhalb der Card", async ({
+  page,
+}) => {
+  await page.goto("/inbox");
+  await fillInboxInquiry(page);
+  await page.getByRole("button", { name: "Anfrage analysieren" }).click();
+  await expect(page.getByRole("heading", { name: "Analyse abgeschlossen" })).toBeVisible();
+
+  await page.getByRole("link", { name: "In Heute weiterprüfen" }).click();
+  await expect(page).toHaveURL(/\/today\?focusWorkflowId=.+/);
+
+  // The static Weber fixture still outranks this fresh, normal-priority
+  // decision by default, so it stays under "Weitere Entscheidungen".
+  const overviewButton = page.getByRole("button", {
+    name: "Angebotsentwurf Familie Schneider vorbereiten",
+  });
+  await expect(overviewButton).toBeVisible();
+
+  // Establish a deterministic starting point, then use a real keyboard
+  // interaction (Tab away and Shift+Tab back) so Chromium's focus-visible
+  // heuristic genuinely applies, rather than relying on a bare .focus()
+  // call alone, which does not reliably trigger :focus-visible.
+  await overviewButton.focus();
+  await page.keyboard.press("Tab");
+  await page.keyboard.press("Shift+Tab");
+  await expect(overviewButton).toBeFocused();
+
+  const focusStyle = await overviewButton.evaluate((el) => {
+    const computed = window.getComputedStyle(el);
+    return { outlineStyle: computed.outlineStyle, boxShadow: computed.boxShadow };
+  });
+  // The focus indicator must be an inset ring rendered as a box-shadow, not
+  // an outline drawn outside the button's own box: the card wrapper clips
+  // anything extending past its border via overflow-hidden.
+  expect(focusStyle.outlineStyle).toBe("none");
+  expect(focusStyle.boxShadow).not.toBe("none");
 });
 
 test("Ein fremder oder ungültiger focusWorkflowId fokussiert keine Decision", async ({ page }) => {
