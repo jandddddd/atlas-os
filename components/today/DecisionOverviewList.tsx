@@ -51,17 +51,16 @@ export function DecisionOverviewList({
         {decisions.map((decision) => (
           <div
             key={decision.id}
-            data-handoff-focused={decision.id === focusedDecisionId ? "true" : undefined}
-            tabIndex={decision.id === focusedDecisionId ? -1 : undefined}
             className={
               decision.id === focusedDecisionId
-                ? "rounded-3xl border border-neutral-200 bg-white p-6 shadow-sm ring-2 ring-emerald-400 transition hover:border-neutral-300 hover:shadow-md focus:outline-none"
-                : "rounded-3xl border border-neutral-200 bg-white p-6 shadow-sm transition hover:border-neutral-300 hover:shadow-md"
+                ? "overflow-hidden rounded-3xl border border-neutral-200 bg-white shadow-sm ring-2 ring-emerald-400 transition hover:border-neutral-300 hover:shadow-md"
+                : "overflow-hidden rounded-3xl border border-neutral-200 bg-white shadow-sm transition hover:border-neutral-300 hover:shadow-md"
             }
           >
             <button
               type="button"
-              className="w-full text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-neutral-900 disabled:cursor-not-allowed disabled:opacity-60"
+              data-handoff-focused={decision.id === focusedDecisionId ? "true" : undefined}
+              className="w-full p-6 text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-neutral-900 disabled:cursor-not-allowed disabled:opacity-60"
               disabled={isDisabled}
               onClick={() => onSelect(decision.id)}
             >
@@ -74,12 +73,14 @@ export function DecisionOverviewList({
               </p>
             </button>
             {decision.offerHref ? (
-              <Link
-                href={decision.offerHref}
-                className="mt-4 inline-flex text-sm font-medium text-neutral-700 underline-offset-4 hover:underline"
-              >
-                Angebot öffnen
-              </Link>
+              <div className="border-t border-neutral-200 px-6 py-4">
+                <Link
+                  href={decision.offerHref}
+                  className="inline-flex text-sm font-medium text-neutral-700 underline-offset-4 hover:underline"
+                >
+                  Angebot öffnen
+                </Link>
+              </div>
             ) : null}
           </div>
         ))}

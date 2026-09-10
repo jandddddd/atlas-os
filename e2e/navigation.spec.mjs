@@ -224,6 +224,14 @@ test("Inbox → Today Handoff fokussiert die dynamische Inbox-Decision, ohne sie
   // Accessible handoff: keyboard and screen reader users must land on the
   // same target as the visual highlight, not just see it scrolled into view.
   await expect(focusedItem).toBeFocused();
+  // The handoff target is the real decision button itself, not a
+  // non-interactive card wrapper: real button semantics/accessible name
+  // and Enter/Space activation must be preserved for screen reader and
+  // keyboard users.
+  const overviewDecisionButton = page.getByRole("button", {
+    name: "Angebotsentwurf Familie Schneider vorbereiten",
+  });
+  await expect(overviewDecisionButton).toBeFocused();
 
   // No prioritization mutation: the decision-state cookie must not record a
   // "prioritize" action for the inbox decision from this pure focus hint.

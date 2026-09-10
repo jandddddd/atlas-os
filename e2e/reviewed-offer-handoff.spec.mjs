@@ -766,6 +766,37 @@ test("Today Overview-Handoff öffnet das Angebot ohne die Decision zu priorisier
   expect(decisionCookieAfter?.value).toBe(decisionCookieBefore?.value);
 });
 
+test("Die vollständige Decision-Card-Fläche bleibt klickbar, nicht nur der Text", async ({
+  page,
+}) => {
+  await fillAndAnalyze(page);
+
+  await page.getByRole("link", { name: "In Heute weiterprüfen" }).click();
+  await expect(page).toHaveURL(/\/today\?focusWorkflowId=.+/);
+
+  const overviewButton = page.getByRole("button", { name: inboxDecisionTitle });
+  await expect(overviewButton).toBeVisible();
+  // The overview card itself already renders a heading with this exact
+  // title, so a bare page-wide heading assertion below would pass even
+  // without any click at all; scope the outcome check to the primary
+  // region specifically to actually prove prioritization happened.
+  const priorityRegion = page.getByRole("region", { name: "Heute zuerst" });
+  await expect(priorityRegion).not.toContainText(inboxDecisionTitle);
+
+  // Click near the visible card's own edge/padding, deliberately not on any
+  // text or heading: before the fix, this padding belonged to a
+  // non-interactive wrapper around the button and did not trigger onSelect.
+  const cardWrapper = overviewButton.locator("xpath=..");
+  await cardWrapper.scrollIntoViewIfNeeded();
+  const cardBox = await cardWrapper.boundingBox();
+  expect(cardBox).not.toBeNull();
+  await page.mouse.click(cardBox.x + 8, cardBox.y + 8);
+
+  // The existing prioritize flow still fires from that click: the decision
+  // becomes the primary "Heute zuerst" card.
+  await expect(priorityRegion).toContainText(inboxDecisionTitle);
+});
+
 test("Today zeigt keinen Offer-Link, wenn noch kein Angebot existiert", async ({ page }) => {
   await fillAndAnalyze(page);
 
