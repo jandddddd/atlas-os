@@ -242,6 +242,11 @@ test("Inbox → Today Handoff fokussiert die dynamische Inbox-Decision, ohne sie
 test("Inbox → Today Handoff fokussiert die dynamische Inbox-Decision, wenn sie bereits Heute zuerst ist", async ({
   page,
 }) => {
+  // A small/mobile viewport, deliberately shorter than the full primary
+  // ApprovalCard: this is exactly the case where centering the card instead
+  // of aligning it to the start would push its own heading out of view.
+  await page.setViewportSize({ width: 390, height: 600 });
+
   const highPriorityAnalysisFixture = {
     ...inboxAnalysisFixture,
     workflow: { ...inboxAnalysisFixture.workflow, priority: "high" },
@@ -266,13 +271,23 @@ test("Inbox → Today Handoff fokussiert die dynamische Inbox-Decision, wenn sie
   await page.getByRole("link", { name: "In Heute weiterprüfen" }).click();
   await expect(page).toHaveURL(`/today?focusWorkflowId=${analysis.workflowId}`);
 
-  await expect(
-    page.getByRole("heading", { name: "Angebotsentwurf Familie Schneider vorbereiten" }),
-  ).toBeVisible();
+  const handoffHeading = page.getByRole("heading", {
+    name: "Angebotsentwurf Familie Schneider vorbereiten",
+  });
+  await expect(handoffHeading).toBeVisible();
 
   const focusedItem = page.locator('[data-handoff-focused="true"]');
   await expect(focusedItem).toBeVisible();
   await expect(focusedItem).toBeFocused();
+
+  // The card's own heading must stay within the visible viewport instead of
+  // landing above it, which block: "center" could do on a card taller than
+  // the viewport.
+  await expect(async () => {
+    const headingBox = await handoffHeading.boundingBox();
+    expect(headingBox).not.toBeNull();
+    expect(headingBox.y).toBeGreaterThanOrEqual(0);
+  }).toPass();
 });
 
 test("Ein fremder oder ungültiger focusWorkflowId fokussiert keine Decision", async ({ page }) => {

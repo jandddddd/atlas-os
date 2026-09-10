@@ -256,7 +256,12 @@ export function TodayApprovalCenter({
       const target = document.querySelector<HTMLElement>(
         '[data-handoff-focused="true"]',
       );
-      target?.scrollIntoView({ block: "center" });
+      // The primary "Heute zuerst" wrapper contains the full ApprovalCard,
+      // which can be taller than small/mobile viewports; centering it can
+      // push its own heading above the visible area. Aligning to the start
+      // keeps the card's title in view instead. The overview button is
+      // compact enough that centering it remains the better default.
+      target?.scrollIntoView({ block: isPriorityDecisionFocused ? "start" : "center" });
       target?.focus();
     });
 
