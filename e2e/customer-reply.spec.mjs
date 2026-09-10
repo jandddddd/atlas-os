@@ -74,7 +74,7 @@ async function readLocalStorageJson(page, key) {
 
 async function goToTodayAndApprove(page, decisionTitle) {
   await page.getByRole("link", { name: "In Heute weiterprüfen" }).click();
-  await expect(page).toHaveURL("/today");
+  await expect(page).toHaveURL(/\/today\?focusWorkflowId=.+/);
   await page.getByRole("button", { name: decisionTitle }).click();
   await expect(page.getByRole("heading", { name: decisionTitle })).toBeVisible();
   await page.getByRole("button", { name: "Als geprüft vormerken" }).click();

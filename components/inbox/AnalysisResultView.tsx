@@ -235,7 +235,11 @@ export function AnalysisResultView({
 
         {isTodayHandoffAvailable ? (
           <Link
-            href="/today"
+            href={
+              analysis.workflowId
+                ? { pathname: "/today", query: { focusWorkflowId: analysis.workflowId } }
+                : "/today"
+            }
             className="inline-flex items-center gap-2 rounded-xl px-4 py-3 font-medium text-neutral-700 transition hover:bg-emerald-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-neutral-900"
           >
             In Heute weiterprüfen

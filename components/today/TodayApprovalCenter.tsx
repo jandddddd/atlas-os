@@ -68,6 +68,13 @@ type TodayApprovalCenterProps = {
   dateLabel: string;
   initialCompletionStatus: CompletionStatus;
   decisions: TodayApprovalDecision[];
+  /**
+   * A pure navigation/focus hint carried over from an Inbox handoff. Never
+   * used to prioritize, approve, or otherwise mutate any decision state —
+   * only to scroll to and visually highlight the matching decision, once
+   * its identity has been confirmed against decision.workflowId.
+   */
+  focusWorkflowId?: string;
 };
 
 function filterCompletedDecisionIds(
@@ -121,6 +128,7 @@ export function TodayApprovalCenter({
   dateLabel,
   initialCompletionStatus,
   decisions,
+  focusWorkflowId,
 }: TodayApprovalCenterProps) {
   const [priorityByDecisionId, setPriorityByDecisionId] = useState<
     Record<string, TodayDecisionPriorityExplanation>
@@ -182,6 +190,19 @@ export function TodayApprovalCenter({
   const hasClarificationDraftForOverviewInboxDecision =
     overviewInboxDecision?.workflowId !== undefined &&
     overviewInboxDecision.workflowId === overviewClarificationDraftWorkflowId;
+  // A pure navigation/focus match, never a priority decision: inboxTodayDecisionId
+  // alone is not enough, since it is a fixed constant reused across any
+  // dynamic Inbox decision snapshot, not a per-analysis identity. workflowId
+  // is the only safe identity to confirm this is genuinely the same case the
+  // Inbox handoff came from.
+  const isPriorityDecisionFocused =
+    priorityDecision?.id === inboxTodayDecisionId &&
+    priorityDecision.workflowId !== undefined &&
+    priorityDecision.workflowId === focusWorkflowId;
+  const isOverviewInboxDecisionFocused =
+    overviewInboxDecision !== undefined &&
+    overviewInboxDecision.workflowId !== undefined &&
+    overviewInboxDecision.workflowId === focusWorkflowId;
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => {
@@ -222,6 +243,24 @@ export function TodayApprovalCenter({
     window.addEventListener("storage", handleStorageChange);
     return () => window.removeEventListener("storage", handleStorageChange);
   }, [overviewInboxDecision?.workflowId]);
+
+  // Pure navigation focus, not a state change: scrolls to whichever element
+  // (if any) was securely matched and marked with data-handoff-focused above.
+  // Does nothing when focusWorkflowId is absent, unmatched, or stale.
+  useEffect(() => {
+    if (!focusWorkflowId) return;
+
+    const frame = window.requestAnimationFrame(() => {
+      document
+        .querySelector('[data-handoff-focused="true"]')
+        ?.scrollIntoView({ block: "center" });
+    });
+
+    return () => window.cancelAnimationFrame(frame);
+  }, [focusWorkflowId, isPriorityDecisionFocused, isOverviewInboxDecisionFocused]);
+  const focusedOverviewDecisionId = isOverviewInboxDecisionFocused
+    ? overviewInboxDecision?.id
+    : undefined;
   const overviewDecisions = overviewDecisionIds
     .map((decisionId) => decisionById.get(decisionId))
     .filter((decision): decision is TodayApprovalDecision => Boolean(decision))
@@ -425,6 +464,14 @@ export function TodayApprovalCenter({
 
       {hasDecisions && priorityDecision ? (
         <>
+          <div
+            data-handoff-focused={isPriorityDecisionFocused ? "true" : undefined}
+            className={
+              isPriorityDecisionFocused
+                ? "rounded-[2rem] ring-2 ring-emerald-400 ring-offset-2 ring-offset-neutral-50"
+                : undefined
+            }
+          >
           <ApprovalCard
             {...priorityDecision}
             details={{
@@ -475,10 +522,12 @@ export function TodayApprovalCenter({
               },
             ]}
           />
+          </div>
           <DecisionOverviewList
             decisions={overviewDecisions}
             onSelect={prioritizeDecision}
             isDisabled={isSubmittingPriorityDecision}
+            focusedDecisionId={focusedOverviewDecisionId}
           />
         </>
       ) : (
