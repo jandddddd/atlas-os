@@ -157,6 +157,14 @@ export function TodayApprovalCenter({
   const [submissionError, setSubmissionError] = useState<SubmissionErrorStatus>(null);
   const [isSubmittingPriorityDecision, setIsSubmittingPriorityDecision] = useState(false);
   const priorityDecisionSubmissionInProgress = useRef(false);
+  // Marks the focusWorkflowId already handled by the Inbox handoff effect
+  // below. The handoff is a one-time navigation event, not a reactive
+  // state: once applied for a given workflow, later business actions (e.g.
+  // postponing the decision into the overview list) must not scroll/focus
+  // it again, even though that action flips isPriorityDecisionFocused and
+  // isOverviewInboxDecisionFocused. A ref (not state) is used deliberately,
+  // since marking it must never itself trigger a re-render.
+  const processedFocusWorkflowIdRef = useRef<string | null>(null);
   const [clarificationDraftWorkflowId, setClarificationDraftWorkflowId] = useState<
     string | null
   >(null);
@@ -248,11 +256,21 @@ export function TodayApprovalCenter({
   // focus on whichever element (if any) was securely matched and marked
   // with data-handoff-focused above, so keyboard and screen reader users
   // land on the same target as the visual highlight. Does nothing when
-  // focusWorkflowId is absent, unmatched, or stale.
+  // focusWorkflowId is absent, unmatched, or stale, and runs at most once
+  // per focusWorkflowId value regardless of how often the priority/overview
+  // booleans below flip afterwards from unrelated decision actions.
   useEffect(() => {
     if (!focusWorkflowId) return;
+    if (processedFocusWorkflowIdRef.current === focusWorkflowId) return;
 
     const frame = window.requestAnimationFrame(() => {
+      // Marked here, inside the frame that actually runs, rather than
+      // synchronously above: if this effect re-runs and cancels the frame
+      // before it fires (e.g. two renders settling in quick succession),
+      // the handoff must still be retried, not silently consumed without
+      // ever having scrolled/focused anything.
+      processedFocusWorkflowIdRef.current = focusWorkflowId;
+
       const target = document.querySelector<HTMLElement>(
         '[data-handoff-focused="true"]',
       );

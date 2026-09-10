@@ -290,6 +290,57 @@ test("Inbox → Today Handoff fokussiert die dynamische Inbox-Decision, wenn sie
   }).toPass();
 });
 
+test("Ein bereits verarbeiteter Inbox-Handoff wird nach 'Später entscheiden' nicht erneut fokussiert", async ({
+  page,
+}) => {
+  const inboxDecisionTitle = "Angebotsentwurf Familie Schneider vorbereiten";
+  const highPriorityAnalysisFixture = {
+    ...inboxAnalysisFixture,
+    workflow: { ...inboxAnalysisFixture.workflow, priority: "high" },
+  };
+  await page.route("**/api/analyze-inquiry", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ analysis: highPriorityAnalysisFixture }),
+    });
+  });
+
+  await page.goto("/inbox");
+  await fillInboxInquiry(page);
+  await page.getByRole("button", { name: "Anfrage analysieren" }).click();
+  await expect(page.getByRole("heading", { name: "Analyse abgeschlossen" })).toBeVisible();
+
+  const analysis = await page.evaluate(() =>
+    JSON.parse(window.localStorage.getItem("atlas-inquiry-analysis")),
+  );
+
+  await page.getByRole("link", { name: "In Heute weiterprüfen" }).click();
+  await expect(page).toHaveURL(`/today?focusWorkflowId=${analysis.workflowId}`);
+
+  const priorityRegion = page.getByRole("region", { name: "Heute zuerst" });
+  await expect(priorityRegion).toContainText(inboxDecisionTitle);
+
+  const initialFocusedItem = page.locator('[data-handoff-focused="true"]');
+  await expect(initialFocusedItem).toBeFocused();
+
+  // The initial handoff for this focusWorkflowId is already consumed here.
+  // Postponing moves the same dynamic decision into the overview list,
+  // which flips isPriorityDecisionFocused/isOverviewInboxDecisionFocused,
+  // but must not re-trigger the scroll/focus effect.
+  await page.getByRole("button", { name: "Später entscheiden" }).click();
+
+  // The postpone action itself still works correctly: the decision is no
+  // longer primary and now appears as an overview item instead.
+  await expect(priorityRegion).not.toContainText(inboxDecisionTitle);
+  const overviewItem = page.getByRole("button", { name: inboxDecisionTitle });
+  await expect(overviewItem).toBeVisible();
+
+  // The already-consumed handoff must not scroll/focus the just-moved
+  // decision again.
+  await expect(overviewItem).not.toBeFocused();
+});
+
 test("Ein fremder oder ungültiger focusWorkflowId fokussiert keine Decision", async ({ page }) => {
   await page.goto("/inbox");
   await fillInboxInquiry(page);
