@@ -420,6 +420,124 @@ test("Today zeigt keinen Rückfrage-Hinweis ohne vorbereiteten Rückfrageentwurf
   ).toHaveCount(0);
 });
 
+test("Weitere Entscheidungen zeigt 'Rückfrage vorbereitet' für die dynamische Inbox-Decision, wenn ein passender Draft existiert", async ({ page }) => {
+  const inboxDecisionTitle = "Angebotsentwurf Familie Schneider vorbereiten";
+
+  await page.goto("/inbox");
+  await fillInboxInquiry(page);
+  await page.getByRole("button", { name: "Anfrage analysieren" }).click();
+  await expect(page.getByRole("heading", { name: "Analyse abgeschlossen" })).toBeVisible();
+  await page.getByRole("button", { name: "Rückfrage vorbereiten" }).click();
+  await expect(page.getByRole("region", { name: "Rückfrageentwurf" })).toBeVisible();
+
+  await page.getByRole("link", { name: "In Heute weiterprüfen" }).click();
+  await expect(page).toHaveURL("/today");
+
+  // Deliberately not promoted to priority: this decision must show its
+  // status directly from the collapsed "Weitere Entscheidungen" row.
+  const overviewItem = page.getByRole("button", { name: inboxDecisionTitle });
+  await expect(overviewItem).toBeVisible();
+  await expect(overviewItem).toContainText("Rückfrage vorbereitet");
+});
+
+test("Weitere Entscheidungen zeigt keinen Rückfrage-Status ohne vorbereiteten Draft", async ({ page }) => {
+  const inboxDecisionTitle = "Angebotsentwurf Familie Schneider vorbereiten";
+
+  await page.goto("/inbox");
+  await fillInboxInquiry(page);
+  await page.getByRole("button", { name: "Anfrage analysieren" }).click();
+  await expect(page.getByRole("heading", { name: "Analyse abgeschlossen" })).toBeVisible();
+
+  await page.getByRole("link", { name: "In Heute weiterprüfen" }).click();
+  await expect(page).toHaveURL("/today");
+
+  const overviewItem = page.getByRole("button", { name: inboxDecisionTitle });
+  await expect(overviewItem).toBeVisible();
+  await expect(overviewItem).not.toContainText("Rückfrage vorbereitet");
+  await expect(overviewItem).toContainText("Angebot · Prüfung offen");
+});
+
+test("Weitere Entscheidungen behält 'Rückfrage vorbereitet' bei einem fremden live Inbox-Workflow", async ({ page }) => {
+  const inboxDecisionTitle = "Angebotsentwurf Familie Schneider vorbereiten";
+
+  await page.goto("/inbox");
+  await fillInboxInquiry(page);
+  await page.getByRole("button", { name: "Anfrage analysieren" }).click();
+  await expect(page.getByRole("heading", { name: "Analyse abgeschlossen" })).toBeVisible();
+  await page.getByRole("button", { name: "Rückfrage vorbereiten" }).click();
+  await expect(page.getByRole("region", { name: "Rückfrageentwurf" })).toBeVisible();
+
+  await page.getByRole("link", { name: "In Heute weiterprüfen" }).click();
+  await expect(page).toHaveURL("/today");
+
+  // The live Inbox slot moves on to an unrelated workflow. The overview
+  // status is scoped to the decision's own workflowId and must stay correct
+  // regardless of liveInboxWorkflowId, unlike the "Ändern" edit handoff.
+  await page.evaluate(() => {
+    const currentAnalysis = JSON.parse(
+      window.localStorage.getItem("atlas-inquiry-analysis"),
+    );
+    currentAnalysis.workflowId = "unrelated-workflow-b";
+    window.localStorage.setItem(
+      "atlas-inquiry-analysis",
+      JSON.stringify(currentAnalysis),
+    );
+  });
+  await page.reload();
+
+  const overviewItem = page.getByRole("button", { name: inboxDecisionTitle });
+  await expect(overviewItem).toBeVisible();
+  await expect(overviewItem).toContainText("Rückfrage vorbereitet");
+});
+
+test("Weitere Entscheidungen erkennt einen Cross-Tab-Draft ohne Reload", async ({
+  page,
+  context,
+}) => {
+  const inboxDecisionTitle = "Angebotsentwurf Familie Schneider vorbereiten";
+
+  await page.goto("/inbox");
+  await fillInboxInquiry(page);
+  await page.getByRole("button", { name: "Anfrage analysieren" }).click();
+  await expect(page.getByRole("heading", { name: "Analyse abgeschlossen" })).toBeVisible();
+
+  await page.getByRole("link", { name: "In Heute weiterprüfen" }).click();
+  await expect(page).toHaveURL("/today");
+
+  const overviewItem = page.getByRole("button", { name: inboxDecisionTitle });
+  await expect(overviewItem).toBeVisible();
+  await expect(overviewItem).not.toContainText("Rückfrage vorbereitet");
+
+  // A genuine second tab shares the same localStorage origin, so writing
+  // there fires a native "storage" event in the first tab (a same-tab write
+  // never fires this event at all).
+  const secondTab = await context.newPage();
+  await secondTab.goto("/inbox");
+  await secondTab.evaluate(() => {
+    const currentAnalysis = JSON.parse(
+      window.localStorage.getItem("atlas-inquiry-analysis"),
+    );
+    window.localStorage.setItem(
+      "atlas-clarification-draft",
+      JSON.stringify({
+        customerName: currentAnalysis.customer.name,
+        subject: "Rückfrage zu Ihrer Anfrage",
+        message: "Bitte ergänzen Sie die fehlenden Angaben.",
+        missingInformation: currentAnalysis.missingInformation,
+        status: "draft",
+      }),
+    );
+    window.localStorage.setItem(
+      "atlas-clarification-draft-analysis-binding",
+      JSON.stringify({ version: 1, workflowId: currentAnalysis.workflowId }),
+    );
+  });
+  await secondTab.close();
+
+  // No reload: Today must notice the cross-tab draft while staying mounted.
+  await expect(overviewItem).toContainText("Rückfrage vorbereitet");
+});
+
 test("Today zeigt den Hinweis nicht für einen Rückfrageentwurf einer fremden workflowId", async ({ page }) => {
   const inboxDecisionTitle = "Angebotsentwurf Familie Schneider vorbereiten";
 
