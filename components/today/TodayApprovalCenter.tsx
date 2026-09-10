@@ -244,16 +244,20 @@ export function TodayApprovalCenter({
     return () => window.removeEventListener("storage", handleStorageChange);
   }, [overviewInboxDecision?.workflowId]);
 
-  // Pure navigation focus, not a state change: scrolls to whichever element
-  // (if any) was securely matched and marked with data-handoff-focused above.
-  // Does nothing when focusWorkflowId is absent, unmatched, or stale.
+  // Pure navigation focus, not a state change: scrolls to and puts real DOM
+  // focus on whichever element (if any) was securely matched and marked
+  // with data-handoff-focused above, so keyboard and screen reader users
+  // land on the same target as the visual highlight. Does nothing when
+  // focusWorkflowId is absent, unmatched, or stale.
   useEffect(() => {
     if (!focusWorkflowId) return;
 
     const frame = window.requestAnimationFrame(() => {
-      document
-        .querySelector('[data-handoff-focused="true"]')
-        ?.scrollIntoView({ block: "center" });
+      const target = document.querySelector<HTMLElement>(
+        '[data-handoff-focused="true"]',
+      );
+      target?.scrollIntoView({ block: "center" });
+      target?.focus();
     });
 
     return () => window.cancelAnimationFrame(frame);
@@ -466,9 +470,10 @@ export function TodayApprovalCenter({
         <>
           <div
             data-handoff-focused={isPriorityDecisionFocused ? "true" : undefined}
+            tabIndex={isPriorityDecisionFocused ? -1 : undefined}
             className={
               isPriorityDecisionFocused
-                ? "rounded-[2rem] ring-2 ring-emerald-400 ring-offset-2 ring-offset-neutral-50"
+                ? "rounded-[2rem] ring-2 ring-emerald-400 ring-offset-2 ring-offset-neutral-50 focus:outline-none"
                 : undefined
             }
           >

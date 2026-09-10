@@ -221,6 +221,9 @@ test("Inbox → Today Handoff fokussiert die dynamische Inbox-Decision, ohne sie
   const focusedItem = page.locator('[data-handoff-focused="true"]');
   await expect(focusedItem).toBeVisible();
   await expect(focusedItem).toContainText("Angebotsentwurf Familie Schneider vorbereiten");
+  // Accessible handoff: keyboard and screen reader users must land on the
+  // same target as the visual highlight, not just see it scrolled into view.
+  await expect(focusedItem).toBeFocused();
 
   // No prioritization mutation: the decision-state cookie must not record a
   // "prioritize" action for the inbox decision from this pure focus hint.
@@ -234,6 +237,42 @@ test("Inbox → Today Handoff fokussiert die dynamische Inbox-Decision, ohne sie
       action: "prioritize",
     });
   }
+});
+
+test("Inbox → Today Handoff fokussiert die dynamische Inbox-Decision, wenn sie bereits Heute zuerst ist", async ({
+  page,
+}) => {
+  const highPriorityAnalysisFixture = {
+    ...inboxAnalysisFixture,
+    workflow: { ...inboxAnalysisFixture.workflow, priority: "high" },
+  };
+  await page.route("**/api/analyze-inquiry", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ analysis: highPriorityAnalysisFixture }),
+    });
+  });
+
+  await page.goto("/inbox");
+  await fillInboxInquiry(page);
+  await page.getByRole("button", { name: "Anfrage analysieren" }).click();
+  await expect(page.getByRole("heading", { name: "Analyse abgeschlossen" })).toBeVisible();
+
+  const analysis = await page.evaluate(() =>
+    JSON.parse(window.localStorage.getItem("atlas-inquiry-analysis")),
+  );
+
+  await page.getByRole("link", { name: "In Heute weiterprüfen" }).click();
+  await expect(page).toHaveURL(`/today?focusWorkflowId=${analysis.workflowId}`);
+
+  await expect(
+    page.getByRole("heading", { name: "Angebotsentwurf Familie Schneider vorbereiten" }),
+  ).toBeVisible();
+
+  const focusedItem = page.locator('[data-handoff-focused="true"]');
+  await expect(focusedItem).toBeVisible();
+  await expect(focusedItem).toBeFocused();
 });
 
 test("Ein fremder oder ungültiger focusWorkflowId fokussiert keine Decision", async ({ page }) => {
@@ -251,6 +290,8 @@ test("Ein fremder oder ungültiger focusWorkflowId fokussiert keine Decision", a
   await expect(
     page.getByRole("heading", { name: "Besichtigung Weber als nächsten Schritt einplanen" }),
   ).toBeVisible();
+  // No accessible handoff focus was set anywhere on the page either.
+  expect(await page.evaluate(() => document.activeElement === document.body)).toBe(true);
 });
 
 test("Ein focusWorkflowId fokussiert eine legacy Inbox-Decision ohne workflowId nicht", async ({
@@ -290,6 +331,8 @@ test("Ein focusWorkflowId fokussiert eine legacy Inbox-Decision ohne workflowId 
   await page.goto("/today?focusWorkflowId=some-workflow-id");
   await expect(page.getByRole("heading", { name: legacyDecisionTitle })).toBeVisible();
   await expect(page.locator('[data-handoff-focused="true"]')).toHaveCount(0);
+  // No accessible handoff focus was set anywhere on the page either.
+  expect(await page.evaluate(() => document.activeElement === document.body)).toBe(true);
 });
 
 test("Ändern führt bei einer inzwischen fremden live Inbox-Analyse nicht mehr in den falschen Vorgang", async ({ page }) => {
