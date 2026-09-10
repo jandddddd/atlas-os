@@ -153,11 +153,21 @@ export function TodayApprovalCenter({
     string | null
   >(null);
   const [liveInboxWorkflowId, setLiveInboxWorkflowId] = useState<string | null>(null);
+  const [overviewClarificationDraftWorkflowId, setOverviewClarificationDraftWorkflowId] =
+    useState<string | null>(null);
 
   const [priorityDecisionId, ...overviewDecisionIds] = visibleDecisionIds;
   const priorityDecision = priorityDecisionId
     ? decisionById.get(priorityDecisionId) ?? null
     : null;
+  // The dynamic inbox decision is never both the priority decision and an
+  // overview decision at once, so at most one of these is ever defined.
+  const overviewInboxDecision = overviewDecisionIds
+    .map((decisionId) => decisionById.get(decisionId))
+    .find(
+      (decision): decision is TodayApprovalDecision =>
+        decision?.id === inboxTodayDecisionId,
+    );
   // Gate the note on the workflow ID actually being rendered right now, not
   // just on the last localStorage read: the read only resolves in a later
   // animation frame, but the priority decision itself can already change to
@@ -165,6 +175,13 @@ export function TodayApprovalCenter({
   const hasClarificationDraftForPriorityDecision =
     priorityDecision?.workflowId !== undefined &&
     priorityDecision.workflowId === clarificationDraftWorkflowId;
+  // Scoped to the overview decision's own workflowId, deliberately never to
+  // liveInboxWorkflowId: a prepared clarification stays valid for its own
+  // workflow regardless of which workflow currently occupies the single
+  // live Inbox slot.
+  const hasClarificationDraftForOverviewInboxDecision =
+    overviewInboxDecision?.workflowId !== undefined &&
+    overviewInboxDecision.workflowId === overviewClarificationDraftWorkflowId;
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => {
@@ -172,26 +189,39 @@ export function TodayApprovalCenter({
       setClarificationDraftWorkflowId(
         workflowId && loadClarificationDraftForWorkflowId(workflowId) ? workflowId : null,
       );
+      const overviewWorkflowId = overviewInboxDecision?.workflowId;
+      setOverviewClarificationDraftWorkflowId(
+        overviewWorkflowId && loadClarificationDraftForWorkflowId(overviewWorkflowId)
+          ? overviewWorkflowId
+          : null,
+      );
       setLiveInboxWorkflowId(loadInquiryAnalysis()?.workflowId ?? null);
     });
 
     return () => window.cancelAnimationFrame(frame);
-  }, [priorityDecision?.workflowId]);
+  }, [priorityDecision?.workflowId, overviewInboxDecision?.workflowId]);
 
-  // The above effect only re-reads the live Inbox workflow when the
-  // rendered priority decision itself changes, so it never notices another
-  // tab overwriting the single-slot Inbox analysis while this page stays
-  // mounted. The native "storage" event only fires in other tabs/windows of
-  // the same origin, which is exactly the cross-tab case to cover here; a
-  // same-tab write already goes through the effect above via navigation.
+  // The above effect only re-reads storage when the rendered priority or
+  // overview inbox decision itself changes, so it never notices another tab
+  // writing to the single-slot Inbox analysis or the clarification draft
+  // while this page stays mounted. The native "storage" event only fires in
+  // other tabs/windows of the same origin, which is exactly the cross-tab
+  // case to cover here; a same-tab write already goes through the effect
+  // above via navigation.
   useEffect(() => {
     function handleStorageChange() {
       setLiveInboxWorkflowId(loadInquiryAnalysis()?.workflowId ?? null);
+      setOverviewClarificationDraftWorkflowId(
+        overviewInboxDecision?.workflowId &&
+          loadClarificationDraftForWorkflowId(overviewInboxDecision.workflowId)
+          ? overviewInboxDecision.workflowId
+          : null,
+      );
     }
 
     window.addEventListener("storage", handleStorageChange);
     return () => window.removeEventListener("storage", handleStorageChange);
-  }, []);
+  }, [overviewInboxDecision?.workflowId]);
   const overviewDecisions = overviewDecisionIds
     .map((decisionId) => decisionById.get(decisionId))
     .filter((decision): decision is TodayApprovalDecision => Boolean(decision))
@@ -199,7 +229,10 @@ export function TodayApprovalCenter({
       id: decision.id,
       title: decision.overviewTitle,
       context: decision.overviewContext,
-      meta: decision.overviewMeta,
+      meta:
+        decision.id === inboxTodayDecisionId && hasClarificationDraftForOverviewInboxDecision
+          ? `${decision.overviewMeta} · Rückfrage vorbereitet`
+          : decision.overviewMeta,
     }));
   const hasDecisions = visibleDecisionIds.length > 0;
 
