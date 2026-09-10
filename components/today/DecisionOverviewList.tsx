@@ -60,7 +60,7 @@ export function DecisionOverviewList({
             <button
               type="button"
               data-handoff-focused={decision.id === focusedDecisionId ? "true" : undefined}
-              className="w-full p-6 text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-neutral-900 disabled:cursor-not-allowed disabled:opacity-60"
+              className="w-full p-6 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-neutral-900 disabled:cursor-not-allowed disabled:opacity-60"
               disabled={isDisabled}
               onClick={() => onSelect(decision.id)}
             >
