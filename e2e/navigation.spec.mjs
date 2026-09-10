@@ -159,7 +159,7 @@ test("Inbox und Today bilden einen beidseitigen Prüfpfad für die vorbereitete 
   await expect(page.getByRole("heading", { name: "Analyse abgeschlossen" })).toBeVisible();
 
   await page.getByRole("link", { name: "In Heute weiterprüfen" }).click();
-  await expect(page).toHaveURL("/today");
+  await expect(page).toHaveURL(/\/today\?focusWorkflowId=.+/);
   await page.getByRole("button", { name: inboxDecisionTitle }).click();
   await expect(page.getByRole("heading", { name: inboxDecisionTitle })).toBeVisible();
   const reviewContext = page.getByRole("region", { name: "Prüfgrundlage aus der Inbox" });
@@ -194,6 +194,213 @@ test("Inbox und Today bilden einen beidseitigen Prüfpfad für die vorbereitete 
   await expect(page.getByRole("link", { name: "In Heute weiterprüfen" })).toHaveCount(0);
 });
 
+test("Inbox → Today Handoff fokussiert die dynamische Inbox-Decision, ohne sie zu priorisieren", async ({
+  page,
+  context,
+}) => {
+  await page.goto("/inbox");
+  await fillInboxInquiry(page);
+  await page.getByRole("button", { name: "Anfrage analysieren" }).click();
+  await expect(page.getByRole("heading", { name: "Analyse abgeschlossen" })).toBeVisible();
+
+  const analysis = await page.evaluate(() =>
+    JSON.parse(window.localStorage.getItem("atlas-inquiry-analysis")),
+  );
+
+  await page.getByRole("link", { name: "In Heute weiterprüfen" }).click();
+  await expect(page).toHaveURL(`/today?focusWorkflowId=${analysis.workflowId}`);
+
+  // The static Weber fixture (high priority) still outranks the fresh,
+  // normal-priority Schneider decision by default, so the handoff must
+  // focus it inside "Weitere Entscheidungen" rather than promoting it to
+  // "Heute zuerst".
+  await expect(
+    page.getByRole("heading", { name: "Besichtigung Weber als nächsten Schritt einplanen" }),
+  ).toBeVisible();
+
+  const focusedItem = page.locator('[data-handoff-focused="true"]');
+  await expect(focusedItem).toBeVisible();
+  await expect(focusedItem).toContainText("Angebotsentwurf Familie Schneider vorbereiten");
+  // Accessible handoff: keyboard and screen reader users must land on the
+  // same target as the visual highlight, not just see it scrolled into view.
+  await expect(focusedItem).toBeFocused();
+
+  // No prioritization mutation: the decision-state cookie must not record a
+  // "prioritize" action for the inbox decision from this pure focus hint.
+  const decisionCookie = (await context.cookies(page.url())).find(
+    (cookie) => cookie.name === todayDecisionCookieName,
+  );
+  if (decisionCookie) {
+    const persistedState = JSON.parse(decodeURIComponent(decisionCookie.value));
+    expect(persistedState.decisions).not.toContainEqual({
+      decisionId: "inbox-recommended-task",
+      action: "prioritize",
+    });
+  }
+});
+
+test("Inbox → Today Handoff fokussiert die dynamische Inbox-Decision, wenn sie bereits Heute zuerst ist", async ({
+  page,
+}) => {
+  // A small/mobile viewport, deliberately shorter than the full primary
+  // ApprovalCard: this is exactly the case where centering the card instead
+  // of aligning it to the start would push its own heading out of view.
+  await page.setViewportSize({ width: 390, height: 600 });
+
+  const highPriorityAnalysisFixture = {
+    ...inboxAnalysisFixture,
+    workflow: { ...inboxAnalysisFixture.workflow, priority: "high" },
+  };
+  await page.route("**/api/analyze-inquiry", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ analysis: highPriorityAnalysisFixture }),
+    });
+  });
+
+  await page.goto("/inbox");
+  await fillInboxInquiry(page);
+  await page.getByRole("button", { name: "Anfrage analysieren" }).click();
+  await expect(page.getByRole("heading", { name: "Analyse abgeschlossen" })).toBeVisible();
+
+  const analysis = await page.evaluate(() =>
+    JSON.parse(window.localStorage.getItem("atlas-inquiry-analysis")),
+  );
+
+  await page.getByRole("link", { name: "In Heute weiterprüfen" }).click();
+  await expect(page).toHaveURL(`/today?focusWorkflowId=${analysis.workflowId}`);
+
+  const handoffHeading = page.getByRole("heading", {
+    name: "Angebotsentwurf Familie Schneider vorbereiten",
+  });
+  await expect(handoffHeading).toBeVisible();
+
+  const focusedItem = page.locator('[data-handoff-focused="true"]');
+  await expect(focusedItem).toBeVisible();
+  await expect(focusedItem).toBeFocused();
+
+  // The card's own heading must stay within the visible viewport instead of
+  // landing above it, which block: "center" could do on a card taller than
+  // the viewport.
+  await expect(async () => {
+    const headingBox = await handoffHeading.boundingBox();
+    expect(headingBox).not.toBeNull();
+    expect(headingBox.y).toBeGreaterThanOrEqual(0);
+  }).toPass();
+});
+
+test("Ein bereits verarbeiteter Inbox-Handoff wird nach 'Später entscheiden' nicht erneut fokussiert", async ({
+  page,
+}) => {
+  const inboxDecisionTitle = "Angebotsentwurf Familie Schneider vorbereiten";
+  const highPriorityAnalysisFixture = {
+    ...inboxAnalysisFixture,
+    workflow: { ...inboxAnalysisFixture.workflow, priority: "high" },
+  };
+  await page.route("**/api/analyze-inquiry", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ analysis: highPriorityAnalysisFixture }),
+    });
+  });
+
+  await page.goto("/inbox");
+  await fillInboxInquiry(page);
+  await page.getByRole("button", { name: "Anfrage analysieren" }).click();
+  await expect(page.getByRole("heading", { name: "Analyse abgeschlossen" })).toBeVisible();
+
+  const analysis = await page.evaluate(() =>
+    JSON.parse(window.localStorage.getItem("atlas-inquiry-analysis")),
+  );
+
+  await page.getByRole("link", { name: "In Heute weiterprüfen" }).click();
+  await expect(page).toHaveURL(`/today?focusWorkflowId=${analysis.workflowId}`);
+
+  const priorityRegion = page.getByRole("region", { name: "Heute zuerst" });
+  await expect(priorityRegion).toContainText(inboxDecisionTitle);
+
+  const initialFocusedItem = page.locator('[data-handoff-focused="true"]');
+  await expect(initialFocusedItem).toBeFocused();
+
+  // The initial handoff for this focusWorkflowId is already consumed here.
+  // Postponing moves the same dynamic decision into the overview list,
+  // which flips isPriorityDecisionFocused/isOverviewInboxDecisionFocused,
+  // but must not re-trigger the scroll/focus effect.
+  await page.getByRole("button", { name: "Später entscheiden" }).click();
+
+  // The postpone action itself still works correctly: the decision is no
+  // longer primary and now appears as an overview item instead.
+  await expect(priorityRegion).not.toContainText(inboxDecisionTitle);
+  const overviewItem = page.getByRole("button", { name: inboxDecisionTitle });
+  await expect(overviewItem).toBeVisible();
+
+  // The already-consumed handoff must not scroll/focus the just-moved
+  // decision again.
+  await expect(overviewItem).not.toBeFocused();
+});
+
+test("Ein fremder oder ungültiger focusWorkflowId fokussiert keine Decision", async ({ page }) => {
+  await page.goto("/inbox");
+  await fillInboxInquiry(page);
+  await page.getByRole("button", { name: "Anfrage analysieren" }).click();
+  await expect(page.getByRole("heading", { name: "Analyse abgeschlossen" })).toBeVisible();
+
+  await page.getByRole("link", { name: "In Heute weiterprüfen" }).click();
+  await expect(page).toHaveURL(/\/today/);
+
+  await page.goto("/today?focusWorkflowId=unrelated-or-invalid-workflow-id");
+
+  await expect(page.locator('[data-handoff-focused="true"]')).toHaveCount(0);
+  await expect(
+    page.getByRole("heading", { name: "Besichtigung Weber als nächsten Schritt einplanen" }),
+  ).toBeVisible();
+  // No accessible handoff focus was set anywhere on the page either.
+  expect(await page.evaluate(() => document.activeElement === document.body)).toBe(true);
+});
+
+test("Ein focusWorkflowId fokussiert eine legacy Inbox-Decision ohne workflowId nicht", async ({
+  page,
+  context,
+}) => {
+  const legacyDecisionTitle = "Altbestand ohne workflowId pruefen";
+  const legacyAnalysis = {
+    customer: { name: "Familie Alt" },
+    project: {
+      trade: "Malerarbeiten",
+      service: "Flur streichen",
+      estimatedArea: null,
+    },
+    workflow: {
+      priority: "high",
+      confidence: 0.7,
+      nextAction: "Entwurf pruefen",
+    },
+    nextSteps: [],
+    missingInformation: [],
+    recommendedTask: {
+      type: "offer",
+      title: legacyDecisionTitle,
+    },
+  };
+  await context.addCookies([
+    {
+      name: "atlas-inbox-today-decision",
+      value: JSON.stringify(legacyAnalysis),
+      url: "http://localhost:3000",
+      httpOnly: true,
+      sameSite: "Lax",
+    },
+  ]);
+
+  await page.goto("/today?focusWorkflowId=some-workflow-id");
+  await expect(page.getByRole("heading", { name: legacyDecisionTitle })).toBeVisible();
+  await expect(page.locator('[data-handoff-focused="true"]')).toHaveCount(0);
+  // No accessible handoff focus was set anywhere on the page either.
+  expect(await page.evaluate(() => document.activeElement === document.body)).toBe(true);
+});
+
 test("Ändern führt bei einer inzwischen fremden live Inbox-Analyse nicht mehr in den falschen Vorgang", async ({ page }) => {
   const inboxDecisionTitle = "Angebotsentwurf Familie Schneider vorbereiten";
 
@@ -203,7 +410,7 @@ test("Ändern führt bei einer inzwischen fremden live Inbox-Analyse nicht mehr 
   await expect(page.getByRole("heading", { name: "Analyse abgeschlossen" })).toBeVisible();
 
   await page.getByRole("link", { name: "In Heute weiterprüfen" }).click();
-  await expect(page).toHaveURL("/today");
+  await expect(page).toHaveURL(/\/today\?focusWorkflowId=.+/);
   await page.getByRole("button", { name: inboxDecisionTitle }).click();
   await expect(page.getByRole("heading", { name: inboxDecisionTitle })).toBeVisible();
 
@@ -227,7 +434,7 @@ test("Ändern führt bei einer inzwischen fremden live Inbox-Analyse nicht mehr 
   await expect(changeAction).toHaveCount(0);
   await page.getByRole("button", { name: "Ändern" }).click();
   await expect(page.getByText("Bearbeitungsansicht folgt.")).toBeVisible();
-  await expect(page).toHaveURL("/today");
+  await expect(page).toHaveURL(/\/today\?focusWorkflowId=.+/);
 
   const analysisAfter = await page.evaluate(() =>
     JSON.parse(window.localStorage.getItem("atlas-inquiry-analysis")),
@@ -247,7 +454,7 @@ test("Ändern erkennt einen echten Cross-Tab-Wechsel des live Inbox-Workflows oh
   await expect(page.getByRole("heading", { name: "Analyse abgeschlossen" })).toBeVisible();
 
   await page.getByRole("link", { name: "In Heute weiterprüfen" }).click();
-  await expect(page).toHaveURL("/today");
+  await expect(page).toHaveURL(/\/today\?focusWorkflowId=.+/);
   await page.getByRole("button", { name: inboxDecisionTitle }).click();
   await expect(page.getByRole("heading", { name: inboxDecisionTitle })).toBeVisible();
   await expect(page.getByRole("link", { name: "Ändern" })).toBeVisible();
@@ -275,7 +482,7 @@ test("Ändern erkennt einen echten Cross-Tab-Wechsel des live Inbox-Workflows oh
   await expect(changeAction).toHaveCount(0);
   await page.getByRole("button", { name: "Ändern" }).click();
   await expect(page.getByText("Bearbeitungsansicht folgt.")).toBeVisible();
-  await expect(page).toHaveURL("/today");
+  await expect(page).toHaveURL(/\/today\?focusWorkflowId=.+/);
 
   const analysisAfter = await page.evaluate(() =>
     JSON.parse(window.localStorage.getItem("atlas-inquiry-analysis")),
@@ -359,7 +566,7 @@ test("Today zeigt einen Hinweis, wenn für die Anfrage bereits eine Rückfrage v
   await expect(page.getByRole("region", { name: "Rückfrageentwurf" })).toBeVisible();
 
   await page.getByRole("link", { name: "In Heute weiterprüfen" }).click();
-  await expect(page).toHaveURL("/today");
+  await expect(page).toHaveURL(/\/today\?focusWorkflowId=.+/);
   await page.getByRole("button", { name: inboxDecisionTitle }).click();
   await expect(page.getByRole("heading", { name: inboxDecisionTitle })).toBeVisible();
 
@@ -379,7 +586,7 @@ test("der Rückfrage-Hinweis verschwindet sofort, wenn nach dem Verschieben eine
   await expect(page.getByRole("region", { name: "Rückfrageentwurf" })).toBeVisible();
 
   await page.getByRole("link", { name: "In Heute weiterprüfen" }).click();
-  await expect(page).toHaveURL("/today");
+  await expect(page).toHaveURL(/\/today\?focusWorkflowId=.+/);
   await page.getByRole("button", { name: inboxDecisionTitle }).click();
   await expect(page.getByRole("heading", { name: inboxDecisionTitle })).toBeVisible();
   await expect(
@@ -411,7 +618,7 @@ test("Today zeigt keinen Rückfrage-Hinweis ohne vorbereiteten Rückfrageentwurf
   await expect(page.getByRole("heading", { name: "Analyse abgeschlossen" })).toBeVisible();
 
   await page.getByRole("link", { name: "In Heute weiterprüfen" }).click();
-  await expect(page).toHaveURL("/today");
+  await expect(page).toHaveURL(/\/today\?focusWorkflowId=.+/);
   await page.getByRole("button", { name: inboxDecisionTitle }).click();
   await expect(page.getByRole("heading", { name: inboxDecisionTitle })).toBeVisible();
 
@@ -431,7 +638,7 @@ test("Weitere Entscheidungen zeigt 'Rückfrage vorbereitet' für die dynamische 
   await expect(page.getByRole("region", { name: "Rückfrageentwurf" })).toBeVisible();
 
   await page.getByRole("link", { name: "In Heute weiterprüfen" }).click();
-  await expect(page).toHaveURL("/today");
+  await expect(page).toHaveURL(/\/today\?focusWorkflowId=.+/);
 
   // Deliberately not promoted to priority: this decision must show its
   // status directly from the collapsed "Weitere Entscheidungen" row.
@@ -449,7 +656,7 @@ test("Weitere Entscheidungen zeigt keinen Rückfrage-Status ohne vorbereiteten D
   await expect(page.getByRole("heading", { name: "Analyse abgeschlossen" })).toBeVisible();
 
   await page.getByRole("link", { name: "In Heute weiterprüfen" }).click();
-  await expect(page).toHaveURL("/today");
+  await expect(page).toHaveURL(/\/today\?focusWorkflowId=.+/);
 
   const overviewItem = page.getByRole("button", { name: inboxDecisionTitle });
   await expect(overviewItem).toBeVisible();
@@ -468,7 +675,7 @@ test("Weitere Entscheidungen behält 'Rückfrage vorbereitet' bei einem fremden 
   await expect(page.getByRole("region", { name: "Rückfrageentwurf" })).toBeVisible();
 
   await page.getByRole("link", { name: "In Heute weiterprüfen" }).click();
-  await expect(page).toHaveURL("/today");
+  await expect(page).toHaveURL(/\/today\?focusWorkflowId=.+/);
 
   // The live Inbox slot moves on to an unrelated workflow. The overview
   // status is scoped to the decision's own workflowId and must stay correct
@@ -502,7 +709,7 @@ test("Weitere Entscheidungen erkennt einen Cross-Tab-Draft ohne Reload", async (
   await expect(page.getByRole("heading", { name: "Analyse abgeschlossen" })).toBeVisible();
 
   await page.getByRole("link", { name: "In Heute weiterprüfen" }).click();
-  await expect(page).toHaveURL("/today");
+  await expect(page).toHaveURL(/\/today\?focusWorkflowId=.+/);
 
   const overviewItem = page.getByRole("button", { name: inboxDecisionTitle });
   await expect(overviewItem).toBeVisible();
@@ -561,7 +768,7 @@ test("Today zeigt den Hinweis nicht für einen Rückfrageentwurf einer fremden w
   });
 
   await page.getByRole("link", { name: "In Heute weiterprüfen" }).click();
-  await expect(page).toHaveURL("/today");
+  await expect(page).toHaveURL(/\/today\?focusWorkflowId=.+/);
   await page.getByRole("button", { name: inboxDecisionTitle }).click();
   await expect(page.getByRole("heading", { name: inboxDecisionTitle })).toBeVisible();
 
@@ -599,7 +806,10 @@ test("Inbox-Prüfvormerkung bleibt auch während der Verarbeitung klar benannt",
   await page.getByRole("button", { name: "Anfrage analysieren" }).click();
   await page.getByRole("link", { name: "In Heute weiterprüfen" }).click();
   await page.getByRole("button", { name: "Angebotsentwurf Familie Schneider vorbereiten" }).click();
-  await page.route("**/today", async (route) => {
+  // "**/today" alone would no longer match once focusWorkflowId is part of
+  // the URL, since Next.js Server Actions post back to the exact current
+  // URL including its query string.
+  await page.route("**/today**", async (route) => {
     if (route.request().method() === "POST") {
       await new Promise((resolve) => setTimeout(resolve, 500));
     }

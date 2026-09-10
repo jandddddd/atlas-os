@@ -16,6 +16,7 @@ type TodayPageProps = {
   searchParams: Promise<{
     offerApproved?: string;
     changeRequested?: string;
+    focusWorkflowId?: string;
   }>;
 };
 
@@ -50,6 +51,7 @@ export default async function TodayPage({ searchParams }: TodayPageProps) {
           dateLabel={todayLabel}
           initialCompletionStatus={completionStatus}
           decisions={applyTodayDecisionState(decisions, persistedState)}
+          focusWorkflowId={params.focusWorkflowId}
         />
       </div>
     </main>

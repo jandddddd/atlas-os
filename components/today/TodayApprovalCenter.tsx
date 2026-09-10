@@ -68,6 +68,13 @@ type TodayApprovalCenterProps = {
   dateLabel: string;
   initialCompletionStatus: CompletionStatus;
   decisions: TodayApprovalDecision[];
+  /**
+   * A pure navigation/focus hint carried over from an Inbox handoff. Never
+   * used to prioritize, approve, or otherwise mutate any decision state —
+   * only to scroll to and visually highlight the matching decision, once
+   * its identity has been confirmed against decision.workflowId.
+   */
+  focusWorkflowId?: string;
 };
 
 function filterCompletedDecisionIds(
@@ -121,6 +128,7 @@ export function TodayApprovalCenter({
   dateLabel,
   initialCompletionStatus,
   decisions,
+  focusWorkflowId,
 }: TodayApprovalCenterProps) {
   const [priorityByDecisionId, setPriorityByDecisionId] = useState<
     Record<string, TodayDecisionPriorityExplanation>
@@ -149,6 +157,14 @@ export function TodayApprovalCenter({
   const [submissionError, setSubmissionError] = useState<SubmissionErrorStatus>(null);
   const [isSubmittingPriorityDecision, setIsSubmittingPriorityDecision] = useState(false);
   const priorityDecisionSubmissionInProgress = useRef(false);
+  // Marks the focusWorkflowId already handled by the Inbox handoff effect
+  // below. The handoff is a one-time navigation event, not a reactive
+  // state: once applied for a given workflow, later business actions (e.g.
+  // postponing the decision into the overview list) must not scroll/focus
+  // it again, even though that action flips isPriorityDecisionFocused and
+  // isOverviewInboxDecisionFocused. A ref (not state) is used deliberately,
+  // since marking it must never itself trigger a re-render.
+  const processedFocusWorkflowIdRef = useRef<string | null>(null);
   const [clarificationDraftWorkflowId, setClarificationDraftWorkflowId] = useState<
     string | null
   >(null);
@@ -182,6 +198,19 @@ export function TodayApprovalCenter({
   const hasClarificationDraftForOverviewInboxDecision =
     overviewInboxDecision?.workflowId !== undefined &&
     overviewInboxDecision.workflowId === overviewClarificationDraftWorkflowId;
+  // A pure navigation/focus match, never a priority decision: inboxTodayDecisionId
+  // alone is not enough, since it is a fixed constant reused across any
+  // dynamic Inbox decision snapshot, not a per-analysis identity. workflowId
+  // is the only safe identity to confirm this is genuinely the same case the
+  // Inbox handoff came from.
+  const isPriorityDecisionFocused =
+    priorityDecision?.id === inboxTodayDecisionId &&
+    priorityDecision.workflowId !== undefined &&
+    priorityDecision.workflowId === focusWorkflowId;
+  const isOverviewInboxDecisionFocused =
+    overviewInboxDecision !== undefined &&
+    overviewInboxDecision.workflowId !== undefined &&
+    overviewInboxDecision.workflowId === focusWorkflowId;
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => {
@@ -222,6 +251,43 @@ export function TodayApprovalCenter({
     window.addEventListener("storage", handleStorageChange);
     return () => window.removeEventListener("storage", handleStorageChange);
   }, [overviewInboxDecision?.workflowId]);
+
+  // Pure navigation focus, not a state change: scrolls to and puts real DOM
+  // focus on whichever element (if any) was securely matched and marked
+  // with data-handoff-focused above, so keyboard and screen reader users
+  // land on the same target as the visual highlight. Does nothing when
+  // focusWorkflowId is absent, unmatched, or stale, and runs at most once
+  // per focusWorkflowId value regardless of how often the priority/overview
+  // booleans below flip afterwards from unrelated decision actions.
+  useEffect(() => {
+    if (!focusWorkflowId) return;
+    if (processedFocusWorkflowIdRef.current === focusWorkflowId) return;
+
+    const frame = window.requestAnimationFrame(() => {
+      // Marked here, inside the frame that actually runs, rather than
+      // synchronously above: if this effect re-runs and cancels the frame
+      // before it fires (e.g. two renders settling in quick succession),
+      // the handoff must still be retried, not silently consumed without
+      // ever having scrolled/focused anything.
+      processedFocusWorkflowIdRef.current = focusWorkflowId;
+
+      const target = document.querySelector<HTMLElement>(
+        '[data-handoff-focused="true"]',
+      );
+      // The primary "Heute zuerst" wrapper contains the full ApprovalCard,
+      // which can be taller than small/mobile viewports; centering it can
+      // push its own heading above the visible area. Aligning to the start
+      // keeps the card's title in view instead. The overview button is
+      // compact enough that centering it remains the better default.
+      target?.scrollIntoView({ block: isPriorityDecisionFocused ? "start" : "center" });
+      target?.focus();
+    });
+
+    return () => window.cancelAnimationFrame(frame);
+  }, [focusWorkflowId, isPriorityDecisionFocused, isOverviewInboxDecisionFocused]);
+  const focusedOverviewDecisionId = isOverviewInboxDecisionFocused
+    ? overviewInboxDecision?.id
+    : undefined;
   const overviewDecisions = overviewDecisionIds
     .map((decisionId) => decisionById.get(decisionId))
     .filter((decision): decision is TodayApprovalDecision => Boolean(decision))
@@ -425,6 +491,15 @@ export function TodayApprovalCenter({
 
       {hasDecisions && priorityDecision ? (
         <>
+          <div
+            data-handoff-focused={isPriorityDecisionFocused ? "true" : undefined}
+            tabIndex={isPriorityDecisionFocused ? -1 : undefined}
+            className={
+              isPriorityDecisionFocused
+                ? "rounded-[2rem] ring-2 ring-emerald-400 ring-offset-2 ring-offset-neutral-50 focus:outline-none"
+                : undefined
+            }
+          >
           <ApprovalCard
             {...priorityDecision}
             details={{
@@ -475,10 +550,12 @@ export function TodayApprovalCenter({
               },
             ]}
           />
+          </div>
           <DecisionOverviewList
             decisions={overviewDecisions}
             onSelect={prioritizeDecision}
             isDisabled={isSubmittingPriorityDecision}
+            focusedDecisionId={focusedOverviewDecisionId}
           />
         </>
       ) : (

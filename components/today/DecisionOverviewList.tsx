@@ -9,12 +9,20 @@ type DecisionOverviewListProps = {
   decisions: DecisionOverviewItem[];
   onSelect: (decisionId: string) => void;
   isDisabled?: boolean;
+  /**
+   * Marks one item as a pure navigation/focus target (e.g. from an Inbox
+   * handoff), never a priority/selection state. The caller has already
+   * confirmed the match; this component only renders the given id, without
+   * any workflowId or other identity check of its own.
+   */
+  focusedDecisionId?: string;
 };
 
 export function DecisionOverviewList({
   decisions,
   onSelect,
   isDisabled = false,
+  focusedDecisionId,
 }: DecisionOverviewListProps) {
   return (
     <section aria-labelledby="additional-decisions" className="space-y-5">
@@ -35,7 +43,12 @@ export function DecisionOverviewList({
           <button
             key={decision.id}
             type="button"
-            className="w-full rounded-3xl border border-neutral-200 bg-white p-6 text-left shadow-sm transition hover:border-neutral-300 hover:shadow-md focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-neutral-900 disabled:cursor-not-allowed disabled:opacity-60"
+            data-handoff-focused={decision.id === focusedDecisionId ? "true" : undefined}
+            className={
+              decision.id === focusedDecisionId
+                ? "w-full rounded-3xl border border-neutral-200 bg-white p-6 text-left shadow-sm ring-2 ring-emerald-400 transition hover:border-neutral-300 hover:shadow-md focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-neutral-900 disabled:cursor-not-allowed disabled:opacity-60"
+                : "w-full rounded-3xl border border-neutral-200 bg-white p-6 text-left shadow-sm transition hover:border-neutral-300 hover:shadow-md focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-neutral-900 disabled:cursor-not-allowed disabled:opacity-60"
+            }
             disabled={isDisabled}
             onClick={() => onSelect(decision.id)}
           >

@@ -66,7 +66,7 @@ async function fillAndAnalyze(page) {
 
 async function openInboxDecision(page) {
   await page.getByRole("link", { name: "In Heute weiterprüfen" }).click();
-  await expect(page).toHaveURL("/today");
+  await expect(page).toHaveURL(/\/today\?focusWorkflowId=.+/);
   await page.getByRole("button", { name: inboxDecisionTitle }).click();
   await expect(page.getByRole("heading", { name: inboxDecisionTitle })).toBeVisible();
 }
@@ -148,7 +148,7 @@ test("handoff revalidates storage when the draft disappears after approval", asy
   await page.evaluate(() => window.localStorage.removeItem("atlas-editable-offer"));
   await handoff.click();
 
-  await expect(page).toHaveURL(/\/today$/);
+  await expect(page).toHaveURL(/\/today(\?focusWorkflowId=.+)?$/);
   await expect(handoff).toHaveCount(0);
 });
 
@@ -476,7 +476,7 @@ test("a stale Today approval from an earlier tab is rejected once a second tab r
   });
   await fillAndAnalyze(page);
   await page.getByRole("link", { name: "In Heute weiterprüfen" }).click();
-  await expect(page).toHaveURL("/today");
+  await expect(page).toHaveURL(/\/today\?focusWorkflowId=.+/);
   await expect(page.getByRole("heading", { name: inboxDecisionTitle })).toBeVisible();
   const approveButton = page.getByRole("button", { name: "Als geprüft vormerken" });
   await expect(approveButton).toBeVisible();
