@@ -53,14 +53,14 @@ export function DecisionOverviewList({
             key={decision.id}
             className={
               decision.id === focusedDecisionId
-                ? "overflow-hidden rounded-3xl border border-neutral-200 bg-white shadow-sm ring-2 ring-emerald-400 transition hover:border-neutral-300 hover:shadow-md"
-                : "overflow-hidden rounded-3xl border border-neutral-200 bg-white shadow-sm transition hover:border-neutral-300 hover:shadow-md"
+                ? "flex flex-col overflow-hidden rounded-3xl border border-neutral-200 bg-white shadow-sm ring-2 ring-emerald-400 transition hover:border-neutral-300 hover:shadow-md"
+                : "flex flex-col overflow-hidden rounded-3xl border border-neutral-200 bg-white shadow-sm transition hover:border-neutral-300 hover:shadow-md"
             }
           >
             <button
               type="button"
               data-handoff-focused={decision.id === focusedDecisionId ? "true" : undefined}
-              className="w-full p-6 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-neutral-900 disabled:cursor-not-allowed disabled:opacity-60"
+              className="w-full flex-1 p-6 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-neutral-900 disabled:cursor-not-allowed disabled:opacity-60"
               disabled={isDisabled}
               onClick={() => onSelect(decision.id)}
             >
@@ -74,12 +74,21 @@ export function DecisionOverviewList({
             </button>
             {decision.offerHref ? (
               <div className="border-t border-neutral-200 px-6 py-4">
-                <Link
-                  href={decision.offerHref}
-                  className="inline-flex text-sm font-medium text-neutral-700 underline-offset-4 hover:underline"
-                >
-                  Angebot öffnen
-                </Link>
+                {isDisabled ? (
+                  <span
+                    aria-disabled="true"
+                    className="inline-flex cursor-not-allowed text-sm font-medium text-neutral-400"
+                  >
+                    Angebot öffnen
+                  </span>
+                ) : (
+                  <Link
+                    href={decision.offerHref}
+                    className="inline-flex text-sm font-medium text-neutral-700 underline-offset-4 hover:underline"
+                  >
+                    Angebot öffnen
+                  </Link>
+                )}
               </div>
             ) : null}
           </div>
