@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 
+const todayDecisionCookieName = "atlas-today-decisions";
 const inboxDecisionTitle = "Angebotsentwurf Familie Schneider vorbereiten";
 const inboxAnalysisFixture = {
   customer: { name: "Unbekannt" },
@@ -674,4 +675,223 @@ test("offer workspace migrates the valid bound draft from before Sprint 4a", asy
   const migratedOffer = page.getByRole("article");
   await expect(migratedOffer).toContainText("Angebotsentwurf Familie Schneider");
   await expect(migratedOffer).toContainText("Prüfung offen");
+});
+
+test("Today primary handoff öffnet exakt den passenden Offer-Workspace-Eintrag", async ({
+  page,
+  context,
+}) => {
+  await fillAndAnalyze(page);
+  await generateOfferAndAssertPayload(page);
+  const analysis = await page.evaluate(() =>
+    JSON.parse(window.localStorage.getItem("atlas-inquiry-analysis")),
+  );
+
+  await openInboxDecision(page);
+
+  const offerLink = page.getByRole("link", { name: "Angebot öffnen" });
+  await expect(offerLink).toBeVisible();
+  await expect(offerLink).toHaveAttribute(
+    "href",
+    `/offers/${encodeURIComponent(analysis.workflowId)}`,
+  );
+
+  await offerLink.click();
+  await expect(page).toHaveURL(`/offers/${encodeURIComponent(analysis.workflowId)}`);
+  await expect(
+    page.getByText("Angebotsentwurf Familie Schneider", { exact: true }),
+  ).toBeVisible();
+
+  // Opening the offer must not itself add any decision-state mutation
+  // beyond the legitimate prioritization openInboxDecision already
+  // performed as setup: manualPriorityDecisionId stays exactly that decision
+  // and no approve/later action was recorded in decisions.
+  const decisionCookieAfter = (await context.cookies(page.url())).find(
+    (cookie) => cookie.name === todayDecisionCookieName,
+  );
+  expect(decisionCookieAfter).toBeDefined();
+  const persistedState = JSON.parse(decodeURIComponent(decisionCookieAfter.value));
+  expect(persistedState.manualPriorityDecisionId).toBe("inbox-recommended-task");
+  expect(persistedState.decisions).toEqual([]);
+});
+
+test("Today Overview-Handoff öffnet das Angebot ohne die Decision zu priorisieren", async ({
+  page,
+  context,
+}) => {
+  await fillAndAnalyze(page);
+  await generateOfferAndAssertPayload(page);
+  const analysis = await page.evaluate(() =>
+    JSON.parse(window.localStorage.getItem("atlas-inquiry-analysis")),
+  );
+
+  await page.getByRole("link", { name: "In Heute weiterprüfen" }).click();
+  await expect(page).toHaveURL(/\/today\?focusWorkflowId=.+/);
+
+  // The static Weber fixture still outranks this fresh, normal-priority
+  // decision by default, so it stays under "Weitere Entscheidungen" without
+  // ever being clicked/prioritized.
+  const overviewItem = page.getByRole("button", { name: inboxDecisionTitle });
+  await expect(overviewItem).toBeVisible();
+
+  const offerLink = page.getByRole("link", { name: "Angebot öffnen" });
+  await expect(offerLink).toBeVisible();
+  await expect(offerLink).toHaveAttribute(
+    "href",
+    `/offers/${encodeURIComponent(analysis.workflowId)}`,
+  );
+
+  const decisionCookieBefore = (await context.cookies(page.url())).find(
+    (cookie) => cookie.name === todayDecisionCookieName,
+  );
+
+  await offerLink.click();
+  await expect(page).toHaveURL(`/offers/${encodeURIComponent(analysis.workflowId)}`);
+  await expect(
+    page.getByText("Angebotsentwurf Familie Schneider", { exact: true }),
+  ).toBeVisible();
+
+  // Central security regression: opening the offer from the overview list
+  // must never trigger the existing onSelect/prioritize flow.
+  const decisionCookieAfter = (await context.cookies(page.url())).find(
+    (cookie) => cookie.name === todayDecisionCookieName,
+  );
+  if (decisionCookieAfter) {
+    const persistedState = JSON.parse(decodeURIComponent(decisionCookieAfter.value));
+    expect(persistedState.decisions).not.toContainEqual({
+      decisionId: "inbox-recommended-task",
+      action: "prioritize",
+    });
+  }
+  expect(decisionCookieAfter?.value).toBe(decisionCookieBefore?.value);
+});
+
+test("Today zeigt keinen Offer-Link, wenn noch kein Angebot existiert", async ({ page }) => {
+  await fillAndAnalyze(page);
+
+  await page.getByRole("link", { name: "In Heute weiterprüfen" }).click();
+  await expect(page).toHaveURL(/\/today\?focusWorkflowId=.+/);
+
+  await expect(page.getByRole("button", { name: inboxDecisionTitle })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Angebot öffnen" })).toHaveCount(0);
+});
+
+test("Today zeigt keinen Offer-Link für eine legacy Inbox-Decision ohne workflowId", async ({
+  page,
+  context,
+}) => {
+  await context.addCookies([
+    {
+      name: "atlas-inbox-today-decision",
+      value: JSON.stringify(inboxAnalysisFixture),
+      url: "http://localhost:3000",
+      httpOnly: true,
+      sameSite: "Lax",
+    },
+  ]);
+
+  // An unrelated offer draft exists for a different workflow, proving the
+  // legacy decision cannot accidentally match it.
+  await page.addInitScript((offer) => {
+    window.localStorage.setItem(
+      "atlas-offer-workspace",
+      JSON.stringify({
+        version: 1,
+        offers: [
+          {
+            id: "unrelated-workflow",
+            workflowId: "unrelated-workflow",
+            offer,
+            status: "review-pending",
+            updatedAt: new Date().toISOString(),
+          },
+        ],
+      }),
+    );
+  }, inboxOfferFixture);
+
+  await page.goto("/today");
+  await expect(page.getByRole("heading", { name: inboxDecisionTitle })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Angebot öffnen" })).toHaveCount(0);
+});
+
+test("Today zeigt keinen Offer-Link, wenn nur ein fremder workflowId einen Eintrag hat", async ({
+  page,
+}) => {
+  await fillAndAnalyze(page);
+
+  await page.addInitScript((offer) => {
+    window.localStorage.setItem(
+      "atlas-offer-workspace",
+      JSON.stringify({
+        version: 1,
+        offers: [
+          {
+            id: "unrelated-workflow",
+            workflowId: "unrelated-workflow",
+            offer,
+            status: "review-pending",
+            updatedAt: new Date().toISOString(),
+          },
+        ],
+      }),
+    );
+  }, inboxOfferFixture);
+
+  await page.getByRole("link", { name: "In Heute weiterprüfen" }).click();
+  await expect(page).toHaveURL(/\/today\?focusWorkflowId=.+/);
+
+  await expect(page.getByRole("button", { name: inboxDecisionTitle })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Angebot öffnen" })).toHaveCount(0);
+});
+
+test("Today Overview zeigt den Offer-Link nach einem Cross-Tab-Angebot ohne Reload", async ({
+  page,
+  context,
+}) => {
+  await fillAndAnalyze(page);
+  const analysis = await page.evaluate(() =>
+    JSON.parse(window.localStorage.getItem("atlas-inquiry-analysis")),
+  );
+
+  await page.getByRole("link", { name: "In Heute weiterprüfen" }).click();
+  await expect(page).toHaveURL(/\/today\?focusWorkflowId=.+/);
+  await expect(page.getByRole("button", { name: inboxDecisionTitle })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Angebot öffnen" })).toHaveCount(0);
+
+  // A genuine second tab shares the same localStorage origin, so writing
+  // there fires a native "storage" event in the first tab (a same-tab write
+  // never fires this event at all).
+  const secondTab = await context.newPage();
+  await secondTab.goto("/inbox");
+  await secondTab.evaluate(
+    ({ workflowId, offer }) => {
+      window.localStorage.setItem(
+        "atlas-offer-workspace",
+        JSON.stringify({
+          version: 1,
+          offers: [
+            {
+              id: workflowId,
+              workflowId,
+              offer,
+              status: "review-pending",
+              updatedAt: new Date().toISOString(),
+            },
+          ],
+        }),
+      );
+    },
+    { workflowId: analysis.workflowId, offer: inboxOfferFixture },
+  );
+  await secondTab.close();
+
+  // No reload: Today must notice the cross-tab offer draft while staying
+  // mounted.
+  const offerLink = page.getByRole("link", { name: "Angebot öffnen" });
+  await expect(offerLink).toBeVisible();
+  await expect(offerLink).toHaveAttribute(
+    "href",
+    `/offers/${encodeURIComponent(analysis.workflowId)}`,
+  );
 });
