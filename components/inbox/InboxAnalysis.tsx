@@ -23,7 +23,6 @@ import {
   clearOfferDraft,
   clearInboxWorkflow,
   flagOfferDraftForReReview,
-  getClarificationCommunicationStatus,
   loadClarificationDraftForAnalysis,
   loadInquiryAnalysis,
   loadInquiryContextForAnalysis,
@@ -398,32 +397,57 @@ export function InboxAnalysis() {
   }
 
   function saveClarification() {
-    if (editableClarification && analysis) {
-      // "sent" describes the currently persisted message content. A genuine
-      // change to that content means ATLAS can no longer claim the new
-      // version was already sent, so only a real change to the actual
-      // message fields (not merely opening/closing edit mode) may fall the
-      // status back to "prepared"; leaving the text untouched must never
-      // reset an existing "sent" marking.
-      const contentChanged =
-        editableClarification.subject !== clarification?.subject ||
-        editableClarification.message !== clarification?.message;
-      const savedDraft: ClarificationDraft = {
-        ...editableClarification,
-        communicationStatus: contentChanged
-          ? "prepared"
-          : getClarificationCommunicationStatus(editableClarification),
-      };
-      setClarification(savedDraft);
-      setEditableClarification(savedDraft);
-      saveClarificationDraft(savedDraft, analysis);
-      setClarificationLastSavedAt(
-        new Date().toLocaleTimeString("de-DE", {
-          hour: "2-digit",
-          minute: "2-digit",
-        }),
-      );
+    if (!editableClarification || !analysis) {
+      setIsEditingClarification(false);
+      return;
     }
+
+    // "sent" describes the currently persisted message content. A genuine
+    // change to that content means ATLAS can no longer claim the new
+    // version was already sent, so only a real change to the actual
+    // message fields (not merely opening/closing edit mode) may fall the
+    // status back to "prepared"; leaving the text untouched must never
+    // reset an existing "sent" marking.
+    const contentChanged =
+      editableClarification.subject !== clarification?.subject ||
+      editableClarification.message !== clarification?.message;
+
+    if (!contentChanged) {
+      // Nothing in this tab actually changed, so this tab's own snapshot
+      // must never be written back: another tab may have concurrently
+      // marked this exact draft sent (or reverted it), and that persisted
+      // truth has to win. Re-reading is the only safe way to know it,
+      // rather than assuming this tab's last-known status is still current.
+      const persistedDraft = loadClarificationDraftForAnalysis(analysis);
+      setClarification(persistedDraft);
+      setEditableClarification(persistedDraft);
+      setIsEditingClarification(false);
+      return;
+    }
+
+    // A real content change can never inherit a "sent" marking made against
+    // the old text, concurrently or otherwise, regardless of what is
+    // currently persisted.
+    const draftToSave: ClarificationDraft = {
+      ...editableClarification,
+      communicationStatus: "prepared",
+    };
+    const didSave = saveClarificationDraft(draftToSave, analysis);
+    if (!didSave) {
+      // The write failed; the UI must not claim a save that never actually
+      // persisted, so it stays exactly as it was, still in edit mode with
+      // the unsaved text visible.
+      return;
+    }
+
+    setClarification(draftToSave);
+    setEditableClarification(draftToSave);
+    setClarificationLastSavedAt(
+      new Date().toLocaleTimeString("de-DE", {
+        hour: "2-digit",
+        minute: "2-digit",
+      }),
+    );
     setIsEditingClarification(false);
   }
 

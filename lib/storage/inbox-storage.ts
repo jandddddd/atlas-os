@@ -217,13 +217,21 @@ function loadStoredValue<T>(
   return parsedValue;
 }
 
-function saveStoredValue(key: string, value: unknown) {
-  if (typeof window === "undefined") return;
+/**
+ * Returns whether the write actually succeeded, so a caller that must not
+ * report success on a failed persist (e.g. a workflow-bound status mutation)
+ * can tell the difference from a silent no-op. Existing callers that already
+ * treated a write as fire-and-forget may keep ignoring the return value.
+ */
+function saveStoredValue(key: string, value: unknown): boolean {
+  if (typeof window === "undefined") return false;
 
   try {
     window.localStorage.setItem(key, JSON.stringify(value));
+    return true;
   } catch (error) {
     console.error(`Atlas-Daten für "${key}" konnten nicht gespeichert werden:`, error);
+    return false;
   }
 }
 
@@ -308,29 +316,40 @@ export function loadClarificationCommunicationStatusForWorkflowId(
   return draft ? getClarificationCommunicationStatus(draft) : null;
 }
 
+/**
+ * Returns whether both the draft content and its binding (when applicable)
+ * were actually persisted, so a caller that must not claim a successful save
+ * on a failed write (e.g. after a real content edit) can tell the
+ * difference. Existing callers that already treated this as fire-and-forget
+ * may keep ignoring the return value.
+ */
 export function saveClarificationDraft(
   draft: ClarificationDraft,
   analysis: AnalysisResult,
-) {
-  saveStoredValue(CLARIFICATION_DRAFT_KEY, draft);
+): boolean {
+  const savedDraft = saveStoredValue(CLARIFICATION_DRAFT_KEY, draft);
 
   if (analysis.workflowId) {
-    saveStoredValue(CLARIFICATION_DRAFT_BINDING_KEY, {
+    const savedBinding = saveStoredValue(CLARIFICATION_DRAFT_BINDING_KEY, {
       version: CLARIFICATION_DRAFT_BINDING_VERSION,
       workflowId: analysis.workflowId,
     } satisfies StoredClarificationDraftBinding);
-  } else {
-    clearStoredValue(CLARIFICATION_DRAFT_BINDING_KEY);
+    return savedDraft && savedBinding;
   }
+
+  clearStoredValue(CLARIFICATION_DRAFT_BINDING_KEY);
+  return savedDraft;
 }
 
 /**
  * Sets only the communication status of the currently persisted clarification
  * draft, requiring it to be exactly bound to the given workflowId. Returns
- * the updated draft on success, or null without writing anything if there is
- * no draft, no binding, or the binding belongs to a different workflow — so
- * a caller can never overwrite an unrelated workflow's draft, and never
- * optimistically assume a mutation that did not actually happen.
+ * the updated draft only once the write has actually been confirmed
+ * persisted, or null if there is no draft, no binding, the binding belongs
+ * to a different workflow, or the write itself failed — so a caller can
+ * never overwrite an unrelated workflow's draft, and never optimistically
+ * assume a mutation that did not actually happen (including a storage
+ * failure that the underlying write already treats as a safe no-op).
  */
 export function setClarificationCommunicationStatusForWorkflowId(
   workflowId: string,
@@ -346,8 +365,8 @@ export function setClarificationCommunicationStatusForWorkflowId(
   if (!draft) return null;
 
   const nextDraft: ClarificationDraft = { ...draft, communicationStatus };
-  saveStoredValue(CLARIFICATION_DRAFT_KEY, nextDraft);
-  return nextDraft;
+  const didSave = saveStoredValue(CLARIFICATION_DRAFT_KEY, nextDraft);
+  return didSave ? nextDraft : null;
 }
 
 export function clearClarificationDraft() {

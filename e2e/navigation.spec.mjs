@@ -994,6 +994,162 @@ test("Der Status Rückfrage versendet bleibt nach einem Reload erhalten", async 
   ).toBeVisible();
 });
 
+test("Ein parallel in einem zweiten Tab gesetzter sent-Status übersteht ein No-op-Save im ersten Tab", async ({
+  page,
+  context,
+}) => {
+  await page.goto("/inbox");
+  await fillInboxInquiry(page);
+  await page.getByRole("button", { name: "Anfrage analysieren" }).click();
+  await expect(page.getByRole("heading", { name: "Analyse abgeschlossen" })).toBeVisible();
+  await page.getByRole("button", { name: "Rückfrage vorbereiten" }).click();
+  const draftSection = page.getByRole("region", { name: "Rückfrageentwurf" });
+  await expect(draftSection).toContainText("Rückfrage vorbereitet");
+
+  // Tab A opens edit mode but changes nothing yet.
+  await page.getByRole("button", { name: "Entwurf bearbeiten" }).click();
+
+  // A genuine second tab, sharing the same origin/localStorage, marks the
+  // exact same workflow-bound draft as sent through the real UI while
+  // Tab A's edit is still open.
+  const secondTab = await context.newPage();
+  await secondTab.goto("/inbox");
+  const secondDraftSection = secondTab.getByRole("region", { name: "Rückfrageentwurf" });
+  await expect(secondDraftSection).toContainText("Rückfrage vorbereitet");
+  await secondTab.getByRole("button", { name: "Als versendet markieren" }).click();
+  await expect(secondDraftSection).toContainText("Rückfrage versendet");
+  await secondTab.close();
+
+  const storedAfterSent = await page.evaluate(() =>
+    JSON.parse(window.localStorage.getItem("atlas-clarification-draft")),
+  );
+  expect(storedAfterSent.communicationStatus).toBe("sent");
+
+  // Tab A changes nothing and saves: this must not resurrect "prepared"
+  // over the concurrently persisted "sent" state.
+  await page.getByRole("button", { name: "Änderungen übernehmen" }).click();
+
+  await expect(draftSection).toContainText("Rückfrage versendet");
+  await expect(draftSection).not.toContainText("Rückfrage vorbereitet");
+  const storedAfterNoopSave = await page.evaluate(() =>
+    JSON.parse(window.localStorage.getItem("atlas-clarification-draft")),
+  );
+  expect(storedAfterNoopSave.communicationStatus).toBe("sent");
+});
+
+test("Ein tatsächlicher Edit nach parallelem sent-Status im zweiten Tab setzt die neue Textversion auf prepared", async ({
+  page,
+  context,
+}) => {
+  await page.goto("/inbox");
+  await fillInboxInquiry(page);
+  await page.getByRole("button", { name: "Anfrage analysieren" }).click();
+  await expect(page.getByRole("heading", { name: "Analyse abgeschlossen" })).toBeVisible();
+  await page.getByRole("button", { name: "Rückfrage vorbereiten" }).click();
+  const draftSection = page.getByRole("region", { name: "Rückfrageentwurf" });
+  await expect(draftSection).toContainText("Rückfrage vorbereitet");
+
+  await page.getByRole("button", { name: "Entwurf bearbeiten" }).click();
+  await page.getByLabel("Nachricht").fill("Eine tatsächlich neue Nachricht von Tab A.");
+
+  const secondTab = await context.newPage();
+  await secondTab.goto("/inbox");
+  const secondDraftSection = secondTab.getByRole("region", { name: "Rückfrageentwurf" });
+  await expect(secondDraftSection).toContainText("Rückfrage vorbereitet");
+  await secondTab.getByRole("button", { name: "Als versendet markieren" }).click();
+  await expect(secondDraftSection).toContainText("Rückfrage versendet");
+  await secondTab.close();
+
+  await page.getByRole("button", { name: "Änderungen übernehmen" }).click();
+
+  // The real edit persists its own new text, and that new text can never
+  // inherit a "sent" marking that was only ever confirmed for the old text.
+  await expect(draftSection).toContainText("Rückfrage vorbereitet");
+  await expect(draftSection).not.toContainText("Rückfrage versendet");
+  const stored = await page.evaluate(() =>
+    JSON.parse(window.localStorage.getItem("atlas-clarification-draft")),
+  );
+  expect(stored.communicationStatus).toBe("prepared");
+  expect(stored.message).toBe("Eine tatsächlich neue Nachricht von Tab A.");
+});
+
+test("Ein Storage-Fehler beim Als versendet markieren zeigt die Rückfrage weiterhin als vorbereitet", async ({
+  page,
+}) => {
+  await page.goto("/inbox");
+  await fillInboxInquiry(page);
+  await page.getByRole("button", { name: "Anfrage analysieren" }).click();
+  await expect(page.getByRole("heading", { name: "Analyse abgeschlossen" })).toBeVisible();
+  await page.getByRole("button", { name: "Rückfrage vorbereiten" }).click();
+  const draftSection = page.getByRole("region", { name: "Rückfrageentwurf" });
+  await expect(draftSection).toContainText("Rückfrage vorbereitet");
+
+  // Makes writes to exactly the clarification draft content key throw,
+  // without disturbing any other storage key.
+  await page.evaluate(() => {
+    const originalSetItem = Storage.prototype.setItem;
+    Storage.prototype.setItem = function (key, value) {
+      if (key === "atlas-clarification-draft") {
+        throw new DOMException("Simulated storage failure", "QuotaExceededError");
+      }
+      return originalSetItem.call(this, key, value);
+    };
+  });
+
+  await page.getByRole("button", { name: "Als versendet markieren" }).click();
+
+  await expect(draftSection).toContainText("Rückfrage vorbereitet");
+  await expect(draftSection).not.toContainText("Rückfrage versendet");
+  await expect(page.getByRole("button", { name: "Als versendet markieren" })).toBeVisible();
+
+  const stored = await page.evaluate(() =>
+    JSON.parse(window.localStorage.getItem("atlas-clarification-draft")),
+  );
+  expect(stored.communicationStatus).toBe("prepared");
+});
+
+test("Ein Storage-Fehler beim Speichern einer echten Änderung nach Als versendet markieren behauptet keinen Erfolg", async ({
+  page,
+}) => {
+  await page.goto("/inbox");
+  await fillInboxInquiry(page);
+  await page.getByRole("button", { name: "Anfrage analysieren" }).click();
+  await expect(page.getByRole("heading", { name: "Analyse abgeschlossen" })).toBeVisible();
+  await page.getByRole("button", { name: "Rückfrage vorbereiten" }).click();
+  await page.getByRole("button", { name: "Als versendet markieren" }).click();
+  const draftSection = page.getByRole("region", { name: "Rückfrageentwurf" });
+  await expect(draftSection).toContainText("Rückfrage versendet");
+
+  await page.getByRole("button", { name: "Entwurf bearbeiten" }).click();
+  await page.getByLabel("Nachricht").fill("Eine geänderte Nachricht, die nicht gespeichert werden kann.");
+
+  await page.evaluate(() => {
+    const originalSetItem = Storage.prototype.setItem;
+    Storage.prototype.setItem = function (key, value) {
+      if (key === "atlas-clarification-draft") {
+        throw new DOMException("Simulated storage failure", "QuotaExceededError");
+      }
+      return originalSetItem.call(this, key, value);
+    };
+  });
+
+  await page.getByRole("button", { name: "Änderungen übernehmen" }).click();
+
+  // The save must not claim success: no saved-at timestamp, and the edit
+  // view stays open with the unsaved text rather than silently reverting or
+  // pretending completion.
+  await expect(page.getByText(/Änderungen gespeichert um/)).toHaveCount(0);
+  await expect(page.getByLabel("Nachricht")).toBeVisible();
+
+  const stored = await page.evaluate(() =>
+    JSON.parse(window.localStorage.getItem("atlas-clarification-draft")),
+  );
+  expect(stored.communicationStatus).toBe("sent");
+  expect(stored.message).not.toBe(
+    "Eine geänderte Nachricht, die nicht gespeichert werden kann.",
+  );
+});
+
 test("Ein sent-Status für einen fremden workflowId zeigt in Today keine Rückfrage versendet", async ({
   page,
 }) => {

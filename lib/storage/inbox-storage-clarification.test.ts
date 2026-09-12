@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import type { ClarificationDraft } from "../../components/inbox/types.ts";
 import {
   getClarificationCommunicationStatus,
   isClarificationDraft,
@@ -12,7 +13,7 @@ const validDraft = {
   message: "Guten Tag Familie Berger,\n\n...",
   missingInformation: ["Bilder", "genaue Raummaße"],
   status: "draft",
-};
+} satisfies ClarificationDraft;
 
 test("akzeptiert einen vollständigen Rückfrageentwurf", () => {
   assert.equal(isClarificationDraft(validDraft), true);
