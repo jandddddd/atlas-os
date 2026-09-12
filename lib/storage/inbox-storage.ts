@@ -359,9 +359,24 @@ function saveStoredValue(key: string, value: unknown): boolean {
   }
 }
 
-function clearStoredValue(key: string) {
-  if (typeof window === "undefined") return;
-  window.localStorage.removeItem(key);
+/**
+ * Returns whether the removal actually completed without throwing, mirroring
+ * saveStoredValue's boolean contract, so a caller that must not report
+ * success on a failed removal (e.g. undoing a sent attestation) can tell the
+ * difference from an unexpected storage exception. Existing callers that
+ * already treated removal as fire-and-forget may keep ignoring the return
+ * value.
+ */
+function clearStoredValue(key: string): boolean {
+  if (typeof window === "undefined") return false;
+
+  try {
+    window.localStorage.removeItem(key);
+    return true;
+  } catch (error) {
+    console.error(`Atlas-Daten für "${key}" konnten nicht entfernt werden:`, error);
+    return false;
+  }
 }
 
 export function loadInquiryAnalysis(): AnalysisResult | null {
@@ -638,6 +653,8 @@ function markClarificationSentForRevision(
  * workflowId+revision, so a stale caller can never remove a marker
  * belonging to a newer revision; the current-record check only prevents
  * reporting false success once the visible revision itself is stale.
+ * Reports the removal's own success too, so a caller cannot claim "sent" was
+ * undone when the underlying storage write actually failed.
  */
 function unmarkClarificationSentForRevision(
   workflowId: string,
@@ -648,8 +665,7 @@ function unmarkClarificationSentForRevision(
     return false;
   }
 
-  clearStoredValue(clarificationSentMarkerKey(workflowId, revision));
-  return true;
+  return clearStoredValue(clarificationSentMarkerKey(workflowId, revision));
 }
 
 function matchesExpectedLegacyState(
@@ -713,8 +729,7 @@ function unmarkClarificationSentForLegacy(
 ): boolean {
   if (!matchesExpectedLegacyState(workflowId, subject, message)) return false;
 
-  clearStoredValue(clarificationLegacySentMarkerKey(workflowId));
-  return true;
+  return clearStoredValue(clarificationLegacySentMarkerKey(workflowId));
 }
 
 /**

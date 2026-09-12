@@ -1556,6 +1556,203 @@ test("Ein fehlgeschlagener Edit-Save an einem sent-Draft zeigt eine zugängliche
   expect(marker).not.toBeNull();
 });
 
+test("Ein fehlgeschlagener Mark-Write zeigt eine zugängliche Fehlermeldung und behauptet nicht versendet", async ({
+  page,
+}) => {
+  await page.goto("/inbox");
+  await fillInboxInquiry(page);
+  await page.getByRole("button", { name: "Anfrage analysieren" }).click();
+  await expect(page.getByRole("heading", { name: "Analyse abgeschlossen" })).toBeVisible();
+  await page.getByRole("button", { name: "Rückfrage vorbereiten" }).click();
+  const draftSection = page.getByRole("region", { name: "Rückfrageentwurf" });
+  await expect(draftSection).toContainText("Rückfrage vorbereitet");
+  const storedBefore = await page.evaluate(() =>
+    JSON.parse(window.localStorage.getItem("atlas-clarification-draft")),
+  );
+
+  await page.evaluate(() => {
+    const originalSetItem = Storage.prototype.setItem;
+    Storage.prototype.setItem = function (key, value) {
+      if (key.startsWith("atlas-clarification-sent:")) {
+        throw new DOMException("Simulated storage failure", "QuotaExceededError");
+      }
+      return originalSetItem.call(this, key, value);
+    };
+  });
+
+  await page.getByRole("button", { name: "Als versendet markieren" }).click();
+
+  await expect(draftSection).toContainText("Rückfrage vorbereitet");
+  await expect(draftSection).not.toContainText("Rückfrage versendet");
+  const markError = page.locator('[role="alert"]', {
+    hasText: "Der Versandstatus konnte nicht gespeichert werden. Bitte versuche es erneut.",
+  });
+  await expect(markError).toBeVisible();
+
+  const storedAfter = await page.evaluate(() =>
+    JSON.parse(window.localStorage.getItem("atlas-clarification-draft")),
+  );
+  expect(storedAfter).toEqual(storedBefore);
+  const marker = await page.evaluate(
+    ({ workflowId, revision }) =>
+      window.localStorage.getItem(`atlas-clarification-sent:${workflowId}:${revision}`),
+    { workflowId: storedBefore.workflowId, revision: storedBefore.revision },
+  );
+  expect(marker).toBeNull();
+});
+
+test("Ein fehlgeschlagener Unmark-Remove zeigt eine zugängliche Fehlermeldung und behält Rückfrage versendet", async ({
+  page,
+}) => {
+  await page.goto("/inbox");
+  await fillInboxInquiry(page);
+  await page.getByRole("button", { name: "Anfrage analysieren" }).click();
+  await expect(page.getByRole("heading", { name: "Analyse abgeschlossen" })).toBeVisible();
+  await page.getByRole("button", { name: "Rückfrage vorbereiten" }).click();
+  await page.getByRole("button", { name: "Als versendet markieren" }).click();
+  const draftSection = page.getByRole("region", { name: "Rückfrageentwurf" });
+  await expect(draftSection).toContainText("Rückfrage versendet");
+  const stored = await page.evaluate(() =>
+    JSON.parse(window.localStorage.getItem("atlas-clarification-draft")),
+  );
+
+  await page.evaluate(() => {
+    const originalRemoveItem = Storage.prototype.removeItem;
+    Storage.prototype.removeItem = function (key) {
+      if (key.startsWith("atlas-clarification-sent:")) {
+        throw new DOMException("Simulated storage failure", "QuotaExceededError");
+      }
+      return originalRemoveItem.call(this, key);
+    };
+  });
+
+  await page.getByRole("button", { name: "Versandmarkierung zurücknehmen" }).click();
+
+  await expect(draftSection).toContainText("Rückfrage versendet");
+  await expect(draftSection).not.toContainText("Rückfrage vorbereitet");
+  const unmarkError = page.locator('[role="alert"]', {
+    hasText: "Der Versandstatus konnte nicht gespeichert werden. Bitte versuche es erneut.",
+  });
+  await expect(unmarkError).toBeVisible();
+
+  const marker = await page.evaluate(
+    ({ workflowId, revision }) =>
+      window.localStorage.getItem(`atlas-clarification-sent:${workflowId}:${revision}`),
+    { workflowId: stored.workflowId, revision: stored.revision },
+  );
+  expect(marker).not.toBeNull();
+});
+
+test("Ein Mark-Klick auf eine inzwischen durch eine andere Revision ersetzte Identity zeigt die aktuelle Version und eine verständliche Meldung", async ({
+  page,
+}) => {
+  await page.goto("/inbox");
+  await fillInboxInquiry(page);
+  await page.getByRole("button", { name: "Anfrage analysieren" }).click();
+  await expect(page.getByRole("heading", { name: "Analyse abgeschlossen" })).toBeVisible();
+  await page.getByRole("button", { name: "Rückfrage vorbereiten" }).click();
+  const draftSection = page.getByRole("region", { name: "Rückfrageentwurf" });
+  await expect(draftSection).toContainText("Rückfrage vorbereitet");
+  const storedA = await page.evaluate(() =>
+    JSON.parse(window.localStorage.getItem("atlas-clarification-draft")),
+  );
+
+  // A same-document write — unlike a genuine second tab — never fires a
+  // "storage" event in this very document, so this tab's own React state
+  // stays exactly as it was. This reproduces a stale identity
+  // deterministically, without relying on cross-tab timing (which the
+  // existing cross-tab listener would otherwise resolve before a click
+  // could ever observe it).
+  const newMessage = "Neue Nachricht aus einer konkurrierenden Revision B.";
+  await page.evaluate(
+    ({ workflowId, message }) => {
+      window.localStorage.setItem(
+        "atlas-clarification-draft",
+        JSON.stringify({
+          version: 2,
+          workflowId,
+          revision: "concurrent-revision-b",
+          draft: {
+            customerName: "Unbekannt",
+            subject: "Konkurrierender Betreff B",
+            message,
+            missingInformation: [],
+            status: "draft",
+          },
+        }),
+      );
+    },
+    { workflowId: storedA.workflowId, message: newMessage },
+  );
+
+  await page.getByRole("button", { name: "Als versendet markieren" }).click();
+
+  // The stale identity must never mark the newer revision; the actual
+  // current persisted truth is shown instead, with an honest explanation.
+  await expect(draftSection).toContainText(newMessage);
+  await expect(draftSection).toContainText("Rückfrage vorbereitet");
+  await expect(page.getByRole("button", { name: "Als versendet markieren" })).toBeVisible();
+  const staleError = page.locator('[role="alert"]', {
+    hasText:
+      "Der Rückfrageentwurf wurde zwischenzeitlich geändert. Bitte prüfe die aktuelle Version erneut.",
+  });
+  await expect(staleError).toBeVisible();
+
+  const markerForA = await page.evaluate(
+    ({ workflowId, revision }) =>
+      window.localStorage.getItem(`atlas-clarification-sent:${workflowId}:${revision}`),
+    { workflowId: storedA.workflowId, revision: storedA.revision },
+  );
+  expect(markerForA).toBeNull();
+  const markerForB = await page.evaluate(
+    (workflowId) =>
+      window.localStorage.getItem(
+        `atlas-clarification-sent:${workflowId}:concurrent-revision-b`,
+      ),
+    storedA.workflowId,
+  );
+  expect(markerForB).toBeNull();
+});
+
+test("Nach einem fehlgeschlagenen Mark-Versuch verschwindet die alte Fehlermeldung bei einem erfolgreichen erneuten Versuch", async ({
+  page,
+}) => {
+  await page.goto("/inbox");
+  await fillInboxInquiry(page);
+  await page.getByRole("button", { name: "Anfrage analysieren" }).click();
+  await expect(page.getByRole("heading", { name: "Analyse abgeschlossen" })).toBeVisible();
+  await page.getByRole("button", { name: "Rückfrage vorbereiten" }).click();
+  const draftSection = page.getByRole("region", { name: "Rückfrageentwurf" });
+  await expect(draftSection).toContainText("Rückfrage vorbereitet");
+
+  await page.evaluate(() => {
+    const originalSetItem = Storage.prototype.setItem;
+    let shouldFail = true;
+    window.__allowClarificationMarkerWrite = () => {
+      shouldFail = false;
+    };
+    Storage.prototype.setItem = function (key, value) {
+      if (shouldFail && key.startsWith("atlas-clarification-sent:")) {
+        throw new DOMException("Simulated storage failure", "QuotaExceededError");
+      }
+      return originalSetItem.call(this, key, value);
+    };
+  });
+
+  await page.getByRole("button", { name: "Als versendet markieren" }).click();
+  const markError = page.locator('[role="alert"]', {
+    hasText: "Der Versandstatus konnte nicht gespeichert werden. Bitte versuche es erneut.",
+  });
+  await expect(markError).toBeVisible();
+  await expect(draftSection).toContainText("Rückfrage vorbereitet");
+
+  await page.evaluate(() => window.__allowClarificationMarkerWrite());
+  await page.getByRole("button", { name: "Als versendet markieren" }).click();
+
+  await expect(draftSection).toContainText("Rückfrage versendet");
+  await expect(markError).toHaveCount(0);
+});
+
 test("Ein neu gespeicherter Draft wird als atomarer Envelope mit workflowId gespeichert", async ({
   page,
 }) => {

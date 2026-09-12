@@ -49,6 +49,33 @@ import {
   type InquiryIntakeErrors,
 } from "@/lib/inbox/inquiry-intake";
 
+// True only when both identities refer to the exact same persisted draft
+// version: for a canonical identity, the same workflowId and revision; for a
+// legacy identity (no revision concept), the same workflowId and exact
+// subject+message text. Deliberately field-by-field rather than a
+// JSON.stringify comparison, so unrelated key ordering or future optional
+// fields can never cause a false mismatch or false match.
+function isSameClarificationIdentity(
+  a: ClarificationDraftIdentity | null,
+  b: ClarificationDraftIdentity | null,
+): boolean {
+  if (!a || !b) return false;
+
+  if (a.kind === "canonical" && b.kind === "canonical") {
+    return a.workflowId === b.workflowId && a.revision === b.revision;
+  }
+
+  if (a.kind === "legacy" && b.kind === "legacy") {
+    return (
+      a.workflowId === b.workflowId &&
+      a.subject === b.subject &&
+      a.message === b.message
+    );
+  }
+
+  return false;
+}
+
 export function InboxAnalysis() {
   const workflowVersion = useRef(0);
   const customerInputRef = useRef<HTMLInputElement>(null);
@@ -538,22 +565,76 @@ export function InboxAnalysis() {
     setIsEditingClarification(false);
   }
 
+  // Distinguishes why a mark/unmark mutation reported failure, using exactly
+  // one follow-up snapshot read, and surfaces it via the existing
+  // clarificationError channel instead of leaving the click silently inert.
+  // A stale identity (another tab already saved a newer revision) is not a
+  // technical error — it shows the actual current persisted truth instead of
+  // guessing. An unchanged identity means the marker write/removal itself
+  // genuinely failed. Only called from the mark/unmark actions below, which
+  // are themselves only rendered outside edit mode, so this can never
+  // clobber unsaved local edits.
+  function handleClarificationStatusMutationFailure(genericErrorMessage: string) {
+    const workflowId = analysis?.workflowId;
+    if (!workflowId) {
+      setClarificationError(genericErrorMessage);
+      return;
+    }
+
+    const currentSnapshot = loadClarificationSnapshotForWorkflowId(workflowId);
+
+    if (!currentSnapshot) {
+      applyClarificationSnapshot(null);
+      setClarificationError("Der Rückfrageentwurf ist nicht mehr verfügbar.");
+      return;
+    }
+
+    if (!isSameClarificationIdentity(currentSnapshot.identity, clarificationIdentity)) {
+      applyClarificationSnapshot(currentSnapshot);
+      setClarificationError(
+        "Der Rückfrageentwurf wurde zwischenzeitlich geändert. Bitte prüfe die aktuelle Version erneut.",
+      );
+      return;
+    }
+
+    setClarificationError(genericErrorMessage);
+  }
+
   // Grants a sent attestation for exactly the currently visible draft
   // identity. If the mutation reports failure — a stale identity (another
   // tab already saved a newer revision) or a storage write failure — the
-  // UI is left completely unchanged rather than assuming success.
+  // UI never silently claims success; handleClarificationStatusMutationFailure
+  // surfaces an accessible explanation instead.
   function markClarificationSent() {
     if (!clarificationIdentity) return;
-    if (!markClarificationSentForIdentity(clarificationIdentity)) return;
 
-    setClarificationCommunicationStatus("sent");
+    setClarificationError("");
+
+    if (markClarificationSentForIdentity(clarificationIdentity)) {
+      setClarificationCommunicationStatus("sent");
+      setClarificationError("");
+      return;
+    }
+
+    handleClarificationStatusMutationFailure(
+      "Der Versandstatus konnte nicht gespeichert werden. Bitte versuche es erneut.",
+    );
   }
 
   function unmarkClarificationSent() {
     if (!clarificationIdentity) return;
-    if (!unmarkClarificationSentForIdentity(clarificationIdentity)) return;
 
-    setClarificationCommunicationStatus("prepared");
+    setClarificationError("");
+
+    if (unmarkClarificationSentForIdentity(clarificationIdentity)) {
+      setClarificationCommunicationStatus("prepared");
+      setClarificationError("");
+      return;
+    }
+
+    handleClarificationStatusMutationFailure(
+      "Der Versandstatus konnte nicht gespeichert werden. Bitte versuche es erneut.",
+    );
   }
 
   function toggleCustomerReplyPanel() {
