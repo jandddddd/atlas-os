@@ -879,7 +879,7 @@ test("Als versendet markieren setzt Rückfrage versendet in Inbox und Today; Ver
   const storedAfterSent = await page.evaluate(() =>
     JSON.parse(window.localStorage.getItem("atlas-clarification-draft")),
   );
-  expect(storedAfterSent.communicationStatus).toBe("sent");
+  expect(storedAfterSent.draft.communicationStatus).toBe("sent");
 
   await page.getByRole("link", { name: "In Heute weiterprüfen" }).click();
   await expect(page).toHaveURL(/\/today\?focusWorkflowId=.+/);
@@ -903,7 +903,7 @@ test("Als versendet markieren setzt Rückfrage versendet in Inbox und Today; Ver
   const storedAfterUndo = await page.evaluate(() =>
     JSON.parse(window.localStorage.getItem("atlas-clarification-draft")),
   );
-  expect(storedAfterUndo.communicationStatus).toBe("prepared");
+  expect(storedAfterUndo.draft.communicationStatus).toBe("prepared");
 });
 
 test("Nachricht kopieren lässt den Kommunikationsstatus unverändert", async ({ page }) => {
@@ -924,7 +924,7 @@ test("Nachricht kopieren lässt den Kommunikationsstatus unverändert", async ({
   const stored = await page.evaluate(() =>
     JSON.parse(window.localStorage.getItem("atlas-clarification-draft")),
   );
-  expect(stored.communicationStatus).toBe("prepared");
+  expect(stored.draft.communicationStatus).toBe("prepared");
 });
 
 test("Eine inhaltliche Änderung nach Als versendet markieren setzt den Status zurück auf Rückfrage vorbereitet", async ({
@@ -950,8 +950,8 @@ test("Eine inhaltliche Änderung nach Als versendet markieren setzt den Status z
   const stored = await page.evaluate(() =>
     JSON.parse(window.localStorage.getItem("atlas-clarification-draft")),
   );
-  expect(stored.communicationStatus).toBe("prepared");
-  expect(stored.message).toBe("Eine tatsächlich geänderte Nachricht.");
+  expect(stored.draft.communicationStatus).toBe("prepared");
+  expect(stored.draft.message).toBe("Eine tatsächlich geänderte Nachricht.");
 });
 
 test("Speichern ohne inhaltliche Änderung erhält den Status Rückfrage versendet", async ({
@@ -973,7 +973,7 @@ test("Speichern ohne inhaltliche Änderung erhält den Status Rückfrage versend
   const stored = await page.evaluate(() =>
     JSON.parse(window.localStorage.getItem("atlas-clarification-draft")),
   );
-  expect(stored.communicationStatus).toBe("sent");
+  expect(stored.draft.communicationStatus).toBe("sent");
 });
 
 test("Der Status Rückfrage versendet bleibt nach einem Reload erhalten", async ({ page }) => {
@@ -1023,7 +1023,7 @@ test("Ein parallel in einem zweiten Tab gesetzter sent-Status übersteht ein No-
   const storedAfterSent = await page.evaluate(() =>
     JSON.parse(window.localStorage.getItem("atlas-clarification-draft")),
   );
-  expect(storedAfterSent.communicationStatus).toBe("sent");
+  expect(storedAfterSent.draft.communicationStatus).toBe("sent");
 
   // Tab A changes nothing and saves: this must not resurrect "prepared"
   // over the concurrently persisted "sent" state.
@@ -1034,7 +1034,7 @@ test("Ein parallel in einem zweiten Tab gesetzter sent-Status übersteht ein No-
   const storedAfterNoopSave = await page.evaluate(() =>
     JSON.parse(window.localStorage.getItem("atlas-clarification-draft")),
   );
-  expect(storedAfterNoopSave.communicationStatus).toBe("sent");
+  expect(storedAfterNoopSave.draft.communicationStatus).toBe("sent");
 });
 
 test("Ein tatsächlicher Edit nach parallelem sent-Status im zweiten Tab setzt die neue Textversion auf prepared", async ({
@@ -1069,8 +1069,8 @@ test("Ein tatsächlicher Edit nach parallelem sent-Status im zweiten Tab setzt d
   const stored = await page.evaluate(() =>
     JSON.parse(window.localStorage.getItem("atlas-clarification-draft")),
   );
-  expect(stored.communicationStatus).toBe("prepared");
-  expect(stored.message).toBe("Eine tatsächlich neue Nachricht von Tab A.");
+  expect(stored.draft.communicationStatus).toBe("prepared");
+  expect(stored.draft.message).toBe("Eine tatsächlich neue Nachricht von Tab A.");
 });
 
 test("Ein Storage-Fehler beim Als versendet markieren zeigt die Rückfrage weiterhin als vorbereitet", async ({
@@ -1105,7 +1105,7 @@ test("Ein Storage-Fehler beim Als versendet markieren zeigt die Rückfrage weite
   const stored = await page.evaluate(() =>
     JSON.parse(window.localStorage.getItem("atlas-clarification-draft")),
   );
-  expect(stored.communicationStatus).toBe("prepared");
+  expect(stored.draft.communicationStatus).toBe("prepared");
 });
 
 test("Ein Storage-Fehler beim Speichern einer echten Änderung nach Als versendet markieren behauptet keinen Erfolg", async ({
@@ -1144,10 +1144,217 @@ test("Ein Storage-Fehler beim Speichern einer echten Änderung nach Als versende
   const stored = await page.evaluate(() =>
     JSON.parse(window.localStorage.getItem("atlas-clarification-draft")),
   );
-  expect(stored.communicationStatus).toBe("sent");
-  expect(stored.message).not.toBe(
+  expect(stored.draft.communicationStatus).toBe("sent");
+  expect(stored.draft.message).not.toBe(
     "Eine geänderte Nachricht, die nicht gespeichert werden kann.",
   );
+});
+
+test("Ein neu gespeicherter Draft wird als atomarer Envelope mit workflowId gespeichert", async ({
+  page,
+}) => {
+  await page.goto("/inbox");
+  await fillInboxInquiry(page);
+  await page.getByRole("button", { name: "Anfrage analysieren" }).click();
+  await expect(page.getByRole("heading", { name: "Analyse abgeschlossen" })).toBeVisible();
+  const analysis = await page.evaluate(() =>
+    JSON.parse(window.localStorage.getItem("atlas-inquiry-analysis")),
+  );
+  await page.getByRole("button", { name: "Rückfrage vorbereiten" }).click();
+
+  const stored = await page.evaluate(() =>
+    JSON.parse(window.localStorage.getItem("atlas-clarification-draft")),
+  );
+  expect(stored.version).toBe(1);
+  expect(stored.workflowId).toBe(analysis.workflowId);
+  expect(stored.draft.communicationStatus).toBe("prepared");
+
+  // The legacy split binding is no longer needed once the canonical
+  // envelope carries workflow identity and content together.
+  const legacyBinding = await page.evaluate(() =>
+    window.localStorage.getItem("atlas-clarification-draft-analysis-binding"),
+  );
+  expect(legacyBinding).toBeNull();
+});
+
+test("Eine Statusmutation für einen fremden workflowId schreibt nichts und lässt den exakten Workflow unverändert", async ({
+  page,
+}) => {
+  await page.goto("/inbox");
+  await fillInboxInquiry(page);
+  await page.getByRole("button", { name: "Anfrage analysieren" }).click();
+  await expect(page.getByRole("heading", { name: "Analyse abgeschlossen" })).toBeVisible();
+  await page.getByRole("button", { name: "Rückfrage vorbereiten" }).click();
+  const draftSection = page.getByRole("region", { name: "Rückfrageentwurf" });
+  await expect(draftSection).toContainText("Rückfrage vorbereitet");
+
+  // The persisted canonical record now belongs to an entirely different
+  // workflow, while this tab's own React state still believes it is
+  // working with the original one (e.g. a stale tab after another tab
+  // replaced the active workflow).
+  await page.evaluate(() => {
+    const stored = JSON.parse(window.localStorage.getItem("atlas-clarification-draft"));
+    stored.workflowId = "foreign-workflow-id";
+    window.localStorage.setItem("atlas-clarification-draft", JSON.stringify(stored));
+  });
+
+  await page.getByRole("button", { name: "Als versendet markieren" }).click();
+
+  // Fail closed: the mismatch is refused, so the persisted record for the
+  // foreign workflow is left completely untouched.
+  const storedAfter = await page.evaluate(() =>
+    JSON.parse(window.localStorage.getItem("atlas-clarification-draft")),
+  );
+  expect(storedAfter.workflowId).toBe("foreign-workflow-id");
+  expect(storedAfter.draft.communicationStatus).toBe("prepared");
+});
+
+test("Eine Statusmutation lehnt eine Legacy-Split-Shape ohne atomaren Envelope sicher ab (fail closed)", async ({
+  page,
+}) => {
+  await page.goto("/inbox");
+  await fillInboxInquiry(page);
+  await page.getByRole("button", { name: "Anfrage analysieren" }).click();
+  await expect(page.getByRole("heading", { name: "Analyse abgeschlossen" })).toBeVisible();
+  const analysis = await page.evaluate(() =>
+    JSON.parse(window.localStorage.getItem("atlas-inquiry-analysis")),
+  );
+
+  // Reproduces the exact pre-fix split-brain shape: the legacy binding
+  // names this workflow, but the draft key holds only a raw (non-canonical)
+  // draft whose true origin could, under the old two-read contract, have
+  // actually been written for a completely different, concurrently active
+  // workflow. The new atomic contract must never accept this combination as
+  // sufficient proof of identity for a mutation.
+  await page.evaluate((workflowId) => {
+    window.localStorage.setItem(
+      "atlas-clarification-draft",
+      JSON.stringify({
+        customerName: "Unbekannt",
+        subject: "Rückfrage zu einer möglicherweise fremden Anfrage",
+        message: "Ein Draft, dessen wahre Zugehörigkeit nicht atomar geprüft werden kann.",
+        missingInformation: [],
+        status: "draft",
+        communicationStatus: "prepared",
+      }),
+    );
+    window.localStorage.setItem(
+      "atlas-clarification-draft-analysis-binding",
+      JSON.stringify({ version: 1, workflowId }),
+    );
+  }, analysis.workflowId);
+  await page.reload();
+
+  const draftSection = page.getByRole("region", { name: "Rückfrageentwurf" });
+  await expect(draftSection).toBeVisible();
+  await expect(draftSection).toContainText("Rückfrage vorbereitet");
+
+  await page.getByRole("button", { name: "Als versendet markieren" }).click();
+
+  // Fail closed: no canonical envelope existed to atomically confirm and
+  // mutate in one step, so nothing is written and the raw legacy content is
+  // left exactly as it was.
+  await expect(draftSection).toContainText("Rückfrage vorbereitet");
+  await expect(draftSection).not.toContainText("Rückfrage versendet");
+  const storedAfter = await page.evaluate(() =>
+    JSON.parse(window.localStorage.getItem("atlas-clarification-draft")),
+  );
+  expect(storedAfter.communicationStatus).toBe("prepared");
+  expect(storedAfter.version).toBeUndefined();
+});
+
+test("Konsistente Legacy-Daten bleiben lesbar, defaulten auf prepared und wandern bei einem regulären Save in die neue Envelope-Form", async ({
+  page,
+}) => {
+  await page.goto("/inbox");
+  await fillInboxInquiry(page);
+  await page.getByRole("button", { name: "Anfrage analysieren" }).click();
+  await expect(page.getByRole("heading", { name: "Analyse abgeschlossen" })).toBeVisible();
+  const analysis = await page.evaluate(() =>
+    JSON.parse(window.localStorage.getItem("atlas-inquiry-analysis")),
+  );
+
+  await page.evaluate((workflowId) => {
+    window.localStorage.setItem(
+      "atlas-clarification-draft",
+      JSON.stringify({
+        customerName: "Unbekannt",
+        subject: "Alter Betreff",
+        message: "Alte Nachricht ohne communicationStatus.",
+        missingInformation: [],
+        status: "draft",
+      }),
+    );
+    window.localStorage.setItem(
+      "atlas-clarification-draft-analysis-binding",
+      JSON.stringify({ version: 1, workflowId }),
+    );
+  }, analysis.workflowId);
+  await page.reload();
+
+  const draftSection = page.getByRole("region", { name: "Rückfrageentwurf" });
+  await expect(draftSection).toBeVisible();
+  await expect(draftSection).toContainText("Rückfrage vorbereitet");
+  await expect(draftSection).toContainText("Alte Nachricht ohne communicationStatus.");
+
+  // A regular edit-save (the trusted, caller-authored path, not a bare
+  // status toggle) migrates this legacy record into the new canonical
+  // envelope.
+  await page.getByRole("button", { name: "Entwurf bearbeiten" }).click();
+  await page.getByLabel("Nachricht").fill("Neue Nachricht nach Migration.");
+  await page.getByRole("button", { name: "Änderungen übernehmen" }).click();
+
+  const stored = await page.evaluate(() =>
+    JSON.parse(window.localStorage.getItem("atlas-clarification-draft")),
+  );
+  expect(stored.version).toBe(1);
+  expect(stored.workflowId).toBe(analysis.workflowId);
+  expect(stored.draft.message).toBe("Neue Nachricht nach Migration.");
+  expect(stored.draft.communicationStatus).toBe("prepared");
+  const legacyBindingAfter = await page.evaluate(() =>
+    window.localStorage.getItem("atlas-clarification-draft-analysis-binding"),
+  );
+  expect(legacyBindingAfter).toBeNull();
+});
+
+test("Ein alter Kommunikationsklick aus Tab A nach Workflow-Ersetzung durch Tab B ändert Workflow B nicht", async ({
+  page,
+  context,
+}) => {
+  await page.goto("/inbox");
+  await fillInboxInquiry(page);
+  await page.getByRole("button", { name: "Anfrage analysieren" }).click();
+  await expect(page.getByRole("heading", { name: "Analyse abgeschlossen" })).toBeVisible();
+  await page.getByRole("button", { name: "Rückfrage vorbereiten" }).click();
+  const draftSection = page.getByRole("region", { name: "Rückfrageentwurf" });
+  await expect(draftSection).toContainText("Rückfrage vorbereitet");
+
+  // Tab B replaces the single active Inbox workflow with a completely
+  // different one, which — via the existing, already-established clearing
+  // behavior — removes any clarification draft entirely.
+  const secondTab = await context.newPage();
+  await secondTab.goto("/inbox");
+  await secondTab.getByLabel("Kunde oder Kontakt").fill("Firma Weber GmbH");
+  await secondTab.getByLabel("Ort (optional)").fill("Mannheim");
+  await secondTab
+    .getByLabel("Kundenanfrage")
+    .fill("Bitte die Fassade streichen. Maße folgen.");
+  await secondTab.getByRole("button", { name: "Anfrage analysieren" }).click();
+  await expect(
+    secondTab.getByRole("heading", { name: "Analyse abgeschlossen" }),
+  ).toBeVisible();
+  await secondTab.close();
+
+  // Tab A, still showing its own (now stale) workflow, triggers the old
+  // communication action.
+  await page.getByRole("button", { name: "Als versendet markieren" }).click();
+
+  // The new workflow has no clarification draft of its own, so nothing may
+  // be fabricated for it, and Tab A's stale action must not resurrect one.
+  const storedAfter = await page.evaluate(() =>
+    JSON.parse(window.localStorage.getItem("atlas-clarification-draft")),
+  );
+  expect(storedAfter).toBeNull();
 });
 
 test("Ein sent-Status für einen fremden workflowId zeigt in Today keine Rückfrage versendet", async ({
@@ -1261,18 +1468,18 @@ test("Weitere Entscheidungen aktualisiert den Rückfrage-Kommunikationsstatus pe
   const secondTab = await context.newPage();
   await secondTab.goto("/inbox");
   await secondTab.evaluate(() => {
-    const draft = JSON.parse(window.localStorage.getItem("atlas-clarification-draft"));
-    draft.communicationStatus = "sent";
-    window.localStorage.setItem("atlas-clarification-draft", JSON.stringify(draft));
+    const stored = JSON.parse(window.localStorage.getItem("atlas-clarification-draft"));
+    stored.draft.communicationStatus = "sent";
+    window.localStorage.setItem("atlas-clarification-draft", JSON.stringify(stored));
   });
 
   await expect(overviewItem).toContainText("Rückfrage versendet");
   await expect(overviewItem).not.toContainText("Rückfrage vorbereitet");
 
   await secondTab.evaluate(() => {
-    const draft = JSON.parse(window.localStorage.getItem("atlas-clarification-draft"));
-    draft.communicationStatus = "prepared";
-    window.localStorage.setItem("atlas-clarification-draft", JSON.stringify(draft));
+    const stored = JSON.parse(window.localStorage.getItem("atlas-clarification-draft"));
+    stored.draft.communicationStatus = "prepared";
+    window.localStorage.setItem("atlas-clarification-draft", JSON.stringify(stored));
   });
   await secondTab.close();
 
@@ -1303,9 +1510,9 @@ test("Heute zuerst aktualisiert den Rückfrage-Kommunikationsstatus per Cross-Ta
   const secondTab = await context.newPage();
   await secondTab.goto("/inbox");
   await secondTab.evaluate(() => {
-    const draft = JSON.parse(window.localStorage.getItem("atlas-clarification-draft"));
-    draft.communicationStatus = "sent";
-    window.localStorage.setItem("atlas-clarification-draft", JSON.stringify(draft));
+    const stored = JSON.parse(window.localStorage.getItem("atlas-clarification-draft"));
+    stored.draft.communicationStatus = "sent";
+    window.localStorage.setItem("atlas-clarification-draft", JSON.stringify(stored));
   });
   await secondTab.close();
 

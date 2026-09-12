@@ -13,6 +13,12 @@ const OFFER_DRAFT_BINDING_VERSION = 1;
 const OFFER_WORKSPACE_KEY = "atlas-offer-workspace";
 const OFFER_WORKSPACE_VERSION = 1;
 const CLARIFICATION_DRAFT_KEY = "atlas-clarification-draft";
+const CLARIFICATION_DRAFT_VERSION = 1;
+// Legacy-only: before CLARIFICATION_DRAFT_VERSION, the draft's workflow
+// identity lived in this separate key instead of inside the draft record
+// itself. Still read for backward compatibility, but a workflow-bound
+// status mutation never trusts this split shape — see
+// setClarificationCommunicationStatusForWorkflowId.
 const CLARIFICATION_DRAFT_BINDING_KEY = "atlas-clarification-draft-analysis-binding";
 const CLARIFICATION_DRAFT_BINDING_VERSION = 1;
 const INQUIRY_CONTEXT_KEY = "atlas-inquiry-context";
@@ -45,6 +51,19 @@ export type StoredOfferDraftBinding = {
 type StoredClarificationDraftBinding = {
   version: typeof CLARIFICATION_DRAFT_BINDING_VERSION;
   workflowId: string;
+};
+
+/**
+ * The canonical clarification record: workflow identity and draft content
+ * live together in one record under CLARIFICATION_DRAFT_KEY, so a caller
+ * reading it back always gets both from the exact same atomic read — no
+ * separate identity lookup that could observe a different draft than the
+ * one the identity was originally checked against.
+ */
+type StoredClarificationDraft = {
+  version: typeof CLARIFICATION_DRAFT_VERSION;
+  workflowId: string;
+  draft: ClarificationDraft;
 };
 
 export type StoredInquiryContext = {
@@ -149,6 +168,17 @@ function isStoredClarificationDraftBinding(
     isRecord(value) &&
     value.version === CLARIFICATION_DRAFT_BINDING_VERSION &&
     typeof value.workflowId === "string"
+  );
+}
+
+function isStoredClarificationDraft(
+  value: unknown,
+): value is StoredClarificationDraft {
+  return (
+    isRecord(value) &&
+    value.version === CLARIFICATION_DRAFT_VERSION &&
+    typeof value.workflowId === "string" &&
+    isClarificationDraft(value.draft)
   );
 }
 
@@ -267,8 +297,13 @@ export function loadOfferDraftForAnalysis(
   return binding.workflowId === analysis.workflowId ? offer : null;
 }
 
-function loadClarificationDraft(): ClarificationDraft | null {
+/** Legacy-shape-only: a raw draft with no workflow identity of its own. */
+function loadLegacyClarificationDraft(): ClarificationDraft | null {
   return loadStoredValue(CLARIFICATION_DRAFT_KEY, isClarificationDraft);
+}
+
+function loadStoredClarificationDraft(): StoredClarificationDraft | null {
+  return loadStoredValue(CLARIFICATION_DRAFT_KEY, isStoredClarificationDraft);
 }
 
 /**
@@ -283,19 +318,33 @@ export function getClarificationCommunicationStatus(
   return draft.communicationStatus === "sent" ? "sent" : "prepared";
 }
 
+/**
+ * Read-only lookup, safe for display purposes (Inbox restore, Today).
+ * Prefers the canonical record, where workflow identity and draft content
+ * come from the exact same atomic read. Falls back to the legacy split
+ * shape (a raw draft plus a separately keyed binding) for backward
+ * compatibility only; this fallback is intentionally never used by the
+ * workflow-bound status mutation below, since combining two separate reads
+ * is exactly the unsafe pattern that mutation must not repeat.
+ */
 export function loadClarificationDraftForWorkflowId(
   workflowId: string | undefined,
 ): ClarificationDraft | null {
   if (!workflowId) return null;
 
-  const draft = loadClarificationDraft();
-  const binding = loadStoredValue(
+  const storedDraft = loadStoredClarificationDraft();
+  if (storedDraft) {
+    return storedDraft.workflowId === workflowId ? storedDraft.draft : null;
+  }
+
+  const legacyDraft = loadLegacyClarificationDraft();
+  const legacyBinding = loadStoredValue(
     CLARIFICATION_DRAFT_BINDING_KEY,
     isStoredClarificationDraftBinding,
   );
-  if (!draft || !binding) return null;
+  if (!legacyDraft || !legacyBinding) return null;
 
-  return binding.workflowId === workflowId ? draft : null;
+  return legacyBinding.workflowId === workflowId ? legacyDraft : null;
 }
 
 export function loadClarificationDraftForAnalysis(
@@ -317,55 +366,60 @@ export function loadClarificationCommunicationStatusForWorkflowId(
 }
 
 /**
- * Returns whether both the draft content and its binding (when applicable)
- * were actually persisted, so a caller that must not claim a successful save
- * on a failed write (e.g. after a real content edit) can tell the
- * difference. Existing callers that already treated this as fire-and-forget
- * may keep ignoring the return value.
+ * Persists the draft as the canonical record (workflow identity and content
+ * together in one write), migrating away from the legacy split shape the
+ * moment this succeeds. Returns whether the write actually happened, so a
+ * caller that must not claim a successful save on a failed write (e.g.
+ * after a real content edit) can tell the difference. Existing callers that
+ * already treated this as fire-and-forget may keep ignoring the return
+ * value. When the analysis has no workflowId, keeps the existing plain,
+ * unbound draft shape instead of inventing an identity-less envelope.
  */
 export function saveClarificationDraft(
   draft: ClarificationDraft,
   analysis: AnalysisResult,
 ): boolean {
-  const savedDraft = saveStoredValue(CLARIFICATION_DRAFT_KEY, draft);
+  const didSave = analysis.workflowId
+    ? saveStoredValue(CLARIFICATION_DRAFT_KEY, {
+        version: CLARIFICATION_DRAFT_VERSION,
+        workflowId: analysis.workflowId,
+        draft,
+      } satisfies StoredClarificationDraft)
+    : saveStoredValue(CLARIFICATION_DRAFT_KEY, draft);
 
-  if (analysis.workflowId) {
-    const savedBinding = saveStoredValue(CLARIFICATION_DRAFT_BINDING_KEY, {
-      version: CLARIFICATION_DRAFT_BINDING_VERSION,
-      workflowId: analysis.workflowId,
-    } satisfies StoredClarificationDraftBinding);
-    return savedDraft && savedBinding;
-  }
-
+  // A successful save always leaves the canonical (or, without a workflowId,
+  // the plain unbound) shape behind, so no leftover legacy binding can ever
+  // again be paired with a draft that has already moved on.
   clearStoredValue(CLARIFICATION_DRAFT_BINDING_KEY);
-  return savedDraft;
+  return didSave;
 }
 
 /**
  * Sets only the communication status of the currently persisted clarification
- * draft, requiring it to be exactly bound to the given workflowId. Returns
- * the updated draft only once the write has actually been confirmed
- * persisted, or null if there is no draft, no binding, the binding belongs
- * to a different workflow, or the write itself failed — so a caller can
- * never overwrite an unrelated workflow's draft, and never optimistically
- * assume a mutation that did not actually happen (including a storage
- * failure that the underlying write already treats as a safe no-op).
+ * draft. Reads and writes the canonical record as a single atomic unit —
+ * workflow identity and draft content always come from and go back to the
+ * exact same record — so there is no window in which another tab's write
+ * could replace the draft between an identity check and a content mutation.
+ * Returns the updated draft only once the write has actually been confirmed
+ * persisted, or null if there is no canonical record, its workflowId does
+ * not match, or the write itself failed. A record still in the legacy split
+ * shape is deliberately never accepted here: it cannot be identified and
+ * mutated in one atomic step, so fail-closed is the correct behavior rather
+ * than combining two separate reads to guess at it.
  */
 export function setClarificationCommunicationStatusForWorkflowId(
   workflowId: string,
   communicationStatus: ClarificationCommunicationStatus,
 ): ClarificationDraft | null {
-  const binding = loadStoredValue(
-    CLARIFICATION_DRAFT_BINDING_KEY,
-    isStoredClarificationDraftBinding,
-  );
-  if (!binding || binding.workflowId !== workflowId) return null;
+  const storedDraft = loadStoredClarificationDraft();
+  if (!storedDraft || storedDraft.workflowId !== workflowId) return null;
 
-  const draft = loadClarificationDraft();
-  if (!draft) return null;
-
-  const nextDraft: ClarificationDraft = { ...draft, communicationStatus };
-  const didSave = saveStoredValue(CLARIFICATION_DRAFT_KEY, nextDraft);
+  const nextDraft: ClarificationDraft = { ...storedDraft.draft, communicationStatus };
+  const didSave = saveStoredValue(CLARIFICATION_DRAFT_KEY, {
+    version: CLARIFICATION_DRAFT_VERSION,
+    workflowId,
+    draft: nextDraft,
+  } satisfies StoredClarificationDraft);
   return didSave ? nextDraft : null;
 }
 

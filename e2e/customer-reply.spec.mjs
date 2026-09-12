@@ -216,7 +216,7 @@ test("ein als versendet markierter ClarificationDraft verschwindet vollständig 
   await expect(page.getByRole("button", { name: "Als versendet markieren" })).toBeVisible();
 
   const newDraft = await readLocalStorageJson(page, "atlas-clarification-draft");
-  expect(newDraft.communicationStatus).toBe("prepared");
+  expect(newDraft.draft.communicationStatus).toBe("prepared");
 });
 
 test("bei einem Analysefehler bleibt der ClarificationDraft unverändert erhalten", async ({ page }) => {
