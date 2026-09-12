@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { ScanSearch, Sparkles, TriangleAlert } from "lucide-react";
 
 import {
@@ -24,9 +24,8 @@ import {
   clearOfferDraft,
   clearInboxWorkflow,
   flagOfferDraftForReReview,
-  loadClarificationCommunicationStatusForWorkflowId,
-  loadClarificationDraftForAnalysis,
-  loadClarificationDraftIdentityForWorkflowId,
+  loadClarificationSnapshotForAnalysis,
+  loadClarificationSnapshotForWorkflowId,
   loadInquiryAnalysis,
   loadInquiryContextForAnalysis,
   loadOfferDraft,
@@ -39,6 +38,7 @@ import {
   saveOfferDraft,
   unmarkClarificationSentForIdentity,
   type ClarificationDraftIdentity,
+  type ClarificationDraftSnapshot,
 } from "@/lib/storage/inbox-storage";
 import { createClarificationDraft } from "@/lib/inbox/clarification-draft";
 import { composeInquiryWithCustomerReply } from "@/lib/inbox/customer-reply";
@@ -108,19 +108,32 @@ export function InboxAnalysis() {
   const [restartUsesPersistedContext, setRestartUsesPersistedContext] =
     useState(false);
 
+  // The single place that applies a coherent clarification read (content +
+  // identity + status, all from the same underlying record) to local state.
+  // Used by restore, a no-op save, discard, and cross-tab revalidation, so
+  // none of them can end up combining content from one storage state with
+  // identity/status from a later one. Stable across renders (only closes
+  // over useState setters) so effects can safely depend on it.
+  const applyClarificationSnapshot = useCallback(
+    (snapshot: ClarificationDraftSnapshot | null) => {
+      setClarification(snapshot?.draft ?? null);
+      setEditableClarification(snapshot?.draft ?? null);
+      setClarificationIdentity(snapshot?.identity ?? null);
+      setClarificationCommunicationStatus(snapshot?.communicationStatus ?? "prepared");
+    },
+    [],
+  );
+
   useEffect(() => {
     let cancelled = false;
 
     const savedAnalysis = loadInquiryAnalysis();
     const savedOffer = loadOfferDraft();
-    const savedClarification = savedAnalysis
-      ? loadClarificationDraftForAnalysis(savedAnalysis)
-      : null;
-    const savedClarificationIdentity = savedAnalysis
-      ? loadClarificationDraftIdentityForWorkflowId(savedAnalysis.workflowId)
-      : null;
-    const savedClarificationStatus = savedAnalysis
-      ? loadClarificationCommunicationStatusForWorkflowId(savedAnalysis.workflowId)
+    // A single coherent read: content, identity, and status all come from
+    // the exact same underlying record, never three independent reads that
+    // could straddle a concurrent cross-tab write.
+    const savedClarificationSnapshot = savedAnalysis
+      ? loadClarificationSnapshotForAnalysis(savedAnalysis)
       : null;
     const savedInquiryContext = savedAnalysis
       ? loadInquiryContextForAnalysis(savedAnalysis)
@@ -144,11 +157,8 @@ export function InboxAnalysis() {
         setOfferStatus("completed");
       }
 
-      if (savedClarification) {
-        setClarification(savedClarification);
-        setEditableClarification(savedClarification);
-        setClarificationIdentity(savedClarificationIdentity);
-        setClarificationCommunicationStatus(savedClarificationStatus ?? "prepared");
+      if (savedClarificationSnapshot) {
+        applyClarificationSnapshot(savedClarificationSnapshot);
       }
 
       if (savedInquiryContext) {
@@ -161,7 +171,27 @@ export function InboxAnalysis() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [applyClarificationSnapshot]);
+
+  // Cross-tab live revalidation: another tab may mark/unmark the draft sent,
+  // or save a new revision, while this tab is open. While the user is
+  // actively editing here, a cross-tab write must never clobber the unsaved
+  // local text or silently swap in a different identity behind it — that
+  // reconciliation happens later via this tab's own no-op-save, discard, or
+  // a real save (which mints its own new revision regardless).
+  useEffect(() => {
+    const workflowId = analysis?.workflowId;
+    if (!workflowId) return;
+
+    function handleStorageChange() {
+      if (isEditingClarification) return;
+
+      applyClarificationSnapshot(loadClarificationSnapshotForWorkflowId(workflowId));
+    }
+
+    window.addEventListener("storage", handleStorageChange);
+    return () => window.removeEventListener("storage", handleStorageChange);
+  }, [analysis?.workflowId, isEditingClarification, applyClarificationSnapshot]);
 
   function updateIntake(field: keyof InquiryIntake, value: string) {
     setIntake((current) => ({ ...current, [field]: value }));
@@ -440,16 +470,11 @@ export function InboxAnalysis() {
     if (!contentChanged) {
       // Nothing in this tab actually changed, so nothing is written here:
       // another tab may have concurrently marked this exact draft sent (or
-      // reverted it), and that persisted truth has to win. Re-reading is
-      // the only safe way to know it, rather than assuming this tab's
-      // last-known state is still current.
-      const persistedDraft = loadClarificationDraftForAnalysis(analysis);
-      setClarification(persistedDraft);
-      setEditableClarification(persistedDraft);
-      setClarificationIdentity(loadClarificationDraftIdentityForWorkflowId(analysis.workflowId));
-      setClarificationCommunicationStatus(
-        loadClarificationCommunicationStatusForWorkflowId(analysis.workflowId) ?? "prepared",
-      );
+      // reverted it), and that persisted truth has to win. Re-reading a
+      // single coherent snapshot (rather than draft/identity/status
+      // separately) is the only safe way to know it, since anything read
+      // separately could interleave with a write from another tab.
+      applyClarificationSnapshot(loadClarificationSnapshotForAnalysis(analysis));
       setIsEditingClarification(false);
       return;
     }
@@ -478,7 +503,13 @@ export function InboxAnalysis() {
   }
 
   function discardClarificationChanges() {
-    if (clarification) {
+    // "Verwerfen" means discarding this tab's unsaved edit AND showing
+    // whatever is actually currently persisted — not just reverting to the
+    // last state this tab happened to observe, since another tab may have
+    // saved a new revision or changed the sent status in the meantime.
+    if (analysis?.workflowId) {
+      applyClarificationSnapshot(loadClarificationSnapshotForWorkflowId(analysis.workflowId));
+    } else if (clarification) {
       setEditableClarification({ ...clarification });
     }
     setIsEditingClarification(false);

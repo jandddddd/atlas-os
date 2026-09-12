@@ -228,6 +228,62 @@ test("ein als versendet markierter ClarificationDraft verschwindet vollständig 
   expect(newMarker).toBeNull();
 });
 
+test("ein Legacy-Sent-Marker wird nach einer erfolgreichen Kundenantwort vollständig entfernt", async ({
+  page,
+}) => {
+  await fillAndAnalyze(page);
+  const analysis = await readLocalStorageJson(page, "atlas-inquiry-analysis");
+
+  const legacySubject = "Alter Betreff vor Kundenantwort";
+  const legacyMessage = "Alte, bereits versendete Nachricht vor Kundenantwort.";
+  await page.evaluate(
+    ({ workflowId, subject, message }) => {
+      window.localStorage.setItem(
+        "atlas-clarification-draft",
+        JSON.stringify({
+          customerName: "Unbekannt",
+          subject,
+          message,
+          missingInformation: [],
+          status: "draft",
+        }),
+      );
+      window.localStorage.setItem(
+        "atlas-clarification-draft-analysis-binding",
+        JSON.stringify({ version: 1, workflowId }),
+      );
+      window.localStorage.setItem(
+        `atlas-clarification-legacy-sent:${workflowId}`,
+        JSON.stringify({ version: 1, workflowId, subject, message }),
+      );
+    },
+    { workflowId: analysis.workflowId, subject: legacySubject, message: legacyMessage },
+  );
+  await page.reload();
+
+  const draftSection = page.getByRole("region", { name: "Rückfrageentwurf" });
+  await expect(draftSection).toContainText("Rückfrage versendet");
+
+  const panel = await openReplyPanel(page);
+  await panel.getByLabel("Antwort des Kunden").fill("Der Wunschtermin ist Ende des Monats.");
+  await panel.getByRole("button", { name: "Antwort auswerten" }).click();
+
+  await expect(page.getByLabel("Rückfrageentwurf")).toHaveCount(0);
+  expect(await readLocalStorageJson(page, "atlas-clarification-draft")).toBeNull();
+  expect(
+    await readLocalStorageJson(page, "atlas-clarification-draft-analysis-binding"),
+  ).toBeNull();
+  // Unlike a canonical marker, a legacy marker pins real customer subject
+  // and message text, so it must be actively removed rather than merely
+  // left inert once its owning draft is cleared.
+  const legacyMarker = await page.evaluate(
+    (workflowId) =>
+      window.localStorage.getItem(`atlas-clarification-legacy-sent:${workflowId}`),
+    analysis.workflowId,
+  );
+  expect(legacyMarker).toBeNull();
+});
+
 test("bei einem Analysefehler bleibt der ClarificationDraft unverändert erhalten", async ({ page }) => {
   await fillAndAnalyze(page);
   await page.getByRole("button", { name: "Rückfrage vorbereiten" }).click();
