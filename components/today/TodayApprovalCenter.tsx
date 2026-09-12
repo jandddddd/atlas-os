@@ -16,6 +16,7 @@ import {
   loadOfferDraftForAnalysis,
   loadOfferWorkspace,
   markOfferWorkspaceReviewed,
+  type OfferWorkspaceEntry,
 } from "@/lib/storage/inbox-storage";
 import type {
   TodayDecisionPriorityExplanation,
@@ -35,6 +36,7 @@ type CompletionAction = {
 
 const CLARIFICATION_PREPARED_NOTE =
   "Für diese Anfrage ist bereits eine Rückfrage vorbereitet.";
+const OFFER_REVIEW_PENDING_NOTE = "Angebotsprüfung offen";
 
 type TodayApprovalDecision = Omit<ApprovalCardProps, "primaryAction" | "secondaryActions" | "details" | "notice" | "clarificationNote"> & TodayDecisionPriorityFactors & {
   id: string;
@@ -126,6 +128,25 @@ function availableEditHref(
     : undefined;
 }
 
+/**
+ * The workflow id of the given decision, but only when its exact
+ * OfferWorkspaceEntry still requires human review. The canonical truth is
+ * entry.status alone: existence of an entry (used for the offer link) and
+ * "review-pending" (used for this note) are deliberately kept separate, so a
+ * reviewed entry keeps its offer link while never showing this note.
+ */
+function reviewPendingOfferWorkflowId(
+  decision: { id?: string; workflowId?: string },
+  offerWorkspace: OfferWorkspaceEntry[],
+): string | null {
+  if (decision.id !== inboxTodayDecisionId || decision.workflowId === undefined) {
+    return null;
+  }
+
+  const entry = findOfferWorkspaceEntry(offerWorkspace, decision.workflowId);
+  return entry?.status === "review-pending" ? decision.workflowId : null;
+}
+
 export function TodayApprovalCenter({
   dateLabel,
   initialCompletionStatus,
@@ -184,6 +205,16 @@ export function TodayApprovalCenter({
   const [overviewOfferWorkspaceWorkflowId, setOverviewOfferWorkspaceWorkflowId] = useState<
     string | null
   >(null);
+  // Workflow ids for which the exact OfferWorkspaceEntry's canonical status
+  // is "review-pending" right now, scoped separately per slot exactly like
+  // the offer-link workflow ids above. Deliberately independent of those:
+  // an entry can exist (offer link visible) while already being "reviewed"
+  // (this note hidden), or vice versa is never possible, but the two truths
+  // must never be conflated into a single state.
+  const [priorityOfferReviewPendingWorkflowId, setPriorityOfferReviewPendingWorkflowId] =
+    useState<string | null>(null);
+  const [overviewOfferReviewPendingWorkflowId, setOverviewOfferReviewPendingWorkflowId] =
+    useState<string | null>(null);
 
   const [priorityDecisionId, ...overviewDecisionIds] = visibleDecisionIds;
   const priorityDecision = priorityDecisionId
@@ -228,6 +259,16 @@ export function TodayApprovalCenter({
     overviewInboxDecision.workflowId === overviewOfferWorkspaceWorkflowId
       ? `/offers/${encodeURIComponent(overviewInboxDecision.workflowId)}`
       : undefined;
+  // Same workflow-scoped gating as the offer-link booleans above, but reads
+  // the separate review-pending state: an offer link existing does not by
+  // itself mean the offer still needs human review.
+  const hasPendingPriorityOfferReview =
+    priorityDecision?.id === inboxTodayDecisionId &&
+    priorityDecision.workflowId !== undefined &&
+    priorityDecision.workflowId === priorityOfferReviewPendingWorkflowId;
+  const hasPendingOfferReviewForOverviewInboxDecision =
+    overviewInboxDecision?.workflowId !== undefined &&
+    overviewInboxDecision.workflowId === overviewOfferReviewPendingWorkflowId;
   // A pure navigation/focus match, never a priority decision: inboxTodayDecisionId
   // alone is not enough, since it is a fixed constant reused across any
   // dynamic Inbox decision snapshot, not a per-analysis identity. workflowId
@@ -263,11 +304,28 @@ export function TodayApprovalCenter({
           ? overviewWorkflowId
           : null,
       );
+      setPriorityOfferReviewPendingWorkflowId(
+        reviewPendingOfferWorkflowId(
+          { id: priorityDecision?.id, workflowId },
+          offerWorkspace,
+        ),
+      );
+      setOverviewOfferReviewPendingWorkflowId(
+        reviewPendingOfferWorkflowId(
+          { id: overviewInboxDecision?.id, workflowId: overviewWorkflowId },
+          offerWorkspace,
+        ),
+      );
       setLiveInboxWorkflowId(loadInquiryAnalysis()?.workflowId ?? null);
     });
 
     return () => window.cancelAnimationFrame(frame);
-  }, [priorityDecision?.workflowId, overviewInboxDecision?.workflowId]);
+  }, [
+    priorityDecision?.id,
+    priorityDecision?.workflowId,
+    overviewInboxDecision?.id,
+    overviewInboxDecision?.workflowId,
+  ]);
 
   // The above effect only re-reads storage when the rendered priority or
   // overview inbox decision itself changes, so it never notices another tab
@@ -305,11 +363,32 @@ export function TodayApprovalCenter({
           ? overviewWorkflowId
           : null,
       );
+      // Same offerWorkspace read reused for the review-pending truth, so a
+      // reviewed ↔ review-pending transition made in another tab (e.g. a
+      // manual re-review save) is reflected here without a reload, exactly
+      // like the offer-link existence above.
+      setPriorityOfferReviewPendingWorkflowId(
+        reviewPendingOfferWorkflowId(
+          { id: priorityDecision?.id, workflowId: priorityDecision?.workflowId },
+          offerWorkspace,
+        ),
+      );
+      setOverviewOfferReviewPendingWorkflowId(
+        reviewPendingOfferWorkflowId(
+          { id: overviewInboxDecision?.id, workflowId: overviewWorkflowId },
+          offerWorkspace,
+        ),
+      );
     }
 
     window.addEventListener("storage", handleStorageChange);
     return () => window.removeEventListener("storage", handleStorageChange);
-  }, [priorityDecision?.id, priorityDecision?.workflowId, overviewInboxDecision?.workflowId]);
+  }, [
+    priorityDecision?.id,
+    priorityDecision?.workflowId,
+    overviewInboxDecision?.id,
+    overviewInboxDecision?.workflowId,
+  ]);
 
   // Pure navigation focus, not a state change: scrolls to and puts real DOM
   // focus on whichever element (if any) was securely matched and marked
@@ -350,16 +429,26 @@ export function TodayApprovalCenter({
   const overviewDecisions = overviewDecisionIds
     .map((decisionId) => decisionById.get(decisionId))
     .filter((decision): decision is TodayApprovalDecision => Boolean(decision))
-    .map((decision) => ({
-      id: decision.id,
-      title: decision.overviewTitle,
-      context: decision.overviewContext,
-      meta:
-        decision.id === inboxTodayDecisionId && hasClarificationDraftForOverviewInboxDecision
-          ? `${decision.overviewMeta} · Rückfrage vorbereitet`
-          : decision.overviewMeta,
-      offerHref: decision.id === inboxTodayDecisionId ? overviewOfferHref : undefined,
-    }));
+    .map((decision) => {
+      const isOverviewInboxDecision = decision.id === inboxTodayDecisionId;
+      return {
+        id: decision.id,
+        title: decision.overviewTitle,
+        context: decision.overviewContext,
+        meta: [
+          decision.overviewMeta,
+          isOverviewInboxDecision && hasClarificationDraftForOverviewInboxDecision
+            ? "Rückfrage vorbereitet"
+            : null,
+          isOverviewInboxDecision && hasPendingOfferReviewForOverviewInboxDecision
+            ? OFFER_REVIEW_PENDING_NOTE
+            : null,
+        ]
+          .filter((fragment): fragment is string => Boolean(fragment))
+          .join(" · "),
+        offerHref: isOverviewInboxDecision ? overviewOfferHref : undefined,
+      };
+    });
   const hasDecisions = visibleDecisionIds.length > 0;
 
   function applyDecisionResult({
@@ -402,6 +491,21 @@ export function TodayApprovalCenter({
       setCompletionAction(nextCompletionAction);
       if (nextCompletionAction?.workflowId) {
         markOfferWorkspaceReviewed(nextCompletionAction.workflowId);
+        // markOfferWorkspaceReviewed can be a no-op (e.g. the offer draft
+        // binding is flagged for re-review after new customer information
+        // arrived), so the actually persisted status is re-read here rather
+        // than optimistically assumed. The native "storage" event never
+        // fires in the same tab that wrote it, so this same-tab path is the
+        // only way this UI would otherwise learn about the transition.
+        const revalidatedEntry = findOfferWorkspaceEntry(
+          loadOfferWorkspace(),
+          nextCompletionAction.workflowId,
+        );
+        setPriorityOfferReviewPendingWorkflowId(
+          revalidatedEntry?.status === "review-pending"
+            ? nextCompletionAction.workflowId
+            : null,
+        );
       }
       setFeedbackStatus("completed");
       setExpandedDetailsId(null);
@@ -568,9 +672,14 @@ export function TodayApprovalCenter({
               isVisible: expandedDetailsId === priorityDecision.id,
             }}
             clarificationNote={
-              hasClarificationDraftForPriorityDecision
-                ? CLARIFICATION_PREPARED_NOTE
-                : undefined
+              [
+                hasClarificationDraftForPriorityDecision
+                  ? CLARIFICATION_PREPARED_NOTE
+                  : null,
+                hasPendingPriorityOfferReview ? OFFER_REVIEW_PENDING_NOTE : null,
+              ]
+                .filter((fragment): fragment is string => Boolean(fragment))
+                .join(" · ") || undefined
             }
             notice={
               editHintDecisionId === priorityDecision.id

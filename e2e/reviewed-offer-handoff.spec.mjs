@@ -199,8 +199,16 @@ test("offer workspace keeps the draft and reflects its Today review status", asy
   await page.goto("/today");
   await page.getByRole("button", { name: inboxDecisionTitle }).click();
   await expect(page.getByRole("heading", { name: inboxDecisionTitle })).toBeVisible();
+  // The exact workflow's OfferWorkspaceEntry is still "review-pending" here,
+  // so Today must surface this on the primary card.
+  await expect(page.getByText("Angebotsprüfung offen")).toBeVisible();
   await page.getByRole("button", { name: "Als geprüft vormerken" }).click();
   await expect(page.getByRole("region", { name: "Aktueller Abschluss" })).toBeVisible();
+  // Same-tab revalidation, no reload: the approve flow already called
+  // markOfferWorkspaceReviewed for this workflow, and Today re-read the
+  // persisted result rather than assuming success, so the note is gone even
+  // though the native "storage" event never fires in this same tab.
+  await expect(page.getByText("Angebotsprüfung offen")).toHaveCount(0);
 
   await page.goto("/offers");
   await expect(page.getByRole("article")).toContainText("Geprüft");
@@ -432,6 +440,10 @@ test("a Today approval cannot re-mark an offer reviewed, but a manual re-review 
   expect(entryAfterReply.offer).toEqual(inboxOfferFixture);
 
   await openInboxDecision(page);
+  // The customer reply moved this exact entry back to "review-pending", so
+  // the note must reappear here even though it disappeared after the first
+  // approval above.
+  await expect(page.getByText("Angebotsprüfung offen")).toBeVisible();
   await page.getByRole("button", { name: "Als geprüft vormerken" }).click();
   await expect(page.getByRole("region", { name: "Aktueller Abschluss" })).toBeVisible();
 
@@ -920,6 +932,7 @@ test("Today zeigt keinen Offer-Link, wenn noch kein Angebot existiert", async ({
 
   await expect(page.getByRole("button", { name: inboxDecisionTitle })).toBeVisible();
   await expect(page.getByRole("link", { name: "Angebot öffnen" })).toHaveCount(0);
+  await expect(page.getByText("Angebotsprüfung offen")).toHaveCount(0);
 });
 
 test("Today zeigt keinen Offer-Link für eine legacy Inbox-Decision ohne workflowId", async ({
@@ -959,6 +972,7 @@ test("Today zeigt keinen Offer-Link für eine legacy Inbox-Decision ohne workflo
   await page.goto("/today");
   await expect(page.getByRole("heading", { name: inboxDecisionTitle })).toBeVisible();
   await expect(page.getByRole("link", { name: "Angebot öffnen" })).toHaveCount(0);
+  await expect(page.getByText("Angebotsprüfung offen")).toHaveCount(0);
 });
 
 test("Today zeigt keinen Offer-Link, wenn nur ein fremder workflowId einen Eintrag hat", async ({
@@ -989,6 +1003,7 @@ test("Today zeigt keinen Offer-Link, wenn nur ein fremder workflowId einen Eintr
 
   await expect(page.getByRole("button", { name: inboxDecisionTitle })).toBeVisible();
   await expect(page.getByRole("link", { name: "Angebot öffnen" })).toHaveCount(0);
+  await expect(page.getByText("Angebotsprüfung offen")).toHaveCount(0);
 });
 
 test("Today Overview zeigt den Offer-Link nach einem Cross-Tab-Angebot ohne Reload", async ({
@@ -1101,4 +1116,154 @@ test("Today Primary zeigt den Offer-Link nach einem Cross-Tab-Angebot ohne Reloa
   await secondTab.close();
 
   await expect(offerLink).toHaveCount(0);
+});
+
+test("Today Overview zeigt 'Angebotsprüfung offen' für den exakten review-pending Workflow", async ({
+  page,
+}) => {
+  await fillAndAnalyze(page);
+  await generateOfferAndAssertPayload(page);
+
+  await page.getByRole("link", { name: "In Heute weiterprüfen" }).click();
+  await expect(page).toHaveURL(/\/today\?focusWorkflowId=.+/);
+
+  // The static Weber fixture still outranks this fresh, normal-priority
+  // decision by default, so it stays under "Weitere Entscheidungen" without
+  // ever being clicked/prioritized.
+  const overviewItem = page.getByRole("button", { name: inboxDecisionTitle });
+  await expect(overviewItem).toBeVisible();
+  const overviewCard = overviewItem.locator("xpath=..");
+  await expect(overviewCard).toContainText("Angebotsprüfung offen");
+
+  const priorityRegion = page.getByRole("region", { name: "Heute zuerst" });
+  await expect(priorityRegion).not.toContainText("Angebotsprüfung offen");
+});
+
+test("Today zeigt den Offer-Link, aber keine Angebotsprüfung offen, wenn der exakte Eintrag bereits reviewed ist", async ({
+  page,
+}) => {
+  await fillAndAnalyze(page);
+  await generateOfferAndAssertPayload(page);
+  const analysis = await page.evaluate(() =>
+    JSON.parse(window.localStorage.getItem("atlas-inquiry-analysis")),
+  );
+
+  // Flips the canonical status directly, without going through Today's
+  // approve flow, proving the note is driven purely by entry.status and not
+  // by mere entry existence (which the offer link alone already proves).
+  await page.evaluate((workflowId) => {
+    const workspace = JSON.parse(window.localStorage.getItem("atlas-offer-workspace"));
+    workspace.offers = workspace.offers.map((entry) =>
+      entry.workflowId === workflowId ? { ...entry, status: "reviewed" } : entry,
+    );
+    window.localStorage.setItem("atlas-offer-workspace", JSON.stringify(workspace));
+  }, analysis.workflowId);
+
+  await openInboxDecision(page);
+
+  const offerLink = page.getByRole("link", { name: "Angebot öffnen" });
+  await expect(offerLink).toBeVisible();
+  await expect(offerLink).toHaveAttribute(
+    "href",
+    `/offers/${encodeURIComponent(analysis.workflowId)}`,
+  );
+  await expect(page.getByText("Angebotsprüfung offen")).toHaveCount(0);
+});
+
+test("Today zeigt Angebotsprüfung offen weiterhin korrekt, wenn der Inbox-Single-Slot inzwischen einen anderen Workflow zeigt", async ({
+  page,
+}) => {
+  await fillAndAnalyze(page);
+  await generateOfferAndAssertPayload(page);
+  const analysis = await page.evaluate(() =>
+    JSON.parse(window.localStorage.getItem("atlas-inquiry-analysis")),
+  );
+
+  await openInboxDecision(page);
+  await expect(page.getByText("Angebotsprüfung offen")).toBeVisible();
+
+  // The live Inbox single slot moves on to a completely unrelated workflow.
+  // The Today decision's own workflowId comes from the frozen handoff
+  // snapshot, not from this live slot, so it must stay unaffected.
+  await page.evaluate((fixture) => {
+    window.localStorage.setItem(
+      "atlas-inquiry-analysis",
+      JSON.stringify({ ...fixture, workflowId: crypto.randomUUID() }),
+    );
+  }, inboxAnalysisFixture);
+  await page.reload();
+
+  await expect(page.getByRole("heading", { name: inboxDecisionTitle })).toBeVisible();
+  await expect(page.getByText("Angebotsprüfung offen")).toBeVisible();
+  await expect(page.getByRole("link", { name: "Angebot öffnen" })).toHaveAttribute(
+    "href",
+    `/offers/${encodeURIComponent(analysis.workflowId)}`,
+  );
+});
+
+test("Today aktualisiert Angebotsprüfung offen nach einer Cross-Tab-Statusänderung ohne Reload", async ({
+  page,
+  context,
+}) => {
+  await fillAndAnalyze(page);
+  await generateOfferAndAssertPayload(page);
+  const analysis = await page.evaluate(() =>
+    JSON.parse(window.localStorage.getItem("atlas-inquiry-analysis")),
+  );
+
+  await openInboxDecision(page);
+  await expect(page.getByText("Angebotsprüfung offen")).toBeVisible();
+
+  const secondTab = await context.newPage();
+  await secondTab.goto("/inbox");
+  await secondTab.evaluate(
+    ({ workflowId, offer }) => {
+      window.localStorage.setItem(
+        "atlas-offer-workspace",
+        JSON.stringify({
+          version: 1,
+          offers: [
+            {
+              id: workflowId,
+              workflowId,
+              offer,
+              status: "reviewed",
+              updatedAt: new Date().toISOString(),
+            },
+          ],
+        }),
+      );
+    },
+    { workflowId: analysis.workflowId, offer: inboxOfferFixture },
+  );
+
+  // No reload: the note disappears while the offer link stays available,
+  // proving the two truths are read independently.
+  await expect(page.getByText("Angebotsprüfung offen")).toHaveCount(0);
+  await expect(page.getByRole("link", { name: "Angebot öffnen" })).toBeVisible();
+
+  await secondTab.evaluate(
+    ({ workflowId, offer }) => {
+      window.localStorage.setItem(
+        "atlas-offer-workspace",
+        JSON.stringify({
+          version: 1,
+          offers: [
+            {
+              id: workflowId,
+              workflowId,
+              offer,
+              status: "review-pending",
+              updatedAt: new Date().toISOString(),
+            },
+          ],
+        }),
+      );
+    },
+    { workflowId: analysis.workflowId, offer: inboxOfferFixture },
+  );
+  await secondTab.close();
+
+  // No reload: the note reappears without any further action.
+  await expect(page.getByText("Angebotsprüfung offen")).toBeVisible();
 });
