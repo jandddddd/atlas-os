@@ -1132,8 +1132,7 @@ test("Today Overview zeigt 'Angebotsprüfung offen' für den exakten review-pend
   // ever being clicked/prioritized.
   const overviewItem = page.getByRole("button", { name: inboxDecisionTitle });
   await expect(overviewItem).toBeVisible();
-  const overviewCard = overviewItem.locator("xpath=..");
-  await expect(overviewCard).toContainText("Angebotsprüfung offen");
+  await expect(overviewItem).toContainText("Angebotsprüfung offen");
 
   const priorityRegion = page.getByRole("region", { name: "Heute zuerst" });
   await expect(priorityRegion).not.toContainText("Angebotsprüfung offen");
