@@ -1,5 +1,6 @@
 import type {
   AnalysisResult,
+  ClarificationCommunicationStatus,
   ClarificationDraft,
   OfferDraft,
   OfferPosition,
@@ -134,7 +135,10 @@ export function isClarificationDraft(value: unknown): value is ClarificationDraf
     typeof value.subject === "string" &&
     typeof value.message === "string" &&
     isStringArray(value.missingInformation) &&
-    value.status === "draft"
+    value.status === "draft" &&
+    (value.communicationStatus === undefined ||
+      value.communicationStatus === "prepared" ||
+      value.communicationStatus === "sent")
   );
 }
 
@@ -259,6 +263,18 @@ function loadClarificationDraft(): ClarificationDraft | null {
   return loadStoredValue(CLARIFICATION_DRAFT_KEY, isClarificationDraft);
 }
 
+/**
+ * The single normalization point for a draft's communication status. A
+ * missing field (legacy drafts persisted before this field existed) always
+ * means "prepared", never "sent" — a draft can only ever become "sent"
+ * through an explicit human action that writes the field.
+ */
+export function getClarificationCommunicationStatus(
+  draft: ClarificationDraft,
+): ClarificationCommunicationStatus {
+  return draft.communicationStatus === "sent" ? "sent" : "prepared";
+}
+
 export function loadClarificationDraftForWorkflowId(
   workflowId: string | undefined,
 ): ClarificationDraft | null {
@@ -280,6 +296,18 @@ export function loadClarificationDraftForAnalysis(
   return loadClarificationDraftForWorkflowId(analysis.workflowId);
 }
 
+/**
+ * Read-only convenience for callers (Today) that only need the normalized
+ * communication status, never the draft's message content, and must never
+ * mutate it.
+ */
+export function loadClarificationCommunicationStatusForWorkflowId(
+  workflowId: string | undefined,
+): ClarificationCommunicationStatus | null {
+  const draft = loadClarificationDraftForWorkflowId(workflowId);
+  return draft ? getClarificationCommunicationStatus(draft) : null;
+}
+
 export function saveClarificationDraft(
   draft: ClarificationDraft,
   analysis: AnalysisResult,
@@ -294,6 +322,32 @@ export function saveClarificationDraft(
   } else {
     clearStoredValue(CLARIFICATION_DRAFT_BINDING_KEY);
   }
+}
+
+/**
+ * Sets only the communication status of the currently persisted clarification
+ * draft, requiring it to be exactly bound to the given workflowId. Returns
+ * the updated draft on success, or null without writing anything if there is
+ * no draft, no binding, or the binding belongs to a different workflow — so
+ * a caller can never overwrite an unrelated workflow's draft, and never
+ * optimistically assume a mutation that did not actually happen.
+ */
+export function setClarificationCommunicationStatusForWorkflowId(
+  workflowId: string,
+  communicationStatus: ClarificationCommunicationStatus,
+): ClarificationDraft | null {
+  const binding = loadStoredValue(
+    CLARIFICATION_DRAFT_BINDING_KEY,
+    isStoredClarificationDraftBinding,
+  );
+  if (!binding || binding.workflowId !== workflowId) return null;
+
+  const draft = loadClarificationDraft();
+  if (!draft) return null;
+
+  const nextDraft: ClarificationDraft = { ...draft, communicationStatus };
+  saveStoredValue(CLARIFICATION_DRAFT_KEY, nextDraft);
+  return nextDraft;
 }
 
 export function clearClarificationDraft() {

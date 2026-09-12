@@ -23,6 +23,7 @@ import {
   clearOfferDraft,
   clearInboxWorkflow,
   flagOfferDraftForReReview,
+  getClarificationCommunicationStatus,
   loadClarificationDraftForAnalysis,
   loadInquiryAnalysis,
   loadInquiryContextForAnalysis,
@@ -33,6 +34,7 @@ import {
   saveInquiryAnalysis,
   saveInquiryContext,
   saveOfferDraft,
+  setClarificationCommunicationStatusForWorkflowId,
 } from "@/lib/storage/inbox-storage";
 import { createClarificationDraft } from "@/lib/inbox/clarification-draft";
 import { composeInquiryWithCustomerReply } from "@/lib/inbox/customer-reply";
@@ -397,8 +399,24 @@ export function InboxAnalysis() {
 
   function saveClarification() {
     if (editableClarification && analysis) {
-      setClarification(editableClarification);
-      saveClarificationDraft(editableClarification, analysis);
+      // "sent" describes the currently persisted message content. A genuine
+      // change to that content means ATLAS can no longer claim the new
+      // version was already sent, so only a real change to the actual
+      // message fields (not merely opening/closing edit mode) may fall the
+      // status back to "prepared"; leaving the text untouched must never
+      // reset an existing "sent" marking.
+      const contentChanged =
+        editableClarification.subject !== clarification?.subject ||
+        editableClarification.message !== clarification?.message;
+      const savedDraft: ClarificationDraft = {
+        ...editableClarification,
+        communicationStatus: contentChanged
+          ? "prepared"
+          : getClarificationCommunicationStatus(editableClarification),
+      };
+      setClarification(savedDraft);
+      setEditableClarification(savedDraft);
+      saveClarificationDraft(savedDraft, analysis);
       setClarificationLastSavedAt(
         new Date().toLocaleTimeString("de-DE", {
           hour: "2-digit",
@@ -414,6 +432,36 @@ export function InboxAnalysis() {
       setEditableClarification({ ...clarification });
     }
     setIsEditingClarification(false);
+  }
+
+  // Workflow-bound mutation: reads back the actually persisted draft rather
+  // than optimistically assuming success, so a binding mismatch (e.g. a
+  // fresher analysis already replaced this one) never displays a status
+  // that was never written.
+  function markClarificationSent() {
+    if (!analysis?.workflowId) return;
+
+    const updatedDraft = setClarificationCommunicationStatusForWorkflowId(
+      analysis.workflowId,
+      "sent",
+    );
+    if (!updatedDraft) return;
+
+    setClarification(updatedDraft);
+    setEditableClarification(updatedDraft);
+  }
+
+  function unmarkClarificationSent() {
+    if (!analysis?.workflowId) return;
+
+    const updatedDraft = setClarificationCommunicationStatusForWorkflowId(
+      analysis.workflowId,
+      "prepared",
+    );
+    if (!updatedDraft) return;
+
+    setClarification(updatedDraft);
+    setEditableClarification(updatedDraft);
   }
 
   function toggleCustomerReplyPanel() {
@@ -768,6 +816,8 @@ export function InboxAnalysis() {
             onStartEditing={() => setIsEditingClarification(true)}
             onSave={saveClarification}
             onDiscard={discardClarificationChanges}
+            onMarkSent={markClarificationSent}
+            onUnmarkSent={unmarkClarificationSent}
           />
         )}
 

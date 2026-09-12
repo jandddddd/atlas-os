@@ -14,6 +14,7 @@ test("erzeugt einen deterministischen Rückfrageentwurf aus fehlenden Informatio
   assert.equal(draft.subject, "Rückfrage zu Ihrer Anfrage: Wohnzimmer streichen");
   assert.deepEqual(draft.missingInformation, ["Bilder", "genaue Raummaße"]);
   assert.equal(draft.status, "draft");
+  assert.equal(draft.communicationStatus, "prepared");
   assert.equal(
     draft.message,
     [

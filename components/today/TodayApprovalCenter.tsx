@@ -11,7 +11,7 @@ import { TodayEmptyState } from "@/components/today/TodayEmptyState";
 import { TodayHeader } from "@/components/today/TodayHeader";
 import {
   findOfferWorkspaceEntry,
-  loadClarificationDraftForWorkflowId,
+  loadClarificationCommunicationStatusForWorkflowId,
   loadInquiryAnalysis,
   loadOfferDraftForAnalysis,
   loadOfferWorkspace,
@@ -36,6 +36,8 @@ type CompletionAction = {
 
 const CLARIFICATION_PREPARED_NOTE =
   "Für diese Anfrage ist bereits eine Rückfrage vorbereitet.";
+const CLARIFICATION_SENT_NOTE =
+  "Die Rückfrage für diese Anfrage wurde als versendet markiert.";
 const OFFER_REVIEW_PENDING_NOTE = "Angebotsprüfung offen";
 
 type TodayApprovalDecision = Omit<ApprovalCardProps, "primaryAction" | "secondaryActions" | "details" | "notice" | "clarificationNote"> & TodayDecisionPriorityFactors & {
@@ -188,11 +190,19 @@ export function TodayApprovalCenter({
   // isOverviewInboxDecisionFocused. A ref (not state) is used deliberately,
   // since marking it must never itself trigger a re-render.
   const processedFocusWorkflowIdRef = useRef<string | null>(null);
-  const [clarificationDraftWorkflowId, setClarificationDraftWorkflowId] = useState<
-    string | null
-  >(null);
+  // Workflow ids for which the exact clarification draft's communication
+  // status is currently "prepared"/"sent", scoped separately per slot and
+  // kept as two mutually-exclusive truths (never both set for the same
+  // workflowId) rather than a single tri-state, matching the existing
+  // workflow-scoped boolean-state convention in this component.
+  const [priorityClarificationPreparedWorkflowId, setPriorityClarificationPreparedWorkflowId] =
+    useState<string | null>(null);
+  const [priorityClarificationSentWorkflowId, setPriorityClarificationSentWorkflowId] =
+    useState<string | null>(null);
   const [liveInboxWorkflowId, setLiveInboxWorkflowId] = useState<string | null>(null);
-  const [overviewClarificationDraftWorkflowId, setOverviewClarificationDraftWorkflowId] =
+  const [overviewClarificationPreparedWorkflowId, setOverviewClarificationPreparedWorkflowId] =
+    useState<string | null>(null);
+  const [overviewClarificationSentWorkflowId, setOverviewClarificationSentWorkflowId] =
     useState<string | null>(null);
   // Workflow ids for which a matching OfferWorkspaceEntry was confirmed to
   // exist, scoped separately to whichever decision (priority vs. overview)
@@ -232,16 +242,22 @@ export function TodayApprovalCenter({
   // just on the last localStorage read: the read only resolves in a later
   // animation frame, but the priority decision itself can already change to
   // an unrelated one within the same render (e.g. after an approve/postpone).
-  const hasClarificationDraftForPriorityDecision =
+  const hasPreparedClarificationForPriorityDecision =
     priorityDecision?.workflowId !== undefined &&
-    priorityDecision.workflowId === clarificationDraftWorkflowId;
+    priorityDecision.workflowId === priorityClarificationPreparedWorkflowId;
+  const hasSentClarificationForPriorityDecision =
+    priorityDecision?.workflowId !== undefined &&
+    priorityDecision.workflowId === priorityClarificationSentWorkflowId;
   // Scoped to the overview decision's own workflowId, deliberately never to
   // liveInboxWorkflowId: a prepared clarification stays valid for its own
   // workflow regardless of which workflow currently occupies the single
   // live Inbox slot.
-  const hasClarificationDraftForOverviewInboxDecision =
+  const hasPreparedClarificationForOverviewInboxDecision =
     overviewInboxDecision?.workflowId !== undefined &&
-    overviewInboxDecision.workflowId === overviewClarificationDraftWorkflowId;
+    overviewInboxDecision.workflowId === overviewClarificationPreparedWorkflowId;
+  const hasSentClarificationForOverviewInboxDecision =
+    overviewInboxDecision?.workflowId !== undefined &&
+    overviewInboxDecision.workflowId === overviewClarificationSentWorkflowId;
   // Same workflow-scoped matching rule as the clarification checks above,
   // applied to the Offer Workspace archive instead of the clarification
   // draft binding. Only decision.id === inboxTodayDecisionId with an exact
@@ -286,12 +302,24 @@ export function TodayApprovalCenter({
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => {
       const workflowId = priorityDecision?.workflowId;
-      setClarificationDraftWorkflowId(
-        workflowId && loadClarificationDraftForWorkflowId(workflowId) ? workflowId : null,
+      const priorityClarificationStatus =
+        loadClarificationCommunicationStatusForWorkflowId(workflowId);
+      setPriorityClarificationPreparedWorkflowId(
+        workflowId && priorityClarificationStatus === "prepared" ? workflowId : null,
+      );
+      setPriorityClarificationSentWorkflowId(
+        workflowId && priorityClarificationStatus === "sent" ? workflowId : null,
       );
       const overviewWorkflowId = overviewInboxDecision?.workflowId;
-      setOverviewClarificationDraftWorkflowId(
-        overviewWorkflowId && loadClarificationDraftForWorkflowId(overviewWorkflowId)
+      const overviewClarificationStatus =
+        loadClarificationCommunicationStatusForWorkflowId(overviewWorkflowId);
+      setOverviewClarificationPreparedWorkflowId(
+        overviewWorkflowId && overviewClarificationStatus === "prepared"
+          ? overviewWorkflowId
+          : null,
+      );
+      setOverviewClarificationSentWorkflowId(
+        overviewWorkflowId && overviewClarificationStatus === "sent"
           ? overviewWorkflowId
           : null,
       );
@@ -337,12 +365,6 @@ export function TodayApprovalCenter({
   useEffect(() => {
     function handleStorageChange() {
       setLiveInboxWorkflowId(loadInquiryAnalysis()?.workflowId ?? null);
-      setOverviewClarificationDraftWorkflowId(
-        overviewInboxDecision?.workflowId &&
-          loadClarificationDraftForWorkflowId(overviewInboxDecision.workflowId)
-          ? overviewInboxDecision.workflowId
-          : null,
-      );
       // Symmetric with the effect above: an offer created/removed for the
       // dynamic Inbox decision in another tab must revalidate the link
       // regardless of whether that decision is currently primary or in the
@@ -360,6 +382,34 @@ export function TodayApprovalCenter({
       const overviewWorkflowId = overviewInboxDecision?.workflowId;
       setOverviewOfferWorkspaceWorkflowId(
         overviewWorkflowId && findOfferWorkspaceEntry(offerWorkspace, overviewWorkflowId)
+          ? overviewWorkflowId
+          : null,
+      );
+      // Previously only the overview slot was revalidated here for
+      // clarification status, leaving the primary slot stale until the next
+      // decision change. Both slots now use the exact same read, closing
+      // that asymmetry.
+      const priorityClarificationStatus =
+        loadClarificationCommunicationStatusForWorkflowId(priorityWorkflowId);
+      setPriorityClarificationPreparedWorkflowId(
+        priorityWorkflowId && priorityClarificationStatus === "prepared"
+          ? priorityWorkflowId
+          : null,
+      );
+      setPriorityClarificationSentWorkflowId(
+        priorityWorkflowId && priorityClarificationStatus === "sent"
+          ? priorityWorkflowId
+          : null,
+      );
+      const overviewClarificationStatus =
+        loadClarificationCommunicationStatusForWorkflowId(overviewWorkflowId);
+      setOverviewClarificationPreparedWorkflowId(
+        overviewWorkflowId && overviewClarificationStatus === "prepared"
+          ? overviewWorkflowId
+          : null,
+      );
+      setOverviewClarificationSentWorkflowId(
+        overviewWorkflowId && overviewClarificationStatus === "sent"
           ? overviewWorkflowId
           : null,
       );
@@ -431,15 +481,21 @@ export function TodayApprovalCenter({
     .filter((decision): decision is TodayApprovalDecision => Boolean(decision))
     .map((decision) => {
       const isOverviewInboxDecision = decision.id === inboxTodayDecisionId;
+      // Mutually exclusive by construction: a workflow's clarification draft
+      // is either "sent" or "prepared", never both at once.
+      const overviewClarificationFragment =
+        isOverviewInboxDecision && hasSentClarificationForOverviewInboxDecision
+          ? "Rückfrage versendet"
+          : isOverviewInboxDecision && hasPreparedClarificationForOverviewInboxDecision
+            ? "Rückfrage vorbereitet"
+            : null;
       return {
         id: decision.id,
         title: decision.overviewTitle,
         context: decision.overviewContext,
         meta: [
           decision.overviewMeta,
-          isOverviewInboxDecision && hasClarificationDraftForOverviewInboxDecision
-            ? "Rückfrage vorbereitet"
-            : null,
+          overviewClarificationFragment,
           isOverviewInboxDecision && hasPendingOfferReviewForOverviewInboxDecision
             ? OFFER_REVIEW_PENDING_NOTE
             : null,
@@ -673,9 +729,11 @@ export function TodayApprovalCenter({
             }}
             clarificationNote={
               [
-                hasClarificationDraftForPriorityDecision
-                  ? CLARIFICATION_PREPARED_NOTE
-                  : null,
+                hasSentClarificationForPriorityDecision
+                  ? CLARIFICATION_SENT_NOTE
+                  : hasPreparedClarificationForPriorityDecision
+                    ? CLARIFICATION_PREPARED_NOTE
+                    : null,
                 hasPendingPriorityOfferReview ? OFFER_REVIEW_PENDING_NOTE : null,
               ]
                 .filter((fragment): fragment is string => Boolean(fragment))

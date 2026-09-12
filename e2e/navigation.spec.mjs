@@ -51,6 +51,17 @@ async function resetTodayState(context) {
   await context.clearCookies();
 }
 
+async function stubClipboard(page) {
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: {
+        writeText: async () => {},
+      },
+    });
+  });
+}
+
 async function fillInboxInquiry(page, {
   customer = "Familie Berger",
   location = "Heidelberg",
@@ -841,6 +852,310 @@ test("eine statische Today-Entscheidung ohne workflowId zeigt nie einen Rückfra
   await page.reload();
 
   await expect(page.getByRole("heading", { name: "Heute zuerst" })).toBeVisible();
+  await expect(
+    page.getByText("Für diese Anfrage ist bereits eine Rückfrage vorbereitet."),
+  ).toHaveCount(0);
+});
+
+test("Als versendet markieren setzt Rückfrage versendet in Inbox und Today; Versandmarkierung zurücknehmen stellt vorbereitet wieder her", async ({
+  page,
+}) => {
+  const inboxDecisionTitle = "Angebotsentwurf Familie Schneider vorbereiten";
+
+  await page.goto("/inbox");
+  await fillInboxInquiry(page);
+  await page.getByRole("button", { name: "Anfrage analysieren" }).click();
+  await expect(page.getByRole("heading", { name: "Analyse abgeschlossen" })).toBeVisible();
+  await page.getByRole("button", { name: "Rückfrage vorbereiten" }).click();
+  const draftSection = page.getByRole("region", { name: "Rückfrageentwurf" });
+  await expect(draftSection).toContainText("Rückfrage vorbereitet");
+
+  await page.getByRole("button", { name: "Als versendet markieren" }).click();
+  await expect(draftSection).toContainText("Rückfrage versendet");
+  await expect(
+    page.getByRole("button", { name: "Versandmarkierung zurücknehmen" }),
+  ).toBeVisible();
+
+  const storedAfterSent = await page.evaluate(() =>
+    JSON.parse(window.localStorage.getItem("atlas-clarification-draft")),
+  );
+  expect(storedAfterSent.communicationStatus).toBe("sent");
+
+  await page.getByRole("link", { name: "In Heute weiterprüfen" }).click();
+  await expect(page).toHaveURL(/\/today\?focusWorkflowId=.+/);
+  await page.getByRole("button", { name: inboxDecisionTitle }).click();
+  await expect(page.getByRole("heading", { name: inboxDecisionTitle })).toBeVisible();
+  await expect(
+    page.getByText("Die Rückfrage für diese Anfrage wurde als versendet markiert."),
+  ).toBeVisible();
+  await expect(
+    page.getByText("Für diese Anfrage ist bereits eine Rückfrage vorbereitet."),
+  ).toHaveCount(0);
+
+  await page.goto("/inbox");
+  await expect(draftSection).toContainText("Rückfrage versendet");
+
+  await page.getByRole("button", { name: "Versandmarkierung zurücknehmen" }).click();
+  await expect(draftSection).toContainText("Rückfrage vorbereitet");
+  await expect(draftSection).not.toContainText("Rückfrage versendet");
+  await expect(page.getByRole("button", { name: "Als versendet markieren" })).toBeVisible();
+
+  const storedAfterUndo = await page.evaluate(() =>
+    JSON.parse(window.localStorage.getItem("atlas-clarification-draft")),
+  );
+  expect(storedAfterUndo.communicationStatus).toBe("prepared");
+});
+
+test("Nachricht kopieren lässt den Kommunikationsstatus unverändert", async ({ page }) => {
+  await stubClipboard(page);
+  await page.goto("/inbox");
+  await fillInboxInquiry(page);
+  await page.getByRole("button", { name: "Anfrage analysieren" }).click();
+  await expect(page.getByRole("heading", { name: "Analyse abgeschlossen" })).toBeVisible();
+  await page.getByRole("button", { name: "Rückfrage vorbereiten" }).click();
+  const draftSection = page.getByRole("region", { name: "Rückfrageentwurf" });
+  await expect(draftSection).toContainText("Rückfrage vorbereitet");
+
+  await page.getByRole("button", { name: "Nachricht kopieren" }).click();
+  await expect(page.getByText("Nachricht kopiert")).toBeVisible();
+
+  await expect(draftSection).toContainText("Rückfrage vorbereitet");
+  await expect(draftSection).not.toContainText("Rückfrage versendet");
+  const stored = await page.evaluate(() =>
+    JSON.parse(window.localStorage.getItem("atlas-clarification-draft")),
+  );
+  expect(stored.communicationStatus).toBe("prepared");
+});
+
+test("Eine inhaltliche Änderung nach Als versendet markieren setzt den Status zurück auf Rückfrage vorbereitet", async ({
+  page,
+}) => {
+  await page.goto("/inbox");
+  await fillInboxInquiry(page);
+  await page.getByRole("button", { name: "Anfrage analysieren" }).click();
+  await expect(page.getByRole("heading", { name: "Analyse abgeschlossen" })).toBeVisible();
+  await page.getByRole("button", { name: "Rückfrage vorbereiten" }).click();
+  await page.getByRole("button", { name: "Als versendet markieren" }).click();
+  const draftSection = page.getByRole("region", { name: "Rückfrageentwurf" });
+  await expect(draftSection).toContainText("Rückfrage versendet");
+
+  await page.getByRole("button", { name: "Entwurf bearbeiten" }).click();
+  await page.getByLabel("Nachricht").fill("Eine tatsächlich geänderte Nachricht.");
+  await page.getByRole("button", { name: "Änderungen übernehmen" }).click();
+
+  await expect(draftSection).toContainText("Rückfrage vorbereitet");
+  await expect(draftSection).not.toContainText("Rückfrage versendet");
+  await expect(page.getByRole("button", { name: "Als versendet markieren" })).toBeVisible();
+
+  const stored = await page.evaluate(() =>
+    JSON.parse(window.localStorage.getItem("atlas-clarification-draft")),
+  );
+  expect(stored.communicationStatus).toBe("prepared");
+  expect(stored.message).toBe("Eine tatsächlich geänderte Nachricht.");
+});
+
+test("Speichern ohne inhaltliche Änderung erhält den Status Rückfrage versendet", async ({
+  page,
+}) => {
+  await page.goto("/inbox");
+  await fillInboxInquiry(page);
+  await page.getByRole("button", { name: "Anfrage analysieren" }).click();
+  await expect(page.getByRole("heading", { name: "Analyse abgeschlossen" })).toBeVisible();
+  await page.getByRole("button", { name: "Rückfrage vorbereiten" }).click();
+  await page.getByRole("button", { name: "Als versendet markieren" }).click();
+  const draftSection = page.getByRole("region", { name: "Rückfrageentwurf" });
+  await expect(draftSection).toContainText("Rückfrage versendet");
+
+  await page.getByRole("button", { name: "Entwurf bearbeiten" }).click();
+  await page.getByRole("button", { name: "Änderungen übernehmen" }).click();
+
+  await expect(draftSection).toContainText("Rückfrage versendet");
+  const stored = await page.evaluate(() =>
+    JSON.parse(window.localStorage.getItem("atlas-clarification-draft")),
+  );
+  expect(stored.communicationStatus).toBe("sent");
+});
+
+test("Der Status Rückfrage versendet bleibt nach einem Reload erhalten", async ({ page }) => {
+  await page.goto("/inbox");
+  await fillInboxInquiry(page);
+  await page.getByRole("button", { name: "Anfrage analysieren" }).click();
+  await expect(page.getByRole("heading", { name: "Analyse abgeschlossen" })).toBeVisible();
+  await page.getByRole("button", { name: "Rückfrage vorbereiten" }).click();
+  await page.getByRole("button", { name: "Als versendet markieren" }).click();
+
+  await page.reload();
+
+  const draftSection = page.getByRole("region", { name: "Rückfrageentwurf" });
+  await expect(draftSection).toBeVisible();
+  await expect(draftSection).toContainText("Rückfrage versendet");
+  await expect(
+    page.getByRole("button", { name: "Versandmarkierung zurücknehmen" }),
+  ).toBeVisible();
+});
+
+test("Ein sent-Status für einen fremden workflowId zeigt in Today keine Rückfrage versendet", async ({
+  page,
+}) => {
+  const inboxDecisionTitle = "Angebotsentwurf Familie Schneider vorbereiten";
+
+  await page.goto("/inbox");
+  await fillInboxInquiry(page);
+  await page.getByRole("button", { name: "Anfrage analysieren" }).click();
+  await expect(page.getByRole("heading", { name: "Analyse abgeschlossen" })).toBeVisible();
+
+  await page.evaluate(() => {
+    window.localStorage.setItem("atlas-clarification-draft", JSON.stringify({
+      customerName: "Fremde Anfrage",
+      subject: "Rückfrage zu einer anderen Anfrage",
+      message: "Sehr geehrte Damen und Herren,\n\n...",
+      missingInformation: ["Andere Angabe"],
+      status: "draft",
+      communicationStatus: "sent",
+    }));
+    window.localStorage.setItem("atlas-clarification-draft-analysis-binding", JSON.stringify({
+      version: 1,
+      workflowId: "foreign-workflow-id",
+    }));
+  });
+
+  await page.getByRole("link", { name: "In Heute weiterprüfen" }).click();
+  await expect(page).toHaveURL(/\/today\?focusWorkflowId=.+/);
+  await page.getByRole("button", { name: inboxDecisionTitle }).click();
+  await expect(page.getByRole("heading", { name: inboxDecisionTitle })).toBeVisible();
+
+  await expect(
+    page.getByText("Die Rückfrage für diese Anfrage wurde als versendet markiert."),
+  ).toHaveCount(0);
+  await expect(
+    page.getByText("Für diese Anfrage ist bereits eine Rückfrage vorbereitet."),
+  ).toHaveCount(0);
+});
+
+test("Weitere Entscheidungen zeigt 'Rückfrage versendet' für die dynamische Inbox-Decision", async ({
+  page,
+}) => {
+  const inboxDecisionTitle = "Angebotsentwurf Familie Schneider vorbereiten";
+
+  await page.goto("/inbox");
+  await fillInboxInquiry(page);
+  await page.getByRole("button", { name: "Anfrage analysieren" }).click();
+  await expect(page.getByRole("heading", { name: "Analyse abgeschlossen" })).toBeVisible();
+  await page.getByRole("button", { name: "Rückfrage vorbereiten" }).click();
+  await page.getByRole("button", { name: "Als versendet markieren" }).click();
+
+  await page.getByRole("link", { name: "In Heute weiterprüfen" }).click();
+  await expect(page).toHaveURL(/\/today\?focusWorkflowId=.+/);
+
+  const overviewItem = page.getByRole("button", { name: inboxDecisionTitle });
+  await expect(overviewItem).toBeVisible();
+  await expect(overviewItem).toContainText("Rückfrage versendet");
+  await expect(overviewItem).not.toContainText("Rückfrage vorbereitet");
+});
+
+test("Today kombiniert Rückfrage versendet mit Angebotsprüfung offen im selben Hinweis", async ({
+  page,
+}) => {
+  const inboxDecisionTitle = "Angebotsentwurf Familie Schneider vorbereiten";
+
+  await page.goto("/inbox");
+  await fillInboxInquiry(page);
+  await page.getByRole("button", { name: "Anfrage analysieren" }).click();
+  await expect(page.getByRole("heading", { name: "Analyse abgeschlossen" })).toBeVisible();
+  await page.getByRole("button", { name: "Angebotsentwurf erstellen" }).click();
+  await expect(
+    page.getByText("Angebotsentwurf Familie Schneider", { exact: true }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Rückfrage vorbereiten" }).click();
+  await page.getByRole("button", { name: "Als versendet markieren" }).click();
+
+  await page.getByRole("link", { name: "In Heute weiterprüfen" }).click();
+  await expect(page).toHaveURL(/\/today\?focusWorkflowId=.+/);
+  await page.getByRole("button", { name: inboxDecisionTitle }).click();
+  await expect(page.getByRole("heading", { name: inboxDecisionTitle })).toBeVisible();
+
+  await expect(
+    page.getByText("Die Rückfrage für diese Anfrage wurde als versendet markiert."),
+  ).toBeVisible();
+  await expect(page.getByText("Angebotsprüfung offen")).toBeVisible();
+});
+
+test("Weitere Entscheidungen aktualisiert den Rückfrage-Kommunikationsstatus per Cross-Tab ohne Reload (beide Richtungen)", async ({
+  page,
+  context,
+}) => {
+  const inboxDecisionTitle = "Angebotsentwurf Familie Schneider vorbereiten";
+
+  await page.goto("/inbox");
+  await fillInboxInquiry(page);
+  await page.getByRole("button", { name: "Anfrage analysieren" }).click();
+  await expect(page.getByRole("heading", { name: "Analyse abgeschlossen" })).toBeVisible();
+  await page.getByRole("button", { name: "Rückfrage vorbereiten" }).click();
+
+  await page.getByRole("link", { name: "In Heute weiterprüfen" }).click();
+  await expect(page).toHaveURL(/\/today\?focusWorkflowId=.+/);
+
+  const overviewItem = page.getByRole("button", { name: inboxDecisionTitle });
+  await expect(overviewItem).toBeVisible();
+  await expect(overviewItem).toContainText("Rückfrage vorbereitet");
+
+  // A genuine second tab shares the same localStorage origin, so writing
+  // there fires a native "storage" event in the first tab (a same-tab write
+  // never fires this event at all).
+  const secondTab = await context.newPage();
+  await secondTab.goto("/inbox");
+  await secondTab.evaluate(() => {
+    const draft = JSON.parse(window.localStorage.getItem("atlas-clarification-draft"));
+    draft.communicationStatus = "sent";
+    window.localStorage.setItem("atlas-clarification-draft", JSON.stringify(draft));
+  });
+
+  await expect(overviewItem).toContainText("Rückfrage versendet");
+  await expect(overviewItem).not.toContainText("Rückfrage vorbereitet");
+
+  await secondTab.evaluate(() => {
+    const draft = JSON.parse(window.localStorage.getItem("atlas-clarification-draft"));
+    draft.communicationStatus = "prepared";
+    window.localStorage.setItem("atlas-clarification-draft", JSON.stringify(draft));
+  });
+  await secondTab.close();
+
+  await expect(overviewItem).toContainText("Rückfrage vorbereitet");
+  await expect(overviewItem).not.toContainText("Rückfrage versendet");
+});
+
+test("Heute zuerst aktualisiert den Rückfrage-Kommunikationsstatus per Cross-Tab ohne Reload", async ({
+  page,
+  context,
+}) => {
+  const inboxDecisionTitle = "Angebotsentwurf Familie Schneider vorbereiten";
+
+  await page.goto("/inbox");
+  await fillInboxInquiry(page);
+  await page.getByRole("button", { name: "Anfrage analysieren" }).click();
+  await expect(page.getByRole("heading", { name: "Analyse abgeschlossen" })).toBeVisible();
+  await page.getByRole("button", { name: "Rückfrage vorbereiten" }).click();
+
+  await page.getByRole("link", { name: "In Heute weiterprüfen" }).click();
+  await expect(page).toHaveURL(/\/today\?focusWorkflowId=.+/);
+  await page.getByRole("button", { name: inboxDecisionTitle }).click();
+  await expect(page.getByRole("heading", { name: inboxDecisionTitle })).toBeVisible();
+  await expect(
+    page.getByText("Für diese Anfrage ist bereits eine Rückfrage vorbereitet."),
+  ).toBeVisible();
+
+  const secondTab = await context.newPage();
+  await secondTab.goto("/inbox");
+  await secondTab.evaluate(() => {
+    const draft = JSON.parse(window.localStorage.getItem("atlas-clarification-draft"));
+    draft.communicationStatus = "sent";
+    window.localStorage.setItem("atlas-clarification-draft", JSON.stringify(draft));
+  });
+  await secondTab.close();
+
+  await expect(
+    page.getByText("Die Rückfrage für diese Anfrage wurde als versendet markiert."),
+  ).toBeVisible();
   await expect(
     page.getByText("Für diese Anfrage ist bereits eine Rückfrage vorbereitet."),
   ).toHaveCount(0);

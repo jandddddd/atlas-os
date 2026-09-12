@@ -42,10 +42,19 @@ export type OfferDraft = {
 
 export type OfferStatus = "idle" | "generating" | "completed" | "error";
 
+export type ClarificationCommunicationStatus = "prepared" | "sent";
+
 export type ClarificationDraft = {
   customerName: string;
   subject: string;
   message: string;
   missingInformation: string[];
   status: "draft";
+  /**
+   * Whether a human has explicitly marked this exact draft as sent outside
+   * ATLAS. Absent on legacy drafts persisted before this field existed;
+   * always treat an absent value as "prepared", never as "sent" — see
+   * getClarificationCommunicationStatus in lib/storage/inbox-storage.ts.
+   */
+  communicationStatus?: ClarificationCommunicationStatus;
 };

@@ -3,6 +3,8 @@
 import { useEffect, useRef, useState } from "react";
 import { Copy } from "lucide-react";
 
+import { getClarificationCommunicationStatus } from "@/lib/storage/inbox-storage";
+
 import type { ClarificationDraft } from "./types";
 
 type ClarificationDraftViewProps = {
@@ -10,16 +12,20 @@ type ClarificationDraftViewProps = {
   isEditing: boolean;
   lastSavedAt: string | null;
   /**
-   * Disables starting/saving/discarding an edit without hiding the draft or
-   * discarding any text already typed. Used while an unrelated
-   * workflow-mutating action is in progress elsewhere. "Nachricht kopieren"
-   * stays available, since it is read-only.
+   * Disables starting/saving/discarding an edit, and marking/unmarking the
+   * draft as sent, without hiding the draft or discarding any text already
+   * typed. Used while an unrelated workflow-mutating action is in progress
+   * elsewhere. "Nachricht kopieren" stays available, since it is read-only.
    */
   disabled?: boolean;
   onChange: (draft: ClarificationDraft) => void;
   onStartEditing: () => void;
   onSave: () => void;
   onDiscard: () => void;
+  /** Explicit human confirmation that this draft was sent outside ATLAS. */
+  onMarkSent: () => void;
+  /** Corrects an ATLAS-side sent marking; never claims the message itself was un-sent. */
+  onUnmarkSent: () => void;
 };
 
 const COPY_STATUS_RESET_DELAY_MS = 2500;
@@ -33,10 +39,13 @@ export function ClarificationDraftView({
   onStartEditing,
   onSave,
   onDiscard,
+  onMarkSent,
+  onUnmarkSent,
 }: ClarificationDraftViewProps) {
   const [copyStatus, setCopyStatus] = useState<"idle" | "copied" | "error">(
     "idle",
   );
+  const communicationStatus = getClarificationCommunicationStatus(editableDraft);
   const copyResetTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -76,6 +85,9 @@ export function ClarificationDraftView({
           <span className="rounded-full bg-sky-100 px-3 py-1 text-sm font-medium text-sky-800">
             Rückfrageentwurf
           </span>
+          <p className="mt-2 text-sm font-medium text-neutral-600">
+            {communicationStatus === "sent" ? "Rückfrage versendet" : "Rückfrage vorbereitet"}
+          </p>
 
           <div className="mt-3 flex flex-wrap gap-3">
             {isEditing ? (
@@ -116,6 +128,27 @@ export function ClarificationDraftView({
               <Copy className="h-4 w-4" />
               Nachricht kopieren
             </button>
+
+            {!isEditing &&
+              (communicationStatus === "sent" ? (
+                <button
+                  type="button"
+                  onClick={onUnmarkSent}
+                  disabled={disabled}
+                  className="rounded-lg border px-4 py-2 text-sm font-medium transition hover:bg-neutral-50 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Versandmarkierung zurücknehmen
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={onMarkSent}
+                  disabled={disabled}
+                  className="rounded-lg border px-4 py-2 text-sm font-medium transition hover:bg-neutral-50 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Als versendet markieren
+                </button>
+              ))}
           </div>
 
           {lastSavedAt && !isEditing && (
