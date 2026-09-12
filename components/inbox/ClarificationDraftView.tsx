@@ -13,6 +13,13 @@ type ClarificationDraftViewProps = {
    * draft content no longer carries that truth.
    */
   communicationStatus: ClarificationCommunicationStatus;
+  /**
+   * True only when subject or message in editableDraft actually differs from
+   * the last persisted (and, if applicable, sent-attested) content — never
+   * merely because edit mode is open. Used so a sent draft with an unsaved
+   * local edit never visually claims that the edited text was sent.
+   */
+  hasUnsavedChanges: boolean;
   isEditing: boolean;
   lastSavedAt: string | null;
   /**
@@ -37,6 +44,7 @@ const COPY_STATUS_RESET_DELAY_MS = 2500;
 export function ClarificationDraftView({
   editableDraft,
   communicationStatus,
+  hasUnsavedChanges,
   isEditing,
   lastSavedAt,
   disabled = false,
@@ -59,6 +67,18 @@ export function ClarificationDraftView({
       }
     };
   }, []);
+
+  // A sent attestation applies to the exact persisted content it was granted
+  // for; once the visible text diverges from that (an unsaved local edit),
+  // the status must say so honestly instead of claiming the edited text was
+  // sent. The persisted marker itself is untouched here — this only changes
+  // what is displayed until the edit is saved or discarded.
+  const statusLabel =
+    communicationStatus === "sent"
+      ? hasUnsavedChanges
+        ? "Änderungen noch nicht versendet"
+        : "Rückfrage versendet"
+      : "Rückfrage vorbereitet";
 
   async function copyMessage() {
     try {
@@ -89,9 +109,7 @@ export function ClarificationDraftView({
           <span className="rounded-full bg-sky-100 px-3 py-1 text-sm font-medium text-sky-800">
             Rückfrageentwurf
           </span>
-          <p className="mt-2 text-sm font-medium text-neutral-600">
-            {communicationStatus === "sent" ? "Rückfrage versendet" : "Rückfrage vorbereitet"}
-          </p>
+          <p className="mt-2 text-sm font-medium text-neutral-600">{statusLabel}</p>
 
           <div className="mt-3 flex flex-wrap gap-3">
             {isEditing ? (

@@ -1326,6 +1326,236 @@ test("Ein Storage-Fehler beim Speichern einer echten Änderung nach Als versende
   expect(marker).not.toBeNull();
 });
 
+test("Sent-Draft im Edit-Modus ohne inhaltliche Änderung zeigt weiterhin Rückfrage versendet", async ({
+  page,
+}) => {
+  await page.goto("/inbox");
+  await fillInboxInquiry(page);
+  await page.getByRole("button", { name: "Anfrage analysieren" }).click();
+  await expect(page.getByRole("heading", { name: "Analyse abgeschlossen" })).toBeVisible();
+  await page.getByRole("button", { name: "Rückfrage vorbereiten" }).click();
+  await page.getByRole("button", { name: "Als versendet markieren" }).click();
+  const draftSection = page.getByRole("region", { name: "Rückfrageentwurf" });
+  await expect(draftSection).toContainText("Rückfrage versendet");
+
+  await page.getByRole("button", { name: "Entwurf bearbeiten" }).click();
+
+  await expect(draftSection).toContainText("Rückfrage versendet");
+  await expect(draftSection).not.toContainText("Änderungen noch nicht versendet");
+});
+
+test("Sent-Draft mit echter lokaler Textänderung zeigt sofort Änderungen noch nicht versendet, der Marker bleibt erhalten", async ({
+  page,
+}) => {
+  await page.goto("/inbox");
+  await fillInboxInquiry(page);
+  await page.getByRole("button", { name: "Anfrage analysieren" }).click();
+  await expect(page.getByRole("heading", { name: "Analyse abgeschlossen" })).toBeVisible();
+  await page.getByRole("button", { name: "Rückfrage vorbereiten" }).click();
+  await page.getByRole("button", { name: "Als versendet markieren" }).click();
+  const draftSection = page.getByRole("region", { name: "Rückfrageentwurf" });
+  await expect(draftSection).toContainText("Rückfrage versendet");
+  const stored = await page.evaluate(() =>
+    JSON.parse(window.localStorage.getItem("atlas-clarification-draft")),
+  );
+
+  await page.getByRole("button", { name: "Entwurf bearbeiten" }).click();
+  await page.getByLabel("Nachricht").fill("Eine noch nicht gespeicherte, geänderte Nachricht.");
+
+  await expect(draftSection).toContainText("Änderungen noch nicht versendet");
+  await expect(draftSection).not.toContainText("Rückfrage versendet");
+
+  // The persisted sent marker for the still-unchanged old revision must
+  // survive the local, unsaved edit untouched.
+  const marker = await page.evaluate(
+    ({ workflowId, revision }) =>
+      window.localStorage.getItem(`atlas-clarification-sent:${workflowId}:${revision}`),
+    { workflowId: stored.workflowId, revision: stored.revision },
+  );
+  expect(marker).not.toBeNull();
+});
+
+test("Nachricht kopieren kopiert die ungespeicherte lokale Änderung, ohne Storage oder Sent-Status zu verändern", async ({
+  page,
+}) => {
+  await stubClipboard(page);
+  await page.goto("/inbox");
+  await fillInboxInquiry(page);
+  await page.getByRole("button", { name: "Anfrage analysieren" }).click();
+  await expect(page.getByRole("heading", { name: "Analyse abgeschlossen" })).toBeVisible();
+  await page.getByRole("button", { name: "Rückfrage vorbereiten" }).click();
+  await page.getByRole("button", { name: "Als versendet markieren" }).click();
+  const draftSection = page.getByRole("region", { name: "Rückfrageentwurf" });
+  await expect(draftSection).toContainText("Rückfrage versendet");
+  const storedBefore = await page.evaluate(() =>
+    JSON.parse(window.localStorage.getItem("atlas-clarification-draft")),
+  );
+
+  await page.getByRole("button", { name: "Entwurf bearbeiten" }).click();
+  await page.getByLabel("Nachricht").fill("Lokal geänderte, noch nicht gespeicherte Nachricht.");
+  await expect(draftSection).toContainText("Änderungen noch nicht versendet");
+
+  await page.getByRole("button", { name: "Nachricht kopieren" }).click();
+  await expect(page.getByText("Nachricht kopiert")).toBeVisible();
+
+  // Copy is purely read-only: it must neither write to storage nor change
+  // the visible (still dishonest-if-claimed-sent) status.
+  await expect(draftSection).toContainText("Änderungen noch nicht versendet");
+  await expect(draftSection).not.toContainText("Rückfrage versendet");
+  const storedAfter = await page.evaluate(() =>
+    JSON.parse(window.localStorage.getItem("atlas-clarification-draft")),
+  );
+  expect(storedAfter).toEqual(storedBefore);
+  const marker = await page.evaluate(
+    ({ workflowId, revision }) =>
+      window.localStorage.getItem(`atlas-clarification-sent:${workflowId}:${revision}`),
+    { workflowId: storedBefore.workflowId, revision: storedBefore.revision },
+  );
+  expect(marker).not.toBeNull();
+});
+
+test("Verwerfen einer Änderung an einem sent-Draft zeigt wieder den persistierten Text und Rückfrage versendet", async ({
+  page,
+}) => {
+  await page.goto("/inbox");
+  await fillInboxInquiry(page);
+  await page.getByRole("button", { name: "Anfrage analysieren" }).click();
+  await expect(page.getByRole("heading", { name: "Analyse abgeschlossen" })).toBeVisible();
+  await page.getByRole("button", { name: "Rückfrage vorbereiten" }).click();
+  await page.getByRole("button", { name: "Als versendet markieren" }).click();
+  const draftSection = page.getByRole("region", { name: "Rückfrageentwurf" });
+  await expect(draftSection).toContainText("Rückfrage versendet");
+  const stored = await page.evaluate(() =>
+    JSON.parse(window.localStorage.getItem("atlas-clarification-draft")),
+  );
+
+  await page.getByRole("button", { name: "Entwurf bearbeiten" }).click();
+  await page.getByLabel("Nachricht").fill("Nicht gespeicherte Änderung, die verworfen wird.");
+  await expect(draftSection).toContainText("Änderungen noch nicht versendet");
+
+  await page.getByRole("button", { name: "Änderungen verwerfen" }).click();
+
+  await expect(draftSection).toContainText(stored.draft.message);
+  await expect(draftSection).toContainText("Rückfrage versendet");
+  await expect(draftSection).not.toContainText("Änderungen noch nicht versendet");
+});
+
+test("Ein erfolgreicher Save nach einer Änderung an einem sent-Draft mintet eine neue prepared Revision", async ({
+  page,
+}) => {
+  await page.goto("/inbox");
+  await fillInboxInquiry(page);
+  await page.getByRole("button", { name: "Anfrage analysieren" }).click();
+  await expect(page.getByRole("heading", { name: "Analyse abgeschlossen" })).toBeVisible();
+  await page.getByRole("button", { name: "Rückfrage vorbereiten" }).click();
+  await page.getByRole("button", { name: "Als versendet markieren" }).click();
+  const draftSection = page.getByRole("region", { name: "Rückfrageentwurf" });
+  await expect(draftSection).toContainText("Rückfrage versendet");
+  const storedBefore = await page.evaluate(() =>
+    JSON.parse(window.localStorage.getItem("atlas-clarification-draft")),
+  );
+
+  await page.getByRole("button", { name: "Entwurf bearbeiten" }).click();
+  await page.getByLabel("Nachricht").fill("Neue, gespeicherte Nachricht nach sent.");
+  await expect(draftSection).toContainText("Änderungen noch nicht versendet");
+  await page.getByRole("button", { name: "Änderungen übernehmen" }).click();
+
+  await expect(draftSection).toContainText("Rückfrage vorbereitet");
+  await expect(draftSection).not.toContainText("Änderungen noch nicht versendet");
+  await expect(draftSection).not.toContainText("Rückfrage versendet");
+
+  const storedAfter = await page.evaluate(() =>
+    JSON.parse(window.localStorage.getItem("atlas-clarification-draft")),
+  );
+  expect(storedAfter.revision).not.toBe(storedBefore.revision);
+});
+
+test("Ein fehlgeschlagener Prepare-Write zeigt keinen Draft, aber eine zugängliche Fehlermeldung", async ({
+  page,
+}) => {
+  await page.goto("/inbox");
+  await fillInboxInquiry(page);
+  await page.getByRole("button", { name: "Anfrage analysieren" }).click();
+  await expect(page.getByRole("heading", { name: "Analyse abgeschlossen" })).toBeVisible();
+
+  await page.evaluate(() => {
+    const originalSetItem = Storage.prototype.setItem;
+    Storage.prototype.setItem = function (key, value) {
+      if (key === "atlas-clarification-draft") {
+        throw new DOMException("Simulated storage failure", "QuotaExceededError");
+      }
+      return originalSetItem.call(this, key, value);
+    };
+  });
+
+  await page.getByRole("button", { name: "Rückfrage vorbereiten" }).click();
+
+  await expect(page.getByLabel("Rückfrageentwurf")).toHaveCount(0);
+  const prepareError = page.locator('[role="alert"]', {
+    hasText: "Der Rückfrageentwurf konnte nicht gespeichert werden. Bitte versuche es erneut.",
+  });
+  await expect(prepareError).toBeVisible();
+
+  const stored = await page.evaluate(() =>
+    window.localStorage.getItem("atlas-clarification-draft"),
+  );
+  expect(stored).toBeNull();
+});
+
+test("Ein fehlgeschlagener Edit-Save an einem sent-Draft zeigt eine zugängliche Fehlermeldung und behält Änderungen noch nicht versendet", async ({
+  page,
+}) => {
+  await page.goto("/inbox");
+  await fillInboxInquiry(page);
+  await page.getByRole("button", { name: "Anfrage analysieren" }).click();
+  await expect(page.getByRole("heading", { name: "Analyse abgeschlossen" })).toBeVisible();
+  await page.getByRole("button", { name: "Rückfrage vorbereiten" }).click();
+  await page.getByRole("button", { name: "Als versendet markieren" }).click();
+  const draftSection = page.getByRole("region", { name: "Rückfrageentwurf" });
+  await expect(draftSection).toContainText("Rückfrage versendet");
+  const storedBefore = await page.evaluate(() =>
+    JSON.parse(window.localStorage.getItem("atlas-clarification-draft")),
+  );
+
+  await page.getByRole("button", { name: "Entwurf bearbeiten" }).click();
+  await page.getByLabel("Nachricht").fill("Nachricht, deren Speichern fehlschlägt.");
+  await expect(draftSection).toContainText("Änderungen noch nicht versendet");
+
+  await page.evaluate(() => {
+    const originalSetItem = Storage.prototype.setItem;
+    Storage.prototype.setItem = function (key, value) {
+      if (key === "atlas-clarification-draft") {
+        throw new DOMException("Simulated storage failure", "QuotaExceededError");
+      }
+      return originalSetItem.call(this, key, value);
+    };
+  });
+
+  await page.getByRole("button", { name: "Änderungen übernehmen" }).click();
+
+  const editSaveError = page.locator('[role="alert"]', {
+    hasText: "Die Änderungen konnten nicht gespeichert werden. Der Entwurf wurde nicht geändert.",
+  });
+  await expect(editSaveError).toBeVisible();
+  await expect(page.getByLabel("Nachricht")).toBeVisible();
+  await expect(page.getByLabel("Nachricht")).toHaveValue(
+    "Nachricht, deren Speichern fehlschlägt.",
+  );
+  await expect(draftSection).toContainText("Änderungen noch nicht versendet");
+  await expect(page.getByText(/Änderungen gespeichert um/)).toHaveCount(0);
+
+  const storedAfter = await page.evaluate(() =>
+    JSON.parse(window.localStorage.getItem("atlas-clarification-draft")),
+  );
+  expect(storedAfter).toEqual(storedBefore);
+  const marker = await page.evaluate(
+    ({ workflowId, revision }) =>
+      window.localStorage.getItem(`atlas-clarification-sent:${workflowId}:${revision}`),
+    { workflowId: storedBefore.workflowId, revision: storedBefore.revision },
+  );
+  expect(marker).not.toBeNull();
+});
+
 test("Ein neu gespeicherter Draft wird als atomarer Envelope mit workflowId gespeichert", async ({
   page,
 }) => {

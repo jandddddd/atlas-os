@@ -92,6 +92,10 @@ export function InboxAnalysis() {
     useState<ClarificationDraftIdentity | null>(null);
   const [clarificationCommunicationStatus, setClarificationCommunicationStatus] =
     useState<ClarificationCommunicationStatus>("prepared");
+  // A small, local error surface for clarification persistence failures
+  // (prepare or edit-save) — not a global error system, mirrors the existing
+  // resetError/offerError/analysisError pattern already used in this file.
+  const [clarificationError, setClarificationError] = useState("");
   const [inquiryContext, setInquiryContext] = useState<string | null>(null);
   const [offerNeedsReview, setOfferNeedsReview] = useState(false);
   const [isCustomerReplyPanelOpen, setIsCustomerReplyPanelOpen] = useState(false);
@@ -270,6 +274,7 @@ export function InboxAnalysis() {
       setClarification(null);
       setEditableClarification(null);
       setClarificationLastSavedAt(null);
+      setClarificationError("");
       clearClarificationDraft();
       setOfferNeedsReview(false);
       setInquiryContext(inquiry);
@@ -393,6 +398,7 @@ export function InboxAnalysis() {
       setClarification(null);
       setEditableClarification(null);
       setClarificationLastSavedAt(null);
+      setClarificationError("");
       setInquiryContext(null);
       setOfferNeedsReview(false);
       setIsCustomerReplyPanelOpen(false);
@@ -423,6 +429,8 @@ export function InboxAnalysis() {
       return;
     }
 
+    setClarificationError("");
+
     const draft = createClarificationDraft({
       customerName: analysis.customer.name,
       service: analysis.project.service,
@@ -430,7 +438,15 @@ export function InboxAnalysis() {
     });
 
     const { didSave, identity } = saveClarificationDraft(draft, analysis);
-    if (!didSave) return;
+    if (!didSave) {
+      // Never fabricate a locally-displayed draft the write never actually
+      // persisted; only surface a visible, accessible explanation instead of
+      // leaving this silently console-only.
+      setClarificationError(
+        "Der Rückfrageentwurf konnte nicht gespeichert werden. Bitte versuche es erneut.",
+      );
+      return;
+    }
 
     setClarification(draft);
     setEditableClarification(draft);
@@ -475,6 +491,7 @@ export function InboxAnalysis() {
       // separately) is the only safe way to know it, since anything read
       // separately could interleave with a write from another tab.
       applyClarificationSnapshot(loadClarificationSnapshotForAnalysis(analysis));
+      setClarificationError("");
       setIsEditingClarification(false);
       return;
     }
@@ -483,7 +500,11 @@ export function InboxAnalysis() {
     if (!didSave) {
       // The write failed; the UI must not claim a save that never actually
       // persisted, so it stays exactly as it was, still in edit mode with
-      // the unsaved text visible.
+      // the unsaved text visible, and the old persisted (possibly sent)
+      // revision remains completely untouched.
+      setClarificationError(
+        "Die Änderungen konnten nicht gespeichert werden. Der Entwurf wurde nicht geändert.",
+      );
       return;
     }
 
@@ -499,6 +520,7 @@ export function InboxAnalysis() {
         minute: "2-digit",
       }),
     );
+    setClarificationError("");
     setIsEditingClarification(false);
   }
 
@@ -512,6 +534,7 @@ export function InboxAnalysis() {
     } else if (clarification) {
       setEditableClarification({ ...clarification });
     }
+    setClarificationError("");
     setIsEditingClarification(false);
   }
 
@@ -615,6 +638,7 @@ export function InboxAnalysis() {
       setClarification(null);
       setEditableClarification(null);
       setClarificationLastSavedAt(null);
+      setClarificationError("");
       clearClarificationDraft();
       setIsCustomerReplyPanelOpen(false);
       setCustomerReplySubmitError("");
@@ -732,6 +756,7 @@ export function InboxAnalysis() {
       setClarification(null);
       setEditableClarification(null);
       setClarificationLastSavedAt(null);
+      setClarificationError("");
       clearClarificationDraft();
       setReanalysisError("");
     } catch (error) {
@@ -755,6 +780,19 @@ export function InboxAnalysis() {
   // new, independent intake analysis.
   const restartUsesPersistedWorkflow =
     analysisSource === "restored" || restartUsesPersistedContext;
+
+  // True only when the currently edited subject/message actually differs
+  // from the last persisted content — never merely because edit mode is
+  // open, focus changed, or Copy was used. Outside of an active edit,
+  // editableClarification is always kept equal to clarification by every
+  // other code path (restore, no-op save, discard, cross-tab resync, a real
+  // save), so this is naturally false whenever the user isn't mid-edit.
+  const clarificationHasUnsavedChanges = Boolean(
+    clarification &&
+      editableClarification &&
+      (editableClarification.subject !== clarification.subject ||
+        editableClarification.message !== clarification.message),
+  );
 
   function handleRestartAnalysis() {
     // A currently unsaved clarification edit must never be silently
@@ -875,10 +913,20 @@ export function InboxAnalysis() {
           />
         )}
 
+        {clarificationError ? (
+          <p
+            role="alert"
+            className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
+          >
+            {clarificationError}
+          </p>
+        ) : null}
+
         {clarification && editableClarification && (
           <ClarificationDraftView
             editableDraft={editableClarification}
             communicationStatus={clarificationCommunicationStatus}
+            hasUnsavedChanges={clarificationHasUnsavedChanges}
             isEditing={isEditingClarification}
             lastSavedAt={clarificationLastSavedAt}
             disabled={isReanalyzingPersistedContext}
