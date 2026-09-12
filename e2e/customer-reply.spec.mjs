@@ -194,6 +194,7 @@ test("ein als versendet markierter ClarificationDraft verschwindet vollständig 
   await expect(draftSection).toBeVisible();
   await page.getByRole("button", { name: "Als versendet markieren" }).click();
   await expect(draftSection).toContainText("Rückfrage versendet");
+  const storedBeforeReply = await readLocalStorageJson(page, "atlas-clarification-draft");
 
   const panel = await openReplyPanel(page);
   await panel.getByLabel("Antwort des Kunden").fill("Der Wunschtermin ist Ende des Monats.");
@@ -208,7 +209,9 @@ test("ein als versendet markierter ClarificationDraft verschwindet vollständig 
   ).toBeNull();
 
   // A freshly prepared clarification for the same, still-current workflow
-  // must never inherit the previous draft's "sent" marking.
+  // must never inherit the previous draft's "sent" marking — it gets a
+  // genuinely new revision, and the old marker (left inert rather than
+  // actively swept) simply does not apply to it.
   await page.getByRole("button", { name: "Rückfrage vorbereiten" }).click();
   await expect(draftSection).toBeVisible();
   await expect(draftSection).toContainText("Rückfrage vorbereitet");
@@ -216,7 +219,13 @@ test("ein als versendet markierter ClarificationDraft verschwindet vollständig 
   await expect(page.getByRole("button", { name: "Als versendet markieren" })).toBeVisible();
 
   const newDraft = await readLocalStorageJson(page, "atlas-clarification-draft");
-  expect(newDraft.draft.communicationStatus).toBe("prepared");
+  expect(newDraft.revision).not.toBe(storedBeforeReply.revision);
+  const newMarker = await page.evaluate(
+    ({ workflowId, revision }) =>
+      window.localStorage.getItem(`atlas-clarification-sent:${workflowId}:${revision}`),
+    { workflowId: newDraft.workflowId, revision: newDraft.revision },
+  );
+  expect(newMarker).toBeNull();
 });
 
 test("bei einem Analysefehler bleibt der ClarificationDraft unverändert erhalten", async ({ page }) => {

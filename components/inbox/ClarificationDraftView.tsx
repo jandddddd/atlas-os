@@ -3,12 +3,16 @@
 import { useEffect, useRef, useState } from "react";
 import { Copy } from "lucide-react";
 
-import { getClarificationCommunicationStatus } from "@/lib/storage/inbox-storage";
-
-import type { ClarificationDraft } from "./types";
+import type { ClarificationCommunicationStatus, ClarificationDraft } from "./types";
 
 type ClarificationDraftViewProps = {
   editableDraft: ClarificationDraft;
+  /**
+   * The draft's communication status, derived and tracked by the caller —
+   * this component never derives it from editableDraft itself, since the
+   * draft content no longer carries that truth.
+   */
+  communicationStatus: ClarificationCommunicationStatus;
   isEditing: boolean;
   lastSavedAt: string | null;
   /**
@@ -32,6 +36,7 @@ const COPY_STATUS_RESET_DELAY_MS = 2500;
 
 export function ClarificationDraftView({
   editableDraft,
+  communicationStatus,
   isEditing,
   lastSavedAt,
   disabled = false,
@@ -45,7 +50,6 @@ export function ClarificationDraftView({
   const [copyStatus, setCopyStatus] = useState<"idle" | "copied" | "error">(
     "idle",
   );
-  const communicationStatus = getClarificationCommunicationStatus(editableDraft);
   const copyResetTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {

@@ -50,6 +50,5 @@ export function createClarificationDraft({
     message,
     missingInformation: resolvedMissingInformation,
     status: "draft",
-    communicationStatus: "prepared",
   };
 }
