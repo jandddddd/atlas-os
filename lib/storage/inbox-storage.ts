@@ -1,5 +1,6 @@
 import type {
   AnalysisResult,
+  ClarificationCommunicationStatus,
   ClarificationDraft,
   OfferDraft,
   OfferPosition,
@@ -12,8 +13,30 @@ const OFFER_DRAFT_BINDING_VERSION = 1;
 const OFFER_WORKSPACE_KEY = "atlas-offer-workspace";
 const OFFER_WORKSPACE_VERSION = 1;
 const CLARIFICATION_DRAFT_KEY = "atlas-clarification-draft";
+// Version 2 adds `revision`, a fresh identity for the currently persisted
+// message text, and drops the draft-embedded communicationStatus in favor
+// of a separate, revision-bound sent attestation (see
+// StoredClarificationSentMarker below) — a status write must never itself
+// rewrite the draft content, which a shared field would have required.
+const CLARIFICATION_DRAFT_VERSION = 2;
+// Legacy-only: before CLARIFICATION_DRAFT_VERSION, the draft's workflow
+// identity lived in this separate key instead of inside the draft record
+// itself, and it carried no revision at all. Still read for backward
+// compatibility, but never trusted by any status mutation — see
+// resolveClarificationDraftForWorkflowId and the legacy sent marker below.
 const CLARIFICATION_DRAFT_BINDING_KEY = "atlas-clarification-draft-analysis-binding";
 const CLARIFICATION_DRAFT_BINDING_VERSION = 1;
+// Keyed per workflowId+revision, so a stale action bound to an old revision
+// can only ever read or write its own marker, never one belonging to a
+// newer revision of the same workflow.
+const CLARIFICATION_SENT_MARKER_KEY_PREFIX = "atlas-clarification-sent";
+const CLARIFICATION_SENT_MARKER_VERSION = 1;
+// Legacy drafts have no revision to key a marker by; this marker instead
+// pins the exact subject+message text it was granted for, so it can never
+// be (mis)read as covering different content later saved under the same
+// workflowId.
+const CLARIFICATION_LEGACY_SENT_MARKER_KEY_PREFIX = "atlas-clarification-legacy-sent";
+const CLARIFICATION_LEGACY_SENT_MARKER_VERSION = 1;
 const INQUIRY_CONTEXT_KEY = "atlas-inquiry-context";
 const INQUIRY_CONTEXT_VERSION = 1;
 
@@ -44,6 +67,76 @@ export type StoredOfferDraftBinding = {
 type StoredClarificationDraftBinding = {
   version: typeof CLARIFICATION_DRAFT_BINDING_VERSION;
   workflowId: string;
+};
+
+/**
+ * The canonical clarification record: workflow identity and draft content
+ * live together in one record under CLARIFICATION_DRAFT_KEY, so a caller
+ * reading it back always gets both from the exact same atomic read — no
+ * separate identity lookup that could observe a different draft than the
+ * one the identity was originally checked against. `revision` is a fresh
+ * opaque identity minted on every genuine content save; it identifies
+ * exactly which persisted message text a sent attestation applies to,
+ * without the status mutation ever having to rewrite this record itself.
+ */
+type StoredClarificationDraft = {
+  version: typeof CLARIFICATION_DRAFT_VERSION;
+  workflowId: string;
+  revision: string;
+  draft: ClarificationDraft;
+};
+
+/**
+ * A human's explicit confirmation that the exact message text identified by
+ * workflowId+revision was sent outside ATLAS. Stored separately from the
+ * draft record itself (keyed by both fields, see
+ * clarificationSentMarkerKey), so marking or unmarking "sent" never writes
+ * to CLARIFICATION_DRAFT_KEY and can never race with a concurrent content
+ * save the way a shared read-modify-write record would.
+ */
+type StoredClarificationSentMarker = {
+  version: typeof CLARIFICATION_SENT_MARKER_VERSION;
+  workflowId: string;
+  revision: string;
+};
+
+/**
+ * The legacy equivalent of StoredClarificationSentMarker for a pre-revision
+ * draft: since the legacy shape has no revision, the exact subject+message
+ * text stands in for one. A legacy marker only ever matches the legacy
+ * draft it was granted for, and is superseded the moment that workflow
+ * migrates to the canonical (revisioned) shape.
+ */
+type StoredClarificationLegacySentMarker = {
+  version: typeof CLARIFICATION_LEGACY_SENT_MARKER_VERSION;
+  workflowId: string;
+  subject: string;
+  message: string;
+};
+
+/**
+ * An opaque handle on "the clarification draft currently visible for this
+ * workflow", covering both the canonical (revisioned) and legacy shapes.
+ * Callers (Inbox) hold this rather than composing storage keys themselves,
+ * and pass it back unchanged to mark/unmark a sent attestation for exactly
+ * the version of the draft it was obtained from.
+ */
+export type ClarificationDraftIdentity =
+  | { kind: "canonical"; workflowId: string; revision: string }
+  | { kind: "legacy"; workflowId: string; subject: string; message: string };
+
+/**
+ * A single coherent read of "the clarification draft currently visible for
+ * this workflow": content, identity, and communication status all derived
+ * from the exact same underlying record read. A caller that combined three
+ * separate loader calls instead could observe content from one storage
+ * state and identity/status from a later one if another tab wrote in
+ * between — this type exists so no call site has to do that.
+ */
+export type ClarificationDraftSnapshot = {
+  draft: ClarificationDraft;
+  identity: ClarificationDraftIdentity;
+  communicationStatus: ClarificationCommunicationStatus;
 };
 
 export type StoredInquiryContext = {
@@ -148,6 +241,41 @@ function isStoredClarificationDraftBinding(
   );
 }
 
+function isStoredClarificationDraft(
+  value: unknown,
+): value is StoredClarificationDraft {
+  return (
+    isRecord(value) &&
+    value.version === CLARIFICATION_DRAFT_VERSION &&
+    typeof value.workflowId === "string" &&
+    typeof value.revision === "string" &&
+    isClarificationDraft(value.draft)
+  );
+}
+
+function isStoredClarificationSentMarker(
+  value: unknown,
+): value is StoredClarificationSentMarker {
+  return (
+    isRecord(value) &&
+    value.version === CLARIFICATION_SENT_MARKER_VERSION &&
+    typeof value.workflowId === "string" &&
+    typeof value.revision === "string"
+  );
+}
+
+function isStoredClarificationLegacySentMarker(
+  value: unknown,
+): value is StoredClarificationLegacySentMarker {
+  return (
+    isRecord(value) &&
+    value.version === CLARIFICATION_LEGACY_SENT_MARKER_VERSION &&
+    typeof value.workflowId === "string" &&
+    typeof value.subject === "string" &&
+    typeof value.message === "string"
+  );
+}
+
 export function isStoredInquiryContext(
   value: unknown,
 ): value is StoredInquiryContext {
@@ -213,19 +341,42 @@ function loadStoredValue<T>(
   return parsedValue;
 }
 
-function saveStoredValue(key: string, value: unknown) {
-  if (typeof window === "undefined") return;
+/**
+ * Returns whether the write actually succeeded, so a caller that must not
+ * report success on a failed persist (e.g. a workflow-bound status mutation)
+ * can tell the difference from a silent no-op. Existing callers that already
+ * treated a write as fire-and-forget may keep ignoring the return value.
+ */
+function saveStoredValue(key: string, value: unknown): boolean {
+  if (typeof window === "undefined") return false;
 
   try {
     window.localStorage.setItem(key, JSON.stringify(value));
+    return true;
   } catch (error) {
     console.error(`Atlas-Daten für "${key}" konnten nicht gespeichert werden:`, error);
+    return false;
   }
 }
 
-function clearStoredValue(key: string) {
-  if (typeof window === "undefined") return;
-  window.localStorage.removeItem(key);
+/**
+ * Returns whether the removal actually completed without throwing, mirroring
+ * saveStoredValue's boolean contract, so a caller that must not report
+ * success on a failed removal (e.g. undoing a sent attestation) can tell the
+ * difference from an unexpected storage exception. Existing callers that
+ * already treated removal as fire-and-forget may keep ignoring the return
+ * value.
+ */
+function clearStoredValue(key: string): boolean {
+  if (typeof window === "undefined") return false;
+
+  try {
+    window.localStorage.removeItem(key);
+    return true;
+  } catch (error) {
+    console.error(`Atlas-Daten für "${key}" konnten nicht entfernt werden:`, error);
+    return false;
+  }
 }
 
 export function loadInquiryAnalysis(): AnalysisResult | null {
@@ -255,23 +406,123 @@ export function loadOfferDraftForAnalysis(
   return binding.workflowId === analysis.workflowId ? offer : null;
 }
 
-function loadClarificationDraft(): ClarificationDraft | null {
+/** Legacy-shape-only: a raw draft with no workflow identity of its own. */
+function loadLegacyClarificationDraft(): ClarificationDraft | null {
   return loadStoredValue(CLARIFICATION_DRAFT_KEY, isClarificationDraft);
 }
 
+function loadStoredClarificationDraft(): StoredClarificationDraft | null {
+  return loadStoredValue(CLARIFICATION_DRAFT_KEY, isStoredClarificationDraft);
+}
+
+function clarificationSentMarkerKey(workflowId: string, revision: string): string {
+  return `${CLARIFICATION_SENT_MARKER_KEY_PREFIX}:${workflowId}:${revision}`;
+}
+
+function clarificationLegacySentMarkerKey(workflowId: string): string {
+  return `${CLARIFICATION_LEGACY_SENT_MARKER_KEY_PREFIX}:${workflowId}`;
+}
+
+type ResolvedClarificationDraft =
+  | { kind: "canonical"; workflowId: string; revision: string; draft: ClarificationDraft }
+  | { kind: "legacy"; workflowId: string; draft: ClarificationDraft };
+
+/**
+ * The single place that decides which stored shape (canonical or legacy) is
+ * currently authoritative for a workflow, for read purposes. Never used by
+ * a status mutation on its own — see the mark/unmark functions below, which
+ * re-validate their own expected identity independently.
+ */
+function resolveClarificationDraftForWorkflowId(
+  workflowId: string,
+): ResolvedClarificationDraft | null {
+  const storedDraft = loadStoredClarificationDraft();
+  if (storedDraft) {
+    return storedDraft.workflowId === workflowId
+      ? { kind: "canonical", workflowId, revision: storedDraft.revision, draft: storedDraft.draft }
+      : null;
+  }
+
+  const legacyDraft = loadLegacyClarificationDraft();
+  const legacyBinding = loadStoredValue(
+    CLARIFICATION_DRAFT_BINDING_KEY,
+    isStoredClarificationDraftBinding,
+  );
+  if (!legacyDraft || !legacyBinding || legacyBinding.workflowId !== workflowId) return null;
+
+  return { kind: "legacy", workflowId, draft: legacyDraft };
+}
+
+/**
+ * The single source of a coherent draft+identity+status read. Resolves the
+ * underlying record (canonical or legacy) exactly once via
+ * resolveClarificationDraftForWorkflowId, then derives all three fields
+ * from that same resolution — never re-reading CLARIFICATION_DRAFT_KEY
+ * afterward. This is the function every other clarification read below
+ * delegates to, so no call site can end up combining content from one
+ * storage state with identity/status from a later one.
+ */
+function resolveClarificationSnapshotForWorkflowId(
+  workflowId: string,
+): ClarificationDraftSnapshot | null {
+  const resolved = resolveClarificationDraftForWorkflowId(workflowId);
+  if (!resolved) return null;
+
+  if (resolved.kind === "canonical") {
+    const marker = loadStoredValue(
+      clarificationSentMarkerKey(resolved.workflowId, resolved.revision),
+      isStoredClarificationSentMarker,
+    );
+    const isSent =
+      marker !== null &&
+      marker.workflowId === resolved.workflowId &&
+      marker.revision === resolved.revision;
+
+    return {
+      draft: resolved.draft,
+      identity: {
+        kind: "canonical",
+        workflowId: resolved.workflowId,
+        revision: resolved.revision,
+      },
+      communicationStatus: isSent ? "sent" : "prepared",
+    };
+  }
+
+  const legacyMarker = loadStoredValue(
+    clarificationLegacySentMarkerKey(resolved.workflowId),
+    isStoredClarificationLegacySentMarker,
+  );
+  const isLegacySent =
+    legacyMarker !== null &&
+    legacyMarker.workflowId === resolved.workflowId &&
+    legacyMarker.subject === resolved.draft.subject &&
+    legacyMarker.message === resolved.draft.message;
+
+  return {
+    draft: resolved.draft,
+    identity: {
+      kind: "legacy",
+      workflowId: resolved.workflowId,
+      subject: resolved.draft.subject,
+      message: resolved.draft.message,
+    },
+    communicationStatus: isLegacySent ? "sent" : "prepared",
+  };
+}
+
+/**
+ * Read-only lookup, safe for display purposes (Inbox restore, Today).
+ * Prefers the canonical record, where workflow identity and draft content
+ * come from the exact same atomic read. Falls back to the legacy split
+ * shape (a raw draft plus a separately keyed binding) for backward
+ * compatibility only.
+ */
 export function loadClarificationDraftForWorkflowId(
   workflowId: string | undefined,
 ): ClarificationDraft | null {
   if (!workflowId) return null;
-
-  const draft = loadClarificationDraft();
-  const binding = loadStoredValue(
-    CLARIFICATION_DRAFT_BINDING_KEY,
-    isStoredClarificationDraftBinding,
-  );
-  if (!draft || !binding) return null;
-
-  return binding.workflowId === workflowId ? draft : null;
+  return resolveClarificationSnapshotForWorkflowId(workflowId)?.draft ?? null;
 }
 
 export function loadClarificationDraftForAnalysis(
@@ -280,19 +531,249 @@ export function loadClarificationDraftForAnalysis(
   return loadClarificationDraftForWorkflowId(analysis.workflowId);
 }
 
+/**
+ * The opaque identity of the clarification draft currently visible for a
+ * workflow (canonical revision or legacy content snapshot), or null if none
+ * exists. Callers hold this alongside the draft they loaded it with and
+ * pass it back to mark/unmark a sent attestation for exactly that version —
+ * never composing a storage key themselves.
+ */
+export function loadClarificationDraftIdentityForWorkflowId(
+  workflowId: string | undefined,
+): ClarificationDraftIdentity | null {
+  if (!workflowId) return null;
+  return resolveClarificationSnapshotForWorkflowId(workflowId)?.identity ?? null;
+}
+
+/**
+ * Read-only convenience for callers (Today) that only need the normalized
+ * communication status, never the draft's message content, and must never
+ * mutate it. The canonical record is "sent" only while a marker exists for
+ * its exact current revision; a legacy record is "sent" only while a legacy
+ * marker exists whose pinned subject+message still matches it exactly.
+ */
+export function loadClarificationCommunicationStatusForWorkflowId(
+  workflowId: string | undefined,
+): ClarificationCommunicationStatus | null {
+  if (!workflowId) return null;
+  return resolveClarificationSnapshotForWorkflowId(workflowId)?.communicationStatus ?? null;
+}
+
+/**
+ * The coherent draft+identity+status read for a workflow, for callers (only
+ * Inbox today) that need all three fields together and must never assemble
+ * them from separate reads. See ClarificationDraftSnapshot.
+ */
+export function loadClarificationSnapshotForWorkflowId(
+  workflowId: string | undefined,
+): ClarificationDraftSnapshot | null {
+  if (!workflowId) return null;
+  return resolveClarificationSnapshotForWorkflowId(workflowId);
+}
+
+export function loadClarificationSnapshotForAnalysis(
+  analysis: AnalysisResult,
+): ClarificationDraftSnapshot | null {
+  return loadClarificationSnapshotForWorkflowId(analysis.workflowId);
+}
+
+/**
+ * Persists the draft as the canonical record under a fresh revision,
+ * migrating away from the legacy split shape the moment this succeeds. A
+ * status mutation never calls this — only a genuine, caller-authored save
+ * (a new draft, or a real content edit) mints a new revision. Returns the
+ * resulting identity only once the write has actually been confirmed
+ * persisted; on failure, returns a null identity and leaves any existing
+ * legacy binding fully intact, since a failed migration must never strand
+ * the still-valid legacy draft without the identity it needs to remain
+ * readable and actionable. When the analysis has no workflowId, keeps the
+ * existing plain, unbound draft shape instead of inventing an identity.
+ */
 export function saveClarificationDraft(
   draft: ClarificationDraft,
   analysis: AnalysisResult,
-) {
-  saveStoredValue(CLARIFICATION_DRAFT_KEY, draft);
+): { didSave: boolean; identity: ClarificationDraftIdentity | null } {
+  if (!analysis.workflowId) {
+    return { didSave: saveStoredValue(CLARIFICATION_DRAFT_KEY, draft), identity: null };
+  }
 
-  if (analysis.workflowId) {
-    saveStoredValue(CLARIFICATION_DRAFT_BINDING_KEY, {
-      version: CLARIFICATION_DRAFT_BINDING_VERSION,
-      workflowId: analysis.workflowId,
-    } satisfies StoredClarificationDraftBinding);
-  } else {
-    clearStoredValue(CLARIFICATION_DRAFT_BINDING_KEY);
+  const workflowId = analysis.workflowId;
+  const revision = crypto.randomUUID();
+  const didSave = saveStoredValue(CLARIFICATION_DRAFT_KEY, {
+    version: CLARIFICATION_DRAFT_VERSION,
+    workflowId,
+    revision,
+    draft,
+  } satisfies StoredClarificationDraft);
+
+  if (!didSave) return { didSave: false, identity: null };
+
+  // Only remove the legacy binding — and any now-superseded legacy sent
+  // marker, whose pinned text no longer describes this new revision — once
+  // the new canonical record is confirmed persisted. A failed write above
+  // must never strand the still-valid legacy draft without either of them.
+  clearStoredValue(clarificationLegacySentMarkerKey(workflowId));
+  clearStoredValue(CLARIFICATION_DRAFT_BINDING_KEY);
+  return { didSave: true, identity: { kind: "canonical", workflowId, revision } };
+}
+
+/**
+ * Grants a sent attestation for exactly the canonical revision identified.
+ * Reads the current canonical record, requires its workflowId and revision
+ * to match exactly, writes only the separate marker record (never the draft
+ * itself), and re-reads the canonical record once more afterward to confirm
+ * a newer revision was not persisted in the meantime. Returns false — no
+ * marker considered valid — if the identity does not match before or after
+ * the write, or if the write itself failed.
+ */
+function markClarificationSentForRevision(
+  workflowId: string,
+  revision: string,
+): boolean {
+  const matchesRevision = () => {
+    const current = loadStoredClarificationDraft();
+    return current !== null && current.workflowId === workflowId && current.revision === revision;
+  };
+
+  if (!matchesRevision()) return false;
+
+  const didSave = saveStoredValue(clarificationSentMarkerKey(workflowId, revision), {
+    version: CLARIFICATION_SENT_MARKER_VERSION,
+    workflowId,
+    revision,
+  } satisfies StoredClarificationSentMarker);
+  if (!didSave) return false;
+
+  return matchesRevision();
+}
+
+/**
+ * Removes the sent attestation for exactly the canonical revision
+ * identified. The key itself already scopes the removal to that exact
+ * workflowId+revision, so a stale caller can never remove a marker
+ * belonging to a newer revision; the current-record check only prevents
+ * reporting false success once the visible revision itself is stale.
+ * Reports the removal's own success too, so a caller cannot claim "sent" was
+ * undone when the underlying storage write actually failed.
+ */
+function unmarkClarificationSentForRevision(
+  workflowId: string,
+  revision: string,
+): boolean {
+  const current = loadStoredClarificationDraft();
+  if (!current || current.workflowId !== workflowId || current.revision !== revision) {
+    return false;
+  }
+
+  return clearStoredValue(clarificationSentMarkerKey(workflowId, revision));
+}
+
+function matchesExpectedLegacyState(
+  workflowId: string,
+  subject: string,
+  message: string,
+): boolean {
+  // A canonical record now existing means this workflow has already moved
+  // on from the legacy shape; a legacy action must never act on stale data.
+  if (loadStoredClarificationDraft()) return false;
+
+  const legacyDraft = loadLegacyClarificationDraft();
+  const legacyBinding = loadStoredValue(
+    CLARIFICATION_DRAFT_BINDING_KEY,
+    isStoredClarificationDraftBinding,
+  );
+  return (
+    legacyDraft !== null &&
+    legacyBinding !== null &&
+    legacyBinding.workflowId === workflowId &&
+    legacyDraft.subject === subject &&
+    legacyDraft.message === message
+  );
+}
+
+/**
+ * Grants a sent attestation for a legacy draft, without migrating it and
+ * without touching the raw draft or its binding. Requires the exact visible
+ * subject+message to still match before and after the write, so a legacy
+ * marker can never be (mis)applied to content that has since changed.
+ */
+function markClarificationSentForLegacy(
+  workflowId: string,
+  subject: string,
+  message: string,
+): boolean {
+  if (!matchesExpectedLegacyState(workflowId, subject, message)) return false;
+
+  const didSave = saveStoredValue(clarificationLegacySentMarkerKey(workflowId), {
+    version: CLARIFICATION_LEGACY_SENT_MARKER_VERSION,
+    workflowId,
+    subject,
+    message,
+  } satisfies StoredClarificationLegacySentMarker);
+  if (!didSave) return false;
+
+  if (matchesExpectedLegacyState(workflowId, subject, message)) return true;
+
+  // The draft was migrated or replaced between the write and this
+  // re-check: the marker just written no longer describes anything valid
+  // and would otherwise leak real customer text under a workflowId whose
+  // legacy content has moved on.
+  clearStoredValue(clarificationLegacySentMarkerKey(workflowId));
+  return false;
+}
+
+function unmarkClarificationSentForLegacy(
+  workflowId: string,
+  subject: string,
+  message: string,
+): boolean {
+  if (!matchesExpectedLegacyState(workflowId, subject, message)) return false;
+
+  return clearStoredValue(clarificationLegacySentMarkerKey(workflowId));
+}
+
+/**
+ * Grants a sent attestation for exactly the draft identity given — the only
+ * way a "sent" marking may ever be created. Never writes CLARIFICATION_DRAFT_KEY.
+ */
+export function markClarificationSentForIdentity(
+  identity: ClarificationDraftIdentity,
+): boolean {
+  return identity.kind === "canonical"
+    ? markClarificationSentForRevision(identity.workflowId, identity.revision)
+    : markClarificationSentForLegacy(identity.workflowId, identity.subject, identity.message);
+}
+
+/** Corrects an ATLAS-side sent marking for exactly the identity given. */
+export function unmarkClarificationSentForIdentity(
+  identity: ClarificationDraftIdentity,
+): boolean {
+  return identity.kind === "canonical"
+    ? unmarkClarificationSentForRevision(identity.workflowId, identity.revision)
+    : unmarkClarificationSentForLegacy(identity.workflowId, identity.subject, identity.message);
+}
+
+/**
+ * Removes the sent marker for whichever clarification record (canonical or
+ * legacy) is currently persisted, if any, before the record itself is
+ * removed — a legacy marker pins real customer text, so it must never
+ * survive its own draft's deletion. Deliberately targets only the one
+ * exact key the current record identifies, never a prefix scan over
+ * historical markers.
+ */
+function clearClarificationSentMarker() {
+  const storedDraft = loadStoredClarificationDraft();
+  if (storedDraft) {
+    clearStoredValue(clarificationSentMarkerKey(storedDraft.workflowId, storedDraft.revision));
+    return;
+  }
+
+  const legacyBinding = loadStoredValue(
+    CLARIFICATION_DRAFT_BINDING_KEY,
+    isStoredClarificationDraftBinding,
+  );
+  if (legacyBinding) {
+    clearStoredValue(clarificationLegacySentMarkerKey(legacyBinding.workflowId));
   }
 }
 
@@ -300,6 +781,7 @@ export function clearClarificationDraft() {
   if (typeof window === "undefined") return;
 
   try {
+    clearClarificationSentMarker();
     window.localStorage.removeItem(CLARIFICATION_DRAFT_KEY);
     window.localStorage.removeItem(CLARIFICATION_DRAFT_BINDING_KEY);
   } catch (error) {
@@ -626,12 +1108,15 @@ export function clearOfferDraft() {
 export function clearInboxWorkflow() {
   if (typeof window === "undefined") return;
 
+  // Delegates the clarification draft/binding/sent-marker cleanup to the
+  // single function responsible for it, instead of duplicating that logic
+  // (and risking it drifting out of sync) here.
+  clearClarificationDraft();
+
   try {
     window.localStorage.removeItem(INQUIRY_ANALYSIS_KEY);
     window.localStorage.removeItem(OFFER_DRAFT_KEY);
     window.localStorage.removeItem(OFFER_DRAFT_BINDING_KEY);
-    window.localStorage.removeItem(CLARIFICATION_DRAFT_KEY);
-    window.localStorage.removeItem(CLARIFICATION_DRAFT_BINDING_KEY);
     window.localStorage.removeItem(INQUIRY_CONTEXT_KEY);
   } catch (error) {
     console.error("Gespeicherter Atlas-Vorgang konnte nicht gelöscht werden:", error);

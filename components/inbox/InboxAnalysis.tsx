@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { ScanSearch, Sparkles, TriangleAlert } from "lucide-react";
 
 import {
@@ -14,6 +14,7 @@ import { CustomerReplyPanel } from "./CustomerReplyPanel";
 import { OfferDraftView } from "./OfferDraftView";
 import type {
   AnalysisResult,
+  ClarificationCommunicationStatus,
   ClarificationDraft,
   OfferDraft,
   OfferStatus,
@@ -23,16 +24,21 @@ import {
   clearOfferDraft,
   clearInboxWorkflow,
   flagOfferDraftForReReview,
-  loadClarificationDraftForAnalysis,
+  loadClarificationSnapshotForAnalysis,
+  loadClarificationSnapshotForWorkflowId,
   loadInquiryAnalysis,
   loadInquiryContextForAnalysis,
   loadOfferDraft,
   loadOfferDraftNeedsReview,
+  markClarificationSentForIdentity,
   markOfferWorkspaceReviewed,
   saveClarificationDraft,
   saveInquiryAnalysis,
   saveInquiryContext,
   saveOfferDraft,
+  unmarkClarificationSentForIdentity,
+  type ClarificationDraftIdentity,
+  type ClarificationDraftSnapshot,
 } from "@/lib/storage/inbox-storage";
 import { createClarificationDraft } from "@/lib/inbox/clarification-draft";
 import { composeInquiryWithCustomerReply } from "@/lib/inbox/customer-reply";
@@ -42,6 +48,33 @@ import {
   type InquiryIntake,
   type InquiryIntakeErrors,
 } from "@/lib/inbox/inquiry-intake";
+
+// True only when both identities refer to the exact same persisted draft
+// version: for a canonical identity, the same workflowId and revision; for a
+// legacy identity (no revision concept), the same workflowId and exact
+// subject+message text. Deliberately field-by-field rather than a
+// JSON.stringify comparison, so unrelated key ordering or future optional
+// fields can never cause a false mismatch or false match.
+function isSameClarificationIdentity(
+  a: ClarificationDraftIdentity | null,
+  b: ClarificationDraftIdentity | null,
+): boolean {
+  if (!a || !b) return false;
+
+  if (a.kind === "canonical" && b.kind === "canonical") {
+    return a.workflowId === b.workflowId && a.revision === b.revision;
+  }
+
+  if (a.kind === "legacy" && b.kind === "legacy") {
+    return (
+      a.workflowId === b.workflowId &&
+      a.subject === b.subject &&
+      a.message === b.message
+    );
+  }
+
+  return false;
+}
 
 export function InboxAnalysis() {
   const workflowVersion = useRef(0);
@@ -78,6 +111,18 @@ export function InboxAnalysis() {
   const [clarificationLastSavedAt, setClarificationLastSavedAt] = useState<
     string | null
   >(null);
+  // The opaque identity (canonical revision or legacy content snapshot) the
+  // currently shown clarification draft was loaded/saved with. Passed back
+  // unchanged to mark/unmark a sent attestation for exactly that version,
+  // never composing a storage key here.
+  const [clarificationIdentity, setClarificationIdentity] =
+    useState<ClarificationDraftIdentity | null>(null);
+  const [clarificationCommunicationStatus, setClarificationCommunicationStatus] =
+    useState<ClarificationCommunicationStatus>("prepared");
+  // A small, local error surface for clarification persistence failures
+  // (prepare or edit-save) — not a global error system, mirrors the existing
+  // resetError/offerError/analysisError pattern already used in this file.
+  const [clarificationError, setClarificationError] = useState("");
   const [inquiryContext, setInquiryContext] = useState<string | null>(null);
   const [offerNeedsReview, setOfferNeedsReview] = useState(false);
   const [isCustomerReplyPanelOpen, setIsCustomerReplyPanelOpen] = useState(false);
@@ -94,13 +139,32 @@ export function InboxAnalysis() {
   const [restartUsesPersistedContext, setRestartUsesPersistedContext] =
     useState(false);
 
+  // The single place that applies a coherent clarification read (content +
+  // identity + status, all from the same underlying record) to local state.
+  // Used by restore, a no-op save, discard, and cross-tab revalidation, so
+  // none of them can end up combining content from one storage state with
+  // identity/status from a later one. Stable across renders (only closes
+  // over useState setters) so effects can safely depend on it.
+  const applyClarificationSnapshot = useCallback(
+    (snapshot: ClarificationDraftSnapshot | null) => {
+      setClarification(snapshot?.draft ?? null);
+      setEditableClarification(snapshot?.draft ?? null);
+      setClarificationIdentity(snapshot?.identity ?? null);
+      setClarificationCommunicationStatus(snapshot?.communicationStatus ?? "prepared");
+    },
+    [],
+  );
+
   useEffect(() => {
     let cancelled = false;
 
     const savedAnalysis = loadInquiryAnalysis();
     const savedOffer = loadOfferDraft();
-    const savedClarification = savedAnalysis
-      ? loadClarificationDraftForAnalysis(savedAnalysis)
+    // A single coherent read: content, identity, and status all come from
+    // the exact same underlying record, never three independent reads that
+    // could straddle a concurrent cross-tab write.
+    const savedClarificationSnapshot = savedAnalysis
+      ? loadClarificationSnapshotForAnalysis(savedAnalysis)
       : null;
     const savedInquiryContext = savedAnalysis
       ? loadInquiryContextForAnalysis(savedAnalysis)
@@ -124,9 +188,8 @@ export function InboxAnalysis() {
         setOfferStatus("completed");
       }
 
-      if (savedClarification) {
-        setClarification(savedClarification);
-        setEditableClarification(savedClarification);
+      if (savedClarificationSnapshot) {
+        applyClarificationSnapshot(savedClarificationSnapshot);
       }
 
       if (savedInquiryContext) {
@@ -139,7 +202,27 @@ export function InboxAnalysis() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [applyClarificationSnapshot]);
+
+  // Cross-tab live revalidation: another tab may mark/unmark the draft sent,
+  // or save a new revision, while this tab is open. While the user is
+  // actively editing here, a cross-tab write must never clobber the unsaved
+  // local text or silently swap in a different identity behind it — that
+  // reconciliation happens later via this tab's own no-op-save, discard, or
+  // a real save (which mints its own new revision regardless).
+  useEffect(() => {
+    const workflowId = analysis?.workflowId;
+    if (!workflowId) return;
+
+    function handleStorageChange() {
+      if (isEditingClarification) return;
+
+      applyClarificationSnapshot(loadClarificationSnapshotForWorkflowId(workflowId));
+    }
+
+    window.addEventListener("storage", handleStorageChange);
+    return () => window.removeEventListener("storage", handleStorageChange);
+  }, [analysis?.workflowId, isEditingClarification, applyClarificationSnapshot]);
 
   function updateIntake(field: keyof InquiryIntake, value: string) {
     setIntake((current) => ({ ...current, [field]: value }));
@@ -218,6 +301,7 @@ export function InboxAnalysis() {
       setClarification(null);
       setEditableClarification(null);
       setClarificationLastSavedAt(null);
+      setClarificationError("");
       clearClarificationDraft();
       setOfferNeedsReview(false);
       setInquiryContext(inquiry);
@@ -341,6 +425,7 @@ export function InboxAnalysis() {
       setClarification(null);
       setEditableClarification(null);
       setClarificationLastSavedAt(null);
+      setClarificationError("");
       setInquiryContext(null);
       setOfferNeedsReview(false);
       setIsCustomerReplyPanelOpen(false);
@@ -371,17 +456,31 @@ export function InboxAnalysis() {
       return;
     }
 
+    setClarificationError("");
+
     const draft = createClarificationDraft({
       customerName: analysis.customer.name,
       service: analysis.project.service,
       missingInformation: analysis.missingInformation,
     });
 
+    const { didSave, identity } = saveClarificationDraft(draft, analysis);
+    if (!didSave) {
+      // Never fabricate a locally-displayed draft the write never actually
+      // persisted; only surface a visible, accessible explanation instead of
+      // leaving this silently console-only.
+      setClarificationError(
+        "Der Rückfrageentwurf konnte nicht gespeichert werden. Bitte versuche es erneut.",
+      );
+      return;
+    }
+
     setClarification(draft);
     setEditableClarification(draft);
     setClarificationLastSavedAt(null);
     setIsEditingClarification(false);
-    saveClarificationDraft(draft, analysis);
+    setClarificationIdentity(identity);
+    setClarificationCommunicationStatus("prepared");
   }
 
   function handleClarificationCta() {
@@ -396,24 +495,146 @@ export function InboxAnalysis() {
   }
 
   function saveClarification() {
-    if (editableClarification && analysis) {
-      setClarification(editableClarification);
-      saveClarificationDraft(editableClarification, analysis);
-      setClarificationLastSavedAt(
-        new Date().toLocaleTimeString("de-DE", {
-          hour: "2-digit",
-          minute: "2-digit",
-        }),
-      );
+    if (!editableClarification || !analysis) {
+      setIsEditingClarification(false);
+      return;
     }
+
+    // "sent" is a human attestation bound to a specific persisted message
+    // revision, kept entirely separate from the draft content itself (see
+    // lib/storage/inbox-storage.ts). Only a real change to the actual
+    // message fields (not merely opening/closing edit mode) mints a new
+    // revision; leaving the text untouched must never mint one, since a
+    // fresh revision would make an existing "sent" marking inert.
+    const contentChanged =
+      editableClarification.subject !== clarification?.subject ||
+      editableClarification.message !== clarification?.message;
+
+    if (!contentChanged) {
+      // Nothing in this tab actually changed, so nothing is written here:
+      // another tab may have concurrently marked this exact draft sent (or
+      // reverted it), and that persisted truth has to win. Re-reading a
+      // single coherent snapshot (rather than draft/identity/status
+      // separately) is the only safe way to know it, since anything read
+      // separately could interleave with a write from another tab.
+      applyClarificationSnapshot(loadClarificationSnapshotForAnalysis(analysis));
+      setClarificationError("");
+      setIsEditingClarification(false);
+      return;
+    }
+
+    const { didSave, identity } = saveClarificationDraft(editableClarification, analysis);
+    if (!didSave) {
+      // The write failed; the UI must not claim a save that never actually
+      // persisted, so it stays exactly as it was, still in edit mode with
+      // the unsaved text visible, and the old persisted (possibly sent)
+      // revision remains completely untouched.
+      setClarificationError(
+        "Die Änderungen konnten nicht gespeichert werden. Der Entwurf wurde nicht geändert.",
+      );
+      return;
+    }
+
+    setClarification(editableClarification);
+    setEditableClarification(editableClarification);
+    setClarificationIdentity(identity);
+    // A brand-new revision was just minted; no sent marker can possibly
+    // exist for it yet.
+    setClarificationCommunicationStatus("prepared");
+    setClarificationLastSavedAt(
+      new Date().toLocaleTimeString("de-DE", {
+        hour: "2-digit",
+        minute: "2-digit",
+      }),
+    );
+    setClarificationError("");
     setIsEditingClarification(false);
   }
 
   function discardClarificationChanges() {
-    if (clarification) {
+    // "Verwerfen" means discarding this tab's unsaved edit AND showing
+    // whatever is actually currently persisted — not just reverting to the
+    // last state this tab happened to observe, since another tab may have
+    // saved a new revision or changed the sent status in the meantime.
+    if (analysis?.workflowId) {
+      applyClarificationSnapshot(loadClarificationSnapshotForWorkflowId(analysis.workflowId));
+    } else if (clarification) {
       setEditableClarification({ ...clarification });
     }
+    setClarificationError("");
     setIsEditingClarification(false);
+  }
+
+  // Distinguishes why a mark/unmark mutation reported failure, using exactly
+  // one follow-up snapshot read, and surfaces it via the existing
+  // clarificationError channel instead of leaving the click silently inert.
+  // A stale identity (another tab already saved a newer revision) is not a
+  // technical error — it shows the actual current persisted truth instead of
+  // guessing. An unchanged identity means the marker write/removal itself
+  // genuinely failed. Only called from the mark/unmark actions below, which
+  // are themselves only rendered outside edit mode, so this can never
+  // clobber unsaved local edits.
+  function handleClarificationStatusMutationFailure(genericErrorMessage: string) {
+    const workflowId = analysis?.workflowId;
+    if (!workflowId) {
+      setClarificationError(genericErrorMessage);
+      return;
+    }
+
+    const currentSnapshot = loadClarificationSnapshotForWorkflowId(workflowId);
+
+    if (!currentSnapshot) {
+      applyClarificationSnapshot(null);
+      setClarificationError("Der Rückfrageentwurf ist nicht mehr verfügbar.");
+      return;
+    }
+
+    if (!isSameClarificationIdentity(currentSnapshot.identity, clarificationIdentity)) {
+      applyClarificationSnapshot(currentSnapshot);
+      setClarificationError(
+        "Der Rückfrageentwurf wurde zwischenzeitlich geändert. Bitte prüfe die aktuelle Version erneut.",
+      );
+      return;
+    }
+
+    setClarificationError(genericErrorMessage);
+  }
+
+  // Grants a sent attestation for exactly the currently visible draft
+  // identity. If the mutation reports failure — a stale identity (another
+  // tab already saved a newer revision) or a storage write failure — the
+  // UI never silently claims success; handleClarificationStatusMutationFailure
+  // surfaces an accessible explanation instead.
+  function markClarificationSent() {
+    if (!clarificationIdentity) return;
+
+    setClarificationError("");
+
+    if (markClarificationSentForIdentity(clarificationIdentity)) {
+      setClarificationCommunicationStatus("sent");
+      setClarificationError("");
+      return;
+    }
+
+    handleClarificationStatusMutationFailure(
+      "Der Versandstatus konnte nicht gespeichert werden. Bitte versuche es erneut.",
+    );
+  }
+
+  function unmarkClarificationSent() {
+    if (!clarificationIdentity) return;
+
+    setClarificationError("");
+
+    if (unmarkClarificationSentForIdentity(clarificationIdentity)) {
+      setClarificationCommunicationStatus("prepared");
+      setClarificationError("");
+      return;
+    }
+
+    handleClarificationStatusMutationFailure(
+      "Der Versandstatus konnte nicht gespeichert werden. Bitte versuche es erneut.",
+    );
   }
 
   function toggleCustomerReplyPanel() {
@@ -498,6 +719,7 @@ export function InboxAnalysis() {
       setClarification(null);
       setEditableClarification(null);
       setClarificationLastSavedAt(null);
+      setClarificationError("");
       clearClarificationDraft();
       setIsCustomerReplyPanelOpen(false);
       setCustomerReplySubmitError("");
@@ -615,6 +837,7 @@ export function InboxAnalysis() {
       setClarification(null);
       setEditableClarification(null);
       setClarificationLastSavedAt(null);
+      setClarificationError("");
       clearClarificationDraft();
       setReanalysisError("");
     } catch (error) {
@@ -638,6 +861,19 @@ export function InboxAnalysis() {
   // new, independent intake analysis.
   const restartUsesPersistedWorkflow =
     analysisSource === "restored" || restartUsesPersistedContext;
+
+  // True only when the currently edited subject/message actually differs
+  // from the last persisted content — never merely because edit mode is
+  // open, focus changed, or Copy was used. Outside of an active edit,
+  // editableClarification is always kept equal to clarification by every
+  // other code path (restore, no-op save, discard, cross-tab resync, a real
+  // save), so this is naturally false whenever the user isn't mid-edit.
+  const clarificationHasUnsavedChanges = Boolean(
+    clarification &&
+      editableClarification &&
+      (editableClarification.subject !== clarification.subject ||
+        editableClarification.message !== clarification.message),
+  );
 
   function handleRestartAnalysis() {
     // A currently unsaved clarification edit must never be silently
@@ -758,9 +994,20 @@ export function InboxAnalysis() {
           />
         )}
 
+        {clarificationError ? (
+          <p
+            role="alert"
+            className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
+          >
+            {clarificationError}
+          </p>
+        ) : null}
+
         {clarification && editableClarification && (
           <ClarificationDraftView
             editableDraft={editableClarification}
+            communicationStatus={clarificationCommunicationStatus}
+            hasUnsavedChanges={clarificationHasUnsavedChanges}
             isEditing={isEditingClarification}
             lastSavedAt={clarificationLastSavedAt}
             disabled={isReanalyzingPersistedContext}
@@ -768,6 +1015,8 @@ export function InboxAnalysis() {
             onStartEditing={() => setIsEditingClarification(true)}
             onSave={saveClarification}
             onDiscard={discardClarificationChanges}
+            onMarkSent={markClarificationSent}
+            onUnmarkSent={unmarkClarificationSent}
           />
         )}
 

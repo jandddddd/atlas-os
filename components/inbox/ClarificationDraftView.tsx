@@ -3,29 +3,48 @@
 import { useEffect, useRef, useState } from "react";
 import { Copy } from "lucide-react";
 
-import type { ClarificationDraft } from "./types";
+import type { ClarificationCommunicationStatus, ClarificationDraft } from "./types";
 
 type ClarificationDraftViewProps = {
   editableDraft: ClarificationDraft;
+  /**
+   * The draft's communication status, derived and tracked by the caller —
+   * this component never derives it from editableDraft itself, since the
+   * draft content no longer carries that truth.
+   */
+  communicationStatus: ClarificationCommunicationStatus;
+  /**
+   * True only when subject or message in editableDraft actually differs from
+   * the last persisted (and, if applicable, sent-attested) content — never
+   * merely because edit mode is open. Used so a sent draft with an unsaved
+   * local edit never visually claims that the edited text was sent.
+   */
+  hasUnsavedChanges: boolean;
   isEditing: boolean;
   lastSavedAt: string | null;
   /**
-   * Disables starting/saving/discarding an edit without hiding the draft or
-   * discarding any text already typed. Used while an unrelated
-   * workflow-mutating action is in progress elsewhere. "Nachricht kopieren"
-   * stays available, since it is read-only.
+   * Disables starting/saving/discarding an edit, and marking/unmarking the
+   * draft as sent, without hiding the draft or discarding any text already
+   * typed. Used while an unrelated workflow-mutating action is in progress
+   * elsewhere. "Nachricht kopieren" stays available, since it is read-only.
    */
   disabled?: boolean;
   onChange: (draft: ClarificationDraft) => void;
   onStartEditing: () => void;
   onSave: () => void;
   onDiscard: () => void;
+  /** Explicit human confirmation that this draft was sent outside ATLAS. */
+  onMarkSent: () => void;
+  /** Corrects an ATLAS-side sent marking; never claims the message itself was un-sent. */
+  onUnmarkSent: () => void;
 };
 
 const COPY_STATUS_RESET_DELAY_MS = 2500;
 
 export function ClarificationDraftView({
   editableDraft,
+  communicationStatus,
+  hasUnsavedChanges,
   isEditing,
   lastSavedAt,
   disabled = false,
@@ -33,6 +52,8 @@ export function ClarificationDraftView({
   onStartEditing,
   onSave,
   onDiscard,
+  onMarkSent,
+  onUnmarkSent,
 }: ClarificationDraftViewProps) {
   const [copyStatus, setCopyStatus] = useState<"idle" | "copied" | "error">(
     "idle",
@@ -46,6 +67,18 @@ export function ClarificationDraftView({
       }
     };
   }, []);
+
+  // A sent attestation applies to the exact persisted content it was granted
+  // for; once the visible text diverges from that (an unsaved local edit),
+  // the status must say so honestly instead of claiming the edited text was
+  // sent. The persisted marker itself is untouched here — this only changes
+  // what is displayed until the edit is saved or discarded.
+  const statusLabel =
+    communicationStatus === "sent"
+      ? hasUnsavedChanges
+        ? "Änderungen noch nicht versendet"
+        : "Rückfrage versendet"
+      : "Rückfrage vorbereitet";
 
   async function copyMessage() {
     try {
@@ -76,6 +109,7 @@ export function ClarificationDraftView({
           <span className="rounded-full bg-sky-100 px-3 py-1 text-sm font-medium text-sky-800">
             Rückfrageentwurf
           </span>
+          <p className="mt-2 text-sm font-medium text-neutral-600">{statusLabel}</p>
 
           <div className="mt-3 flex flex-wrap gap-3">
             {isEditing ? (
@@ -116,6 +150,27 @@ export function ClarificationDraftView({
               <Copy className="h-4 w-4" />
               Nachricht kopieren
             </button>
+
+            {!isEditing &&
+              (communicationStatus === "sent" ? (
+                <button
+                  type="button"
+                  onClick={onUnmarkSent}
+                  disabled={disabled}
+                  className="rounded-lg border px-4 py-2 text-sm font-medium transition hover:bg-neutral-50 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Versandmarkierung zurücknehmen
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={onMarkSent}
+                  disabled={disabled}
+                  className="rounded-lg border px-4 py-2 text-sm font-medium transition hover:bg-neutral-50 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Als versendet markieren
+                </button>
+              ))}
           </div>
 
           {lastSavedAt && !isEditing && (
